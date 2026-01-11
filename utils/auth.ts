@@ -21,6 +21,21 @@ export const auth = betterAuth({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      mapProfileToUser: () => {
+        return {
+          role: "STUDENT",
+        };
+      },
+    },
+  },
+  user: {
+    additionalFields: {
+      role: {
+        type: ["STUDENT", "HOP"],
+        required: true,
+        defaultValue: "STUDENT",
+        input: false, // don't allow user to set role
+      },
     },
   },
 });

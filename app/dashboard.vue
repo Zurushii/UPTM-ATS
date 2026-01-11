@@ -33,10 +33,7 @@ const signOut = async () => {
               alt="User profile"
               class="h-full w-full object-cover"
             />
-            <span
-              v-else
-              class="text-sm font-medium text-gray-600"
-            >
+            <span v-else class="text-sm font-medium text-gray-600">
               {{ session?.user?.name?.[0] }}
             </span>
           </div>
@@ -56,7 +53,9 @@ const signOut = async () => {
         <pre
           class="mt-4 rounded bg-gray-100 p-2 text-xs text-gray-700 overflow-auto"
         >
-{{ JSON.stringify(session?.session, null, 2) }}
+
+        {{ JSON.stringify(session, null, 2) }}
+
         </pre>
       </div>
 
