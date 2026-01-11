@@ -7,7 +7,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare && npm run auth:migrate",
+    "postinstall": "nuxt prepare",
     "auth:migrate": "npx @better-auth/cli migrate"
   },
   "dependencies": {
