@@ -28,78 +28,84 @@ const signInWithGoogle = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-base-200 px-4">
-    <div class="card w-full max-w-md bg-base-100 shadow-xl">
-      <div class="card-body">
-        <!-- Header -->
-        <div class="text-center mb-4">
-          <h1 class="text-2xl font-bold text-base-content">
-            Login
-          </h1>
-          <p class="text-sm text-base-content/60">
-            Enter your email below to login to your account
-          </p>
-        </div>
-
-        <!-- Form -->
-        <form class="space-y-4" @submit.prevent="handleSignIn">
-          <!-- Email -->
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Email</span>
-            </label>
-            <input
-              v-model="email"
-              type="email"
-              required
-              placeholder="m@example.com"
-              class="input input-bordered"
-            />
+  <div class="min-h-screen flex items-center justify-center px-4">
+    <div class="w-full max-w-md">
+      <!-- Card -->
+      <div class="card bg-base-100 shadow-lg border border-base-300">
+        <div class="card-body space-y-6">
+          <!-- Header -->
+          <div class="text-center space-y-1">
+            <h1 class="text-2xl font-semibold">
+              Welcome back
+            </h1>
+            <p class="text-sm text-base-content/60">
+              Sign in to continue to your dashboard
+            </p>
           </div>
 
-          <!-- Password -->
-          <div class="form-control">
-            <label class="label justify-between">
-              <span class="label-text">Password</span>
-              <NuxtLink
-                to="/forget-password"
-                class="link link-hover text-sm"
-              >
-                Forgot password?
-              </NuxtLink>
-            </label>
-            <input
-              v-model="password"
-              type="password"
-              required
-              placeholder="••••••••"
-              class="input input-bordered"
-            />
+          <!-- Form -->
+          <form class="space-y-4" @submit.prevent="handleSignIn">
+            <!-- Email -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Email</span>
+              </label>
+              <input
+                v-model="email"
+                type="email"
+                required
+                placeholder="student@uptm.edu.my"
+                class="input input-bordered w-full"
+              />
+            </div>
+
+            <!-- Password -->
+            <div class="form-control">
+              <label class="label justify-between">
+                <span class="label-text">Password</span>
+              </label>
+              <input
+                v-model="password"
+                type="password"
+                required
+                placeholder="••••••••"
+                class="input input-bordered w-full"
+              />
+                              <NuxtLink
+                  to="/forget-password"
+                  class="link link-hover text-xs"
+                >
+                  Forgot password?
+                </NuxtLink>
+            </div>
+
+            <!-- Submit -->
+            <button type="submit" class="btn btn-block">
+              Sign in
+            </button>
+          </form>
+
+          <!-- Divider -->
+          <div class="divider text-xs">
+            OR CONTINUE WITH
           </div>
 
-          <!-- Submit -->
-          <button type="submit" class="btn btn-primary w-full mt-2">
-            Login
+          <!-- Social Login -->
+          <button
+            type="button"
+            class="btn btn-outline btn-block"
+            @click="signInWithGoogle"
+          >
+            Continue with Google
           </button>
-        </form>
 
-        <!-- Divider -->
-        <div class="divider">OR</div>
-
-        <!-- Social Login -->
-        <button
-          class="btn btn-outline w-full"
-          @click="signInWithGoogle"
-        >
-          Login with Google
-        </button>
-
-        <!-- Footer -->
-        <div class="text-center text-sm mt-4 text-base-content/60">
-          Don&apos;t have an account?
-          <NuxtLink to="/sign-up" class="link link-primary ml-1">
-            Sign up
-          </NuxtLink>
+          <!-- Footer -->
+          <p class="text-center text-sm text-base-content/60">
+            Don’t have an account?
+            <NuxtLink to="/sign-up" class="link link-hover ml-1">
+              Sign up
+            </NuxtLink>
+          </p>
         </div>
       </div>
     </div>

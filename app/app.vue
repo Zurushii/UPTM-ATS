@@ -11,7 +11,6 @@ onMounted(() => {
   <NuxtLayout>
     <NuxtLoadingIndicator />
     <NuxtPage />
-    <!-- Global floating theme switcher -->
     <ThemeSwitcher />
   </NuxtLayout>
 </template>

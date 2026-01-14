@@ -3,68 +3,121 @@ import { useRoute } from "#app";
 
 const emit = defineEmits(["navigate"]);
 const route = useRoute();
+const user = useState<any>("user");
 
 const isActive = (basePath: string) => {
   if (basePath === "/dashboard") return route.path === "/dashboard";
   return route.path.startsWith(basePath);
 };
 
-const handleClick = () => {
-  emit("navigate");
-};
+const handleClick = () => emit("navigate");
 </script>
 
 <template>
-  <aside class="w-64 bg-base-100 min-h-full border-r">
-    <div class="h-16 flex items-center px-6 font-bold text-lg">
-      ATS Admin
+  <aside class="w-64 bg-base-100 min-h-full border-r flex flex-col">
+    <!-- Brand -->
+    <div class="h-16 flex items-center px-6 border-b">
+      <div>
+        <h2 class="font-semibold text-sm">UPTM ATS</h2>
+        <p class="text-xs text-gray-500">
+          {{ user?.role === "HOP" ? "Head of Program" : "Student" }}
+        </p>
+      </div>
     </div>
 
-    <nav class="px-4 space-y-1">
+    <!-- Navigation -->
+    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
+      <!-- Common -->
       <NuxtLink
         to="/dashboard"
         @click="handleClick"
-        class="flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition hover:bg-base-200"
-        :class="isActive('/dashboard') && 'bg-primary text-primary-content font-medium'"
+        class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+        :class="isActive('/dashboard')
+          ? 'bg-primary text-primary-content font-medium'
+          : 'hover:bg-base-200'"
       >
         📊 Dashboard
       </NuxtLink>
 
-      <NuxtLink
-        to="/dashboard/students"
-        @click="handleClick"
-        class="flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition hover:bg-base-200"
-        :class="isActive('/dashboard/students') && 'bg-primary text-primary-content font-medium'"
-      >
-        🎓 Students
-      </NuxtLink>
+      <!-- HoP -->
+      <template v-if="user?.role === 'HOP'">
+        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">
+          Management
+        </div>
 
-      <NuxtLink
-        to="/dashboard/academic-plan"
-        @click="handleClick"
-        class="flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition hover:bg-base-200"
-        :class="isActive('/dashboard/academic-plan') && 'bg-primary text-primary-content font-medium'"
-      >
-        🗂 Academic Plan
-      </NuxtLink>
+        <NuxtLink
+          to="/dashboard/hop/students"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/hop/students')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          🎓 Students
+        </NuxtLink>
 
-      <NuxtLink
-        to="/dashboard/credit-transfer"
-        @click="handleClick"
-        class="flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition hover:bg-base-200"
-        :class="isActive('/dashboard/credit-transfer') && 'bg-primary text-primary-content font-medium'"
-      >
-        🔄 Credit Transfer
-      </NuxtLink>
+        <NuxtLink
+          to="/dashboard/hop/credit-transfer"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/hop/credit-transfer')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          🔄 Credit Transfer
+        </NuxtLink>
 
-      <NuxtLink
-        to="/dashboard/settings"
-        @click="handleClick"
-        class="flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition hover:bg-base-200"
-        :class="isActive('/dashboard/settings') && 'bg-primary text-primary-content font-medium'"
-      >
-        ⚙️ Settings
-      </NuxtLink>
+        <NuxtLink
+          to="/dashboard/hop/semester-rules"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/hop/semester-rules')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          📐 Semester Rules
+        </NuxtLink>
+
+        <NuxtLink
+          to="/dashboard/hop/academic-planning"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/hop/academic-planning')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          🗂 Academic Planning
+        </NuxtLink>
+      </template>
+
+      <!-- Student -->
+      <template v-if="user?.role === 'STUDENT'">
+        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">
+          Academic
+        </div>
+
+        <NuxtLink
+          to="/dashboard/student/academic-plan"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/student/academic-plan')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          📘 My Academic Plan
+        </NuxtLink>
+
+        <NuxtLink
+          to="/dashboard/student/progress"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="isActive('/dashboard/student/progress')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'"
+        >
+          📈 Progress
+        </NuxtLink>
+      </template>
     </nav>
   </aside>
 </template>

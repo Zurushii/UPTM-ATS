@@ -1,72 +1,53 @@
 <script setup lang="ts">
 import { useSession, authClient } from "@@/utils/auth-client";
-const router = useRouter();
 
+const router = useRouter();
 const { data: session } = await useSession(useFetch);
+
 defineProps<{
   drawerOpen: boolean;
 }>();
 
+defineEmits(["update:drawerOpen"]);
+
 const signOut = async () => {
   await authClient.signOut();
-  router.push("/sign-up");
+  router.push("/sign-in");
 };
 
-defineEmits(["update:drawerOpen"]);
+const user = useState<any>("user");
 </script>
 
 <template>
   <header
-    class="h-16 bg-base-100 border-b px-4 flex items-center justify-between"
+    class="h-16 bg-base-100 border-b flex items-center justify-between px-4 sm:px-6"
   >
     <!-- Left -->
-    <div class="flex items-center gap-2">
-      <!-- Burger (mobile only) -->
-      <label class="btn btn-ghost btn-circle swap swap-rotate lg:hidden">
+    <div class="flex items-center gap-3">
+      <!-- Mobile drawer toggle -->
+      <label class="btn btn-ghost btn-sm btn-circle lg:hidden">
         <input
           type="checkbox"
           :checked="drawerOpen"
+          class="hidden"
           @change="$emit('update:drawerOpen', !drawerOpen)"
         />
-
-        <!-- hamburger -->
-        <svg
-          class="swap-off fill-current"
-          xmlns="http://www.w3.org/2000/svg"
-          width="24"
-          height="24"
-          viewBox="0 0 512 512"
-        >
-          <path
-            d="M64,384H448V341.33H64Zm0-106.67H448V234.67H64ZM64,128v42.67H448V128Z"
-          />
-        </svg>
-
-        <!-- close -->
-        <svg
-          class="swap-on fill-current"
-          xmlns="http://www.w3.org/2000/svg"
-          width="24"
-          height="24"
-          viewBox="0 0 512 512"
-        >
-          <polygon
-            points="400 145.49 366.51 112 256 222.51 145.49 112
-                    112 145.49 222.51 256 112 366.51
-                    145.49 400 256 289.49 366.51 400
-                    400 366.51 289.49 256"
-          />
-        </svg>
+        ☰
       </label>
 
-      <span class="font-semibold text-lg hidden sm:block"> ATS Dashboard </span>
+      <div class="leading-tight">
+        <h1 class="font-semibold text-base">UPTM Academic Tracking System</h1>
+        <p class="text-xs text-gray-500">
+          {{ user?.role === "HOP" ? "Head of Program Dashboard" : "Student Dashboard" }}
+        </p>
+      </div>
     </div>
 
     <!-- Right -->
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-3">
       <ThemeSwitcher />
 
-      <!-- profile dropdown (unchanged) -->
+      <!-- Profile -->
       <div class="dropdown dropdown-end">
         <label tabindex="0" class="btn btn-ghost btn-circle avatar">
           <div class="w-9 rounded-full overflow-hidden">
@@ -77,12 +58,20 @@ defineEmits(["update:drawerOpen"]);
             />
           </div>
         </label>
+
         <ul
           tabindex="0"
-          class="menu menu-sm dropdown-content bg-base-100 rounded-box w-52 shadow"
+          class="menu menu-sm dropdown-content mt-3 bg-base-100 rounded-box w-52 shadow"
         >
+          <li class="px-3 py-2 text-xs text-gray-500">
+            {{ session?.user?.email }}
+          </li>
           <li><NuxtLink to="/dashboard/settings">Settings</NuxtLink></li>
-          <li><button class="text-error" @click="signOut">Logout</button></li>
+          <li>
+            <button class="text-error" @click="signOut">
+              Logout
+            </button>
+          </li>
         </ul>
       </div>
     </div>

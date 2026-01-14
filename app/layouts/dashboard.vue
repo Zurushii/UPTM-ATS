@@ -20,7 +20,6 @@ const drawerOpen = ref(false);
 
       <main class="p-6">
         <NuxtPage />
-        <ThemeSwitcher />
       </main>
     </div>
 
