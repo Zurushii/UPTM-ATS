@@ -32,26 +32,28 @@ const handleClick = () => emit("navigate");
         to="/dashboard"
         @click="handleClick"
         class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-        :class="isActive('/dashboard')
-          ? 'bg-primary text-primary-content font-medium'
-          : 'hover:bg-base-200'"
+        :class="
+          isActive('/dashboard')
+            ? 'bg-primary text-primary-content font-medium'
+            : 'hover:bg-base-200'
+        "
       >
         📊 Dashboard
       </NuxtLink>
 
       <!-- HoP -->
       <template v-if="user?.role === 'HOP'">
-        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">
-          Management
-        </div>
+        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">Management</div>
 
         <NuxtLink
           to="/dashboard/hop/students"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/hop/students')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/hop/students')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
           🎓 Students
         </NuxtLink>
@@ -60,9 +62,11 @@ const handleClick = () => emit("navigate");
           to="/dashboard/hop/credit-transfer"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/hop/credit-transfer')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/hop/credit-transfer')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
           🔄 Credit Transfer
         </NuxtLink>
@@ -71,9 +75,11 @@ const handleClick = () => emit("navigate");
           to="/dashboard/hop/semester-rules"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/hop/semester-rules')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/hop/semester-rules')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
           📐 Semester Rules
         </NuxtLink>
@@ -82,40 +88,57 @@ const handleClick = () => emit("navigate");
           to="/dashboard/hop/academic-planning"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/hop/academic-planning')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/hop/academic-planning')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
           🗂 Academic Planning
+        </NuxtLink>
+
+        <NuxtLink
+          to="/dashboard/profile"
+          @click="handleClick"
+          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
+          :class="
+            isActive('/dashboard/profile')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
+        >
+          👤 My Profile
         </NuxtLink>
       </template>
 
       <!-- Student -->
       <template v-if="user?.role === 'STUDENT'">
-        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">
-          Academic
-        </div>
+        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">Academic</div>
 
         <NuxtLink
           to="/dashboard/student/academic-plan"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/student/academic-plan')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/student/academic-plan')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
           📘 My Academic Plan
         </NuxtLink>
 
         <NuxtLink
-          to="/dashboard/student/progress"
+          to="/dashboard/profile"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="isActive('/dashboard/student/progress')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'"
+          :class="
+            isActive('/dashboard/profile')
+              ? 'bg-primary text-primary-content font-medium'
+              : 'hover:bg-base-200'
+          "
         >
-          📈 Progress
+          👤 My Profile
         </NuxtLink>
       </template>
     </nav>

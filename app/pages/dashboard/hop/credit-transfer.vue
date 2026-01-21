@@ -1,13 +1,21 @@
 <script setup lang="ts">
+import { authClient } from "@@/utils/auth-client";
 import CreditTransferUpload from "@/components/hop/CreditTransferUpload.vue";
-const submitting = ref(false);
-const apiResult = ref<any>(null);
-const apiError = ref<string | null>(null);
 
 definePageMeta({
   layout: "dashboard",
   middleware: ["hop"],
 });
+
+// Session check
+const { data: session } = await authClient.useSession(useFetch);
+if (!session.value) {
+  await navigateTo("/sign-in");
+}
+
+const submitting = ref(false);
+const apiResult = ref<any>(null);
+const apiError = ref<string | null>(null);
 
 type CreditRow = {
   matric_no: string;

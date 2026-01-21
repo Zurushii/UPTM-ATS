@@ -1,17 +1,23 @@
 <script setup lang="ts">
+import { authClient } from "@@/utils/auth-client";
+
 definePageMeta({
   layout: "dashboard",
   middleware: ["hop"],
 });
+
+// Session check
+const { data: session } = await authClient.useSession(useFetch);
+if (!session.value) {
+  await navigateTo("/sign-in");
+}
 </script>
 
 <template>
   <div class="p-6 max-w-5xl space-y-6">
     <!-- Page Header -->
     <div class="space-y-1">
-      <h1 class="text-2xl font-semibold">
-        Academic Planning
-      </h1>
+      <h1 class="text-2xl font-semibold">Academic Planning</h1>
       <p class="text-sm text-base-content/60">
         Review automatically generated academic plans for students.
       </p>
@@ -20,9 +26,7 @@ definePageMeta({
     <!-- Info Card -->
     <div class="card bg-base-100 border border-base-300 shadow-sm">
       <div class="card-body space-y-3">
-        <h2 class="font-medium">
-          How academic plans are generated
-        </h2>
+        <h2 class="font-medium">How academic plans are generated</h2>
 
         <p class="text-sm text-base-content/70">
           Academic plans are generated automatically after credit transfer data
@@ -41,9 +45,7 @@ definePageMeta({
     <div
       class="flex flex-col items-center justify-center border border-dashed border-base-300 rounded-lg p-10 text-center"
     >
-      <h3 class="font-medium mb-1">
-        No academic plans yet
-      </h3>
+      <h3 class="font-medium mb-1">No academic plans yet</h3>
       <p class="text-sm text-base-content/60 max-w-md">
         Academic plans will appear here once credit transfer data has been
         uploaded and processed by the system.

@@ -1,22 +1,25 @@
 <script setup lang="ts">
+import { authClient } from '~~/utils/auth-client';
+
 definePageMeta({
   layout: "dashboard",
   middleware: [],
 });
 
-const user = useState<any>("user");
+const { data: session } = await authClient.useSession(useFetch);
 
-watchEffect(() => {
-  if (!user.value) return;
+  if (!session.value?.user) {
+    navigateTo("/sign-in");
+  }
 
-  if (user.value.role === "HOP") {
+  if (session.value?.user.role === "HOP" && session.value?.user.is_onboarded == true) {
     navigateTo("/dashboard/hop");
   }
 
-  if (user.value.role === "STUDENT") {
+  if (session.value?.user.role === "STUDENT" && session.value?.user.is_onboarded == true) {
     navigateTo("/dashboard/student");
   }
-});
+
 </script>
 
 <template>

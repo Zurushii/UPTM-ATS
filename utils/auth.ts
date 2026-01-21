@@ -1,7 +1,19 @@
 import { betterAuth } from "better-auth";
+import type { BetterAuthOptions } from "better-auth";
 import { createPool } from "mysql2/promise";
+import { customSession } from "better-auth/plugins";
 
-export const auth = betterAuth({
+const baseOptions = {
+  session: {
+    expiresIn: 60 * 60 * 24 * 7, // 7 days
+    updateAge: 60 * 60 * 24, // refresh expiry every 1 day of use
+    freshAge: 60 * 60 * 24, // 1 day
+    cookieCache: {
+      enabled: true,
+      maxAge: 5 * 60, // 5 minutes
+      strategy: "compact",
+    },
+  },
   database: createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -36,6 +48,31 @@ export const auth = betterAuth({
         defaultValue: "STUDENT",
         input: false, // don't allow user to set role
       },
+      is_onboarded: {
+        type: "boolean",
+        required: true,
+        defaultValue: false,
+        input: false,
+      },
     },
   },
+} satisfies BetterAuthOptions;
+
+export const auth = betterAuth({
+  ...baseOptions,
+  plugins: [
+    customSession(async ({ user, session }) => {
+      const roles = await findUserRoles(session.userId);
+      return {
+        roles,
+        user,
+        session,
+      };
+    }, baseOptions),
+  ],
 });
+
+const findUserRoles = async (userId: string) => {
+  // Your logic to find roles
+  return ["STUDENT", "HOP"];
+};

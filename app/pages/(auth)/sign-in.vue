@@ -9,7 +9,7 @@ const handleSignIn = async () => {
     {
       email: email.value,
       password: password.value,
-      callbackURL: "/dashboard",
+      callbackURL: "/onboarding",
     },
     {
       onError(context) {
@@ -22,7 +22,7 @@ const handleSignIn = async () => {
 const signInWithGoogle = async () => {
   await signIn.social({
     provider: "google",
-    callbackURL: "/dashboard",
+    callbackURL: "/onboarding",
   });
 };
 </script>

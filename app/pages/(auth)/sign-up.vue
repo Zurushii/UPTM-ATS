@@ -34,9 +34,7 @@ const handleSignUp = async () => {
         <div class="card-body space-y-6">
           <!-- Header -->
           <div class="text-center space-y-1">
-            <h1 class="text-2xl font-semibold">
-              Create your account
-            </h1>
+            <h1 class="text-2xl font-semibold">Create your account</h1>
             <p class="text-sm text-base-content/60">
               Academic Tracking System – UPTM
             </p>
@@ -102,9 +100,7 @@ const handleSignUp = async () => {
             </div>
 
             <!-- Submit -->
-            <button type="submit" class="btn btn-block">
-              Create account
-            </button>
+            <button type="submit" class="btn btn-block">Create account</button>
           </form>
 
           <!-- Footer -->

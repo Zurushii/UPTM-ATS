@@ -1,17 +1,23 @@
 <script setup lang="ts">
+import { authClient } from "@@/utils/auth-client";
+
 definePageMeta({
   layout: "dashboard",
   middleware: ["hop"],
 });
+
+// Session check
+const { data: session } = await authClient.useSession(useFetch);
+if (!session.value) {
+  await navigateTo("/sign-in");
+}
 </script>
 
 <template>
   <div class="p-6 max-w-6xl space-y-6">
     <!-- Page Header -->
     <div class="space-y-1">
-      <h1 class="text-2xl font-semibold">
-        Students
-      </h1>
+      <h1 class="text-2xl font-semibold">Students</h1>
       <p class="text-sm text-base-content/60">
         List of students under your program.
       </p>
@@ -22,9 +28,7 @@ definePageMeta({
       <div class="card-body space-y-4">
         <!-- Table Header -->
         <div class="flex items-center justify-between">
-          <h2 class="font-medium">
-            Student Directory
-          </h2>
+          <h2 class="font-medium">Student Directory</h2>
 
           <!-- Placeholder for future controls -->
           <div class="flex gap-2">

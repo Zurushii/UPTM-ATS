@@ -2,7 +2,14 @@
 import { useSession, authClient } from "@@/utils/auth-client";
 
 const router = useRouter();
-const { data: session } = await useSession(useFetch);
+const session = ref<any>(null);
+
+if (!(import.meta.server && import.meta.prerender)) {
+  const { data } = await useSession(useFetch);
+  watchEffect(() => {
+    session.value = data.value;
+  });
+}
 
 defineProps<{
   drawerOpen: boolean;
@@ -38,7 +45,11 @@ const user = useState<any>("user");
       <div class="leading-tight">
         <h1 class="font-semibold text-base">UPTM Academic Tracking System</h1>
         <p class="text-xs text-gray-500">
-          {{ user?.role === "HOP" ? "Head of Program Dashboard" : "Student Dashboard" }}
+          {{
+            user?.role === "HOP"
+              ? "Head of Program Dashboard"
+              : "Student Dashboard"
+          }}
         </p>
       </div>
     </div>
@@ -66,11 +77,9 @@ const user = useState<any>("user");
           <li class="px-3 py-2 text-xs text-gray-500">
             {{ session?.user?.email }}
           </li>
-          <li><NuxtLink to="/dashboard/settings">Settings</NuxtLink></li>
+          <li><NuxtLink to="/dashboard/profile">Profile</NuxtLink></li>
           <li>
-            <button class="text-error" @click="signOut">
-              Logout
-            </button>
+            <button class="text-error" @click="signOut">Logout</button>
           </li>
         </ul>
       </div>
