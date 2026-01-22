@@ -1,5 +1,6 @@
 import { pool } from "../../utils/db";
 import { auth } from "@@/utils/auth";
+import { hashPassword } from "better-auth/crypto";
 
 export default defineEventHandler(async (event) => {
   const session = await auth.api.getSession({ headers: event.headers });
@@ -12,12 +13,19 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: "HOP only" });
   }
 
-  const { program_id } = await readBody(event);
+  const { program_id, password } = await readBody(event);
 
   if (!program_id) {
     throw createError({
       statusCode: 400,
       statusMessage: "Program is required",
+    });
+  }
+
+  if (!password || password.length < 8) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Password must be at least 8 characters",
     });
   }
 
@@ -35,6 +43,16 @@ export default defineEventHandler(async (event) => {
     await connection.query("UPDATE user SET is_onboarded = 1 WHERE id = ?", [
       session.user.id,
     ]);
+
+    // Hash password and create credential account for email/password login
+    const hashedPassword = await hashPassword(password);
+
+    await connection.query(
+      `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+       VALUES (UUID(), ?, 'credential', ?, ?, NOW(3), NOW(3))
+       ON DUPLICATE KEY UPDATE password = VALUES(password), updatedAt = NOW(3)`,
+      [session.user.email, session.user.id, hashedPassword],
+    );
 
     await connection.commit();
     return { success: true };

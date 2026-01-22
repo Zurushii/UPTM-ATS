@@ -8,13 +8,16 @@ const loading = ref(false);
 
 const form = reactive({
   program_id: "" as number | "",
+  password: "",
 });
 
 onMounted(async () => {
   programs.value = await $fetch("/api/programs");
 });
 
-const isValid = computed(() => form.program_id !== "");
+const isValid = computed(
+  () => form.program_id !== "" && form.password.length >= 8,
+);
 
 const handleSubmit = async () => {
   if (!isValid.value) return;
@@ -24,8 +27,14 @@ const handleSubmit = async () => {
   try {
     await $fetch("/api/onboarding/hop", {
       method: "POST",
-      body: { program_id: form.program_id },
+      body: { program_id: form.program_id, password: form.password },
     });
+    // Update user state to reflect onboarded status
+    const userState = useState<any>("user");
+    if (userState.value) {
+      userState.value.is_onboarded = true;
+      userState.value.isOnboarded = true;
+    }
     navigateTo("/dashboard/hop");
   } catch (e: any) {
     error.value = e.data?.statusMessage || "Failed to complete onboarding";
@@ -50,6 +59,28 @@ const handleSubmit = async () => {
           <div v-if="error" class="alert alert-error text-sm">{{ error }}</div>
 
           <form class="space-y-4" @submit.prevent="handleSubmit">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Password</span>
+              </label>
+              <input
+                v-model="form.password"
+                type="password"
+                class="input input-bordered w-full"
+                placeholder="Min. 8 characters"
+                minlength="8"
+                required
+              />
+              <label
+                v-if="form.password && form.password.length < 8"
+                class="label"
+              >
+                <span class="label-text-alt text-error">
+                  Password must be at least 8 characters
+                </span>
+              </label>
+            </div>
+
             <div class="form-control">
               <label class="label"
                 ><span class="label-text">Program</span></label

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { signUp } from "@@/utils/auth-client.js";
+import { signIn, signUp } from "@@/utils/auth-client.js";
 
 const firstName = ref("");
 const lastName = ref("");
@@ -13,15 +13,22 @@ const handleSignUp = async () => {
     email: email.value,
     password: password.value,
     name: `${firstName.value} ${lastName.value}`,
-    callbackURL: "/sign-in",
+    callbackURL: "/onboarding",
     fetchOptions: {
       onError(context) {
         alert(context.error.message);
       },
       onSuccess() {
-        router.push("/dashboard");
+        router.push("/onboarding");
       },
     },
+  });
+};
+
+const signUpWithGoogle = async () => {
+  await signIn.social({
+    provider: "google",
+    callbackURL: "/onboarding",
   });
 };
 </script>
@@ -102,6 +109,18 @@ const handleSignUp = async () => {
             <!-- Submit -->
             <button type="submit" class="btn btn-block">Create account</button>
           </form>
+
+          <!-- Divider -->
+          <div class="divider text-xs">OR CONTINUE WITH</div>
+
+          <!-- Social Sign-up -->
+          <button
+            type="button"
+            class="btn btn-outline btn-block"
+            @click="signUpWithGoogle"
+          >
+            Continue with Google
+          </button>
 
           <!-- Footer -->
           <p class="text-center text-sm text-base-content/60">

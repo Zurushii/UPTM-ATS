@@ -11,6 +11,7 @@ const form = reactive({
   matric_no: "",
   intake_year: "",
   program_id: "" as number | "",
+  password: "",
 });
 
 onMounted(async () => {
@@ -33,7 +34,8 @@ const isValid = computed(() => {
     form.full_name.trim().length >= 2 &&
     form.matric_no.length >= 6 &&
     intakeValid.value &&
-    form.program_id !== ""
+    form.program_id !== "" &&
+    form.password.length >= 8
   );
 });
 
@@ -50,8 +52,15 @@ const handleSubmit = async () => {
         matric_no: form.matric_no,
         intake_year: form.intake_year,
         program_id: form.program_id,
+        password: form.password,
       },
     });
+    // Update user state to reflect onboarded status
+    const userState = useState<any>("user");
+    if (userState.value) {
+      userState.value.is_onboarded = true;
+      userState.value.isOnboarded = true;
+    }
     navigateTo("/dashboard/student");
   } catch (e: any) {
     error.value = e.data?.statusMessage || "Failed to complete onboarding";
@@ -119,6 +128,28 @@ const handleSubmit = async () => {
               <label v-if="form.intake_year && !intakeValid" class="label">
                 <span class="label-text-alt text-error">
                   Format: MMYY (e.g., 0824)
+                </span>
+              </label>
+            </div>
+
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Password</span>
+              </label>
+              <input
+                v-model="form.password"
+                type="password"
+                class="input input-bordered w-full"
+                placeholder="Min. 8 characters"
+                minlength="8"
+                required
+              />
+              <label
+                v-if="form.password && form.password.length < 8"
+                class="label"
+              >
+                <span class="label-text-alt text-error">
+                  Password must be at least 8 characters
                 </span>
               </label>
             </div>

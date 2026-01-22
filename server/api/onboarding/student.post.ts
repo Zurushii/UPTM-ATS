@@ -1,5 +1,6 @@
 import { pool } from "../../utils/db";
 import { auth } from "@@/utils/auth";
+import { hashPassword } from "better-auth/crypto";
 
 export default defineEventHandler(async (event) => {
   const session = await auth.api.getSession({ headers: event.headers });
@@ -12,13 +13,21 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: "Students only" });
   }
 
-  const { full_name, matric_no, intake_year, program_id } =
+  const { full_name, matric_no, intake_year, program_id, password } =
     await readBody(event);
 
-  if (!full_name || !matric_no || !intake_year || !program_id) {
+  if (!full_name || !matric_no || !intake_year || !program_id || !password) {
     throw createError({
       statusCode: 400,
       statusMessage: "All fields are required",
+    });
+  }
+
+  // Validate password
+  if (password.length < 8) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Password must be at least 8 characters",
     });
   }
 
@@ -73,6 +82,16 @@ export default defineEventHandler(async (event) => {
     await connection.query(
       "UPDATE user SET name = ?, is_onboarded = 1 WHERE id = ?",
       [full_name.trim(), session.user.id],
+    );
+
+    // Hash password and create credential account for email/password login
+    const hashedPassword = await hashPassword(password);
+
+    await connection.query(
+      `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+       VALUES (UUID(), ?, 'credential', ?, ?, NOW(3), NOW(3))
+       ON DUPLICATE KEY UPDATE password = VALUES(password), updatedAt = NOW(3)`,
+      [session.user.email, session.user.id, hashedPassword],
     );
 
     await connection.commit();
