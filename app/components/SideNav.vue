@@ -59,16 +59,16 @@ const handleClick = () => emit("navigate");
         </NuxtLink>
 
         <NuxtLink
-          to="/dashboard/hop/credit-transfer"
+          to="/dashboard/hop/intake-assessment"
           @click="handleClick"
           class="flex items-center gap-3 px-3 py-2 rounded-md transition"
           :class="
-            isActive('/dashboard/hop/credit-transfer')
+            isActive('/dashboard/hop/intake-assessment')
               ? 'bg-primary text-primary-content font-medium'
               : 'hover:bg-base-200'
           "
         >
-          🔄 Credit Transfer
+          📋 Intake Assessment
         </NuxtLink>
 
         <NuxtLink

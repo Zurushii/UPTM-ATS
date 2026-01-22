@@ -19,10 +19,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   userState.value = session.value.user;
 
   // Redirect non-onboarded users to onboarding when accessing dashboard
-  // Check both snake_case and camelCase since Better Auth may use either
-  const isOnboarded =
-    session.value.user.is_onboarded || session.value.user.isOnboarded;
-  if (!isOnboarded && to.path.startsWith("/dashboard")) {
+  if (!session.value.user.is_onboarded && to.path.startsWith("/dashboard")) {
     return navigateTo("/onboarding");
   }
 });
