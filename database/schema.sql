@@ -147,6 +147,7 @@ CREATE TABLE program_courses (
   course_id INT NOT NULL,
   semester INT NOT NULL,
   course_type ENUM('Core Computing', 'Free Elective', 'Compulsory', 'Specialization', 'Discipline Core', 'Final Year Project', 'Industrial Training') NOT NULL DEFAULT 'Core Computing',
+  course_group VARCHAR(50) DEFAULT NULL,          -- Courses with same group share credits (e.g., "Language Elective")
   prerequisite_course_id INT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

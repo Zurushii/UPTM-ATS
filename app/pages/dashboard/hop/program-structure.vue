@@ -22,6 +22,7 @@ type ProgramStructureCourse = {
   id: number;
   semester: number;
   course_type: string;
+  course_group: string | null;
   prerequisite_course_id: number | null;
   course_id: number;
   course_code: string;
@@ -131,6 +132,7 @@ const showEditModal = ref(false);
 const showCreateCourseModal = ref(false);
 const showCreateSessionModal = ref(false);
 const showCloneSessionModal = ref(false);
+const showImportModal = ref(false);
 const reopenAddAfterCreate = ref(false);
 
 // Form state for adding course
@@ -138,6 +140,7 @@ const newCourse = ref({
   course_id: "",
   semester: 1,
   course_type: "Core Computing",
+  course_group: "",
   prerequisite_course_id: "",
 });
 
@@ -146,6 +149,7 @@ const editingCourse = ref<any>(null);
 const editForm = ref({
   semester: 1,
   course_type: "Core Computing",
+  course_group: "",
   prerequisite_course_id: "",
 });
 
@@ -177,6 +181,11 @@ const createCourseLoading = ref(false);
 const createSessionLoading = ref(false);
 const cloneSessionLoading = ref(false);
 const deleteSessionLoading = ref(false);
+const importLoading = ref(false);
+
+// Import state
+const importFile = ref<File | null>(null);
+const importResult = ref<any>(null);
 
 // Get courses not yet in the program structure
 const availableCourses = computed(() => {
@@ -330,6 +339,7 @@ async function handleAddCourse() {
         course_id: parseInt(newCourse.value.course_id),
         semester: newCourse.value.semester,
         course_type: newCourse.value.course_type,
+        course_group: newCourse.value.course_group || null,
         prerequisite_course_id: newCourse.value.prerequisite_course_id
           ? parseInt(newCourse.value.prerequisite_course_id)
           : null,
@@ -341,6 +351,7 @@ async function handleAddCourse() {
       course_id: "",
       semester: 1,
       course_type: "Core Computing",
+      course_group: "",
       prerequisite_course_id: "",
     };
     await refreshStructure();
@@ -395,6 +406,7 @@ function openEditModal(course: any) {
   editForm.value = {
     semester: course.semester,
     course_type: course.course_type || "Core Computing",
+    course_group: course.course_group || "",
     prerequisite_course_id: course.prerequisite_course_id?.toString() || "",
   };
   showEditModal.value = true;
@@ -411,6 +423,7 @@ async function handleUpdateCourse() {
       body: {
         semester: editForm.value.semester,
         course_type: editForm.value.course_type,
+        course_group: editForm.value.course_group || null,
         prerequisite_course_id: editForm.value.prerequisite_course_id
           ? parseInt(editForm.value.prerequisite_course_id)
           : null,
@@ -460,6 +473,54 @@ function openCloneModal(sourceSession: any) {
   };
   showCloneSessionModal.value = true;
 }
+
+// Open import modal
+function openImportModal() {
+  importFile.value = null;
+  importResult.value = null;
+  showImportModal.value = true;
+}
+
+// Handle file selection for import
+function handleImportFileChange(event: Event) {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    importFile.value = target.files[0];
+  }
+}
+
+// Handle import
+async function handleImport() {
+  if (!importFile.value || !selectedSessionId.value) return;
+
+  importLoading.value = true;
+  importResult.value = null;
+
+  try {
+    const formData = new FormData();
+    formData.append("file", importFile.value);
+    formData.append("session_id", selectedSessionId.value.toString());
+
+    const result = await $fetch<any>("/api/hop/program-structure/import", {
+      method: "POST",
+      body: formData,
+    });
+
+    importResult.value = result;
+    
+    // Refresh data
+    await refreshStructure();
+    await refreshCourses();
+    await refreshSessions();
+  } catch (error: any) {
+    importResult.value = {
+      success: false,
+      error: error?.data?.statusMessage || "Failed to import structure",
+    };
+  } finally {
+    importLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -479,6 +540,13 @@ function openCloneModal(sourceSession: any) {
           @click="showCreateSessionModal = true"
         >
           + New Session
+        </button>
+        <button
+          v-if="selectedSessionId"
+          class="btn btn-outline btn-sm"
+          @click="openImportModal"
+        >
+          📥 Import Structure
         </button>
         <button
           v-if="selectedSessionId"
@@ -646,11 +714,23 @@ function openCloneModal(sourceSession: any) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(course, index) in sem.courses" :key="course.id">
+                  <tr v-for="(course, index) in sem.courses" :key="course.id" :class="{ 'opacity-60': course.course_group && sem.courses.findIndex(c => c.course_group === course.course_group) !== index }">
                     <td class="font-medium">{{ index + 1 }}</td>
-                    <td class="font-mono text-sm">{{ course.course_code }}</td>
+                    <td>
+                      <span class="font-mono text-sm">{{ course.course_code }}</span>
+                      <span v-if="course.course_group" class="ml-1 badge badge-xs badge-outline" :title="'Group: ' + course.course_group">
+                        {{ course.course_group }}
+                      </span>
+                    </td>
                     <td>{{ course.course_name }}</td>
-                    <td class="text-center">{{ course.credit_hour }}</td>
+                    <td class="text-center">
+                      <template v-if="course.course_group && sem.courses.findIndex(c => c.course_group === course.course_group) !== index">
+                        <span class="text-base-content/40" title="Credits counted once per group">—</span>
+                      </template>
+                      <template v-else>
+                        {{ course.credit_hour }}
+                      </template>
+                    </td>
                     <td>
                       <span class="badge badge-sm" :class="{
                         'badge-primary': course.course_type === 'Core Computing',
@@ -971,6 +1051,24 @@ function openCloneModal(sourceSession: any) {
             </select>
           </div>
 
+          <!-- Course Group (for elective options that share credits) -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Course Group (Optional)</span>
+            </label>
+            <input
+              v-model="newCourse.course_group"
+              type="text"
+              placeholder="e.g., Language Elective"
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt text-base-content/60">
+                Courses in the same group share credits (student picks one)
+              </span>
+            </label>
+          </div>
+
           <!-- Prerequisite Selection -->
           <div class="form-control">
             <label class="label">
@@ -1153,6 +1251,24 @@ function openCloneModal(sourceSession: any) {
             </select>
           </div>
 
+          <!-- Course Group (for elective options that share credits) -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Course Group (Optional)</span>
+            </label>
+            <input
+              v-model="editForm.course_group"
+              type="text"
+              placeholder="e.g., Language Elective"
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt text-base-content/60">
+                Courses in the same group share credits (student picks one)
+              </span>
+            </label>
+          </div>
+
           <!-- Prerequisite Selection -->
           <div class="form-control">
             <label class="label">
@@ -1198,6 +1314,82 @@ function openCloneModal(sourceSession: any) {
       </div>
       <form method="dialog" class="modal-backdrop">
         <button @click="showEditModal = false">close</button>
+      </form>
+    </dialog>
+
+    <!-- Import Structure Modal -->
+    <dialog :class="['modal', { 'modal-open': showImportModal }]">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4">Import Program Structure</h3>
+
+        <p class="text-sm text-base-content/70 mb-4">
+          Upload an Excel file (.xlsx) with your program structure. The file should have columns for 
+          Course Code, Course Name, Credit, Status, and Pre-Req.
+        </p>
+
+        <!-- File Input -->
+        <div class="form-control mb-4">
+          <label class="label">
+            <span class="label-text">Select Excel File</span>
+          </label>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            class="file-input file-input-bordered w-full"
+            @change="handleImportFileChange"
+          />
+          <label v-if="importFile" class="label">
+            <span class="label-text-alt text-success">
+              ✓ {{ importFile.name }} selected
+            </span>
+          </label>
+        </div>
+
+        <!-- Import Result -->
+        <div v-if="importResult" class="mb-4">
+          <div v-if="importResult.success" class="alert alert-success">
+            <div>
+              <h4 class="font-semibold">Import Successful!</h4>
+              <ul class="text-sm mt-1">
+                <li>Total processed: {{ importResult.summary.total_processed }}</li>
+                <li>Courses added: {{ importResult.summary.courses_added }}</li>
+                <li>Already existed: {{ importResult.summary.already_exists }}</li>
+                <li v-if="importResult.summary.failed > 0" class="text-warning">
+                  Failed: {{ importResult.summary.failed }}
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div v-else class="alert alert-error">
+            <span>{{ importResult.error }}</span>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="modal-action">
+          <button
+            type="button"
+            class="btn btn-ghost"
+            @click="showImportModal = false"
+          >
+            {{ importResult?.success ? 'Close' : 'Cancel' }}
+          </button>
+          <button
+            v-if="!importResult?.success"
+            class="btn btn-primary"
+            :disabled="!importFile || importLoading"
+            @click="handleImport"
+          >
+            <span
+              v-if="importLoading"
+              class="loading loading-spinner loading-sm"
+            ></span>
+            <span v-else>Import Structure</span>
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button @click="showImportModal = false">close</button>
       </form>
     </dialog>
   </div>

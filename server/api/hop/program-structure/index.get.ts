@@ -70,6 +70,7 @@ export default defineEventHandler(async (event) => {
       pc.id,
       pc.semester,
       pc.course_type,
+      pc.course_group,
       pc.prerequisite_course_id,
       c.id AS course_id,
       c.course_code,
@@ -81,7 +82,7 @@ export default defineEventHandler(async (event) => {
     JOIN courses c ON pc.course_id = c.id
     LEFT JOIN courses prereq ON pc.prerequisite_course_id = prereq.id
     WHERE pc.session_id = ?
-    ORDER BY pc.semester ASC, c.course_code ASC`,
+    ORDER BY pc.semester ASC, pc.course_group ASC, c.course_code ASC`,
     [sessionId],
   );
 
@@ -96,11 +97,31 @@ export default defineEventHandler(async (event) => {
     semesters[course.semester].push(course);
   }
 
+  // Helper function to calculate credits (grouped courses only count once)
+  const calculateCredits = (courses: any[]) => {
+    const seenGroups = new Set<string>();
+    let total = 0;
+    
+    for (const course of courses) {
+      if (course.course_group) {
+        // If course has a group, only count credits once per group
+        if (!seenGroups.has(course.course_group)) {
+          seenGroups.add(course.course_group);
+          total += course.credit_hour;
+        }
+      } else {
+        // No group, count normally
+        total += course.credit_hour;
+      }
+    }
+    return total;
+  };
+
   // Calculate totals per semester
   const semesterSummary = Object.entries(semesters).map(([sem, courses]) => ({
     semester: parseInt(sem),
     courses,
-    totalCredits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
+    totalCredits: calculateCredits(courses),
     courseCount: courses.length,
   }));
 
@@ -109,6 +130,6 @@ export default defineEventHandler(async (event) => {
     session: programSession,
     semesters: semesterSummary,
     totalCourses: coursesArray.length,
-    totalCredits: coursesArray.reduce((sum, c) => sum + c.credit_hour, 0),
+    totalCredits: semesterSummary.reduce((sum, s) => sum + s.totalCredits, 0),
   };
 });
