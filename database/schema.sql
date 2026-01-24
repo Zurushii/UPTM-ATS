@@ -178,6 +178,20 @@ CREATE TABLE semester_entry_rules (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE semester_credit_plans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  rule_id INT NOT NULL,
+  semester_number INT NOT NULL,
+  semester_type ENUM('L', 'S') NOT NULL,          -- L = Long semester, S = Short semester
+  target_credits INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_scp_rule
+    FOREIGN KEY (rule_id) REFERENCES semester_entry_rules(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_rule_semester (rule_id, semester_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 CREATE TABLE academic_plans (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
