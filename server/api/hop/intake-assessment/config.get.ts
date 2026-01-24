@@ -39,8 +39,8 @@ export default defineEventHandler(async (event) => {
   const [ruleSetRows] = await pool.query(
     `SELECT DISTINCT intake_type, 
             COUNT(*) as rule_count,
-            MIN(min_credit) as min_credit_floor,
-            MAX(max_credit) as max_credit_ceiling
+            MIN(credit_transfer) as min_credit,
+            MAX(credit_transfer) as max_credit
      FROM semester_entry_rules 
      WHERE program_id = ? 
      GROUP BY intake_type 
@@ -52,8 +52,8 @@ export default defineEventHandler(async (event) => {
   const ruleSets = (ruleSetRows as any[]).map((r) => ({
     intake_type: r.intake_type,
     rule_count: r.rule_count,
-    min_credit_floor: r.min_credit_floor,
-    max_credit_ceiling: r.max_credit_ceiling,
+    min_credit: r.min_credit,
+    max_credit: r.max_credit,
   }));
 
   return {

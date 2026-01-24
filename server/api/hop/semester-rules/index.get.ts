@@ -35,7 +35,7 @@ export default defineEventHandler(async (event) => {
 
   // Build query
   let sql = `
-    SELECT id, intake_type, min_credit, max_credit, entry_semester
+    SELECT id, intake_type, credit_transfer, entry_semester
     FROM semester_entry_rules
     WHERE program_id = ?
   `;
@@ -46,7 +46,7 @@ export default defineEventHandler(async (event) => {
     params.push(intakeFilter);
   }
 
-  sql += ` ORDER BY intake_type ASC, min_credit ASC`;
+  sql += ` ORDER BY intake_type ASC, credit_transfer DESC`;
 
   const [rows] = await pool.query(sql, params);
 

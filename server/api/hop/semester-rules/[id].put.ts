@@ -2,8 +2,7 @@ import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
 
 interface RuleInput {
-  min_credit: number;
-  max_credit: number;
+  credit_transfer: number;
   entry_semester: number;
 }
 
@@ -46,7 +45,7 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id, intake_type FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, intake_type, credit_transfer FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -59,22 +58,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const intakeType = ruleData[0].intake_type;
+  const oldCreditTransfer = ruleData[0].credit_transfer;
 
   // Parse request body
   const body = await readBody<RuleInput>(event);
 
   // Validate input
-  if (body.min_credit === undefined || body.min_credit < 0) {
+  if (body.credit_transfer === undefined || body.credit_transfer < 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "Min credit must be a non-negative number",
-    });
-  }
-
-  if (body.max_credit === undefined || body.max_credit < body.min_credit) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: "Max credit must be greater than or equal to min credit",
+      statusMessage: "Credit transfer must be a non-negative number",
     });
   }
 
@@ -85,48 +78,32 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Check for overlapping ranges (excluding current rule)
-  const [existingRules] = await pool.query(
-    `SELECT id, min_credit, max_credit FROM semester_entry_rules
-     WHERE program_id = ? AND intake_type = ? AND id != ?
-     AND (
-       (? BETWEEN min_credit AND max_credit) OR
-       (? BETWEEN min_credit AND max_credit) OR
-       (min_credit BETWEEN ? AND ?) OR
-       (max_credit BETWEEN ? AND ?)
-     )`,
-    [
-      programId,
-      intakeType,
-      ruleId,
-      body.min_credit,
-      body.max_credit,
-      body.min_credit,
-      body.max_credit,
-      body.min_credit,
-      body.max_credit,
-    ],
-  );
+  // Check for duplicate credit_transfer if value changed
+  if (body.credit_transfer !== oldCreditTransfer) {
+    const [existingRules] = await pool.query(
+      `SELECT id FROM semester_entry_rules
+       WHERE program_id = ? AND intake_type = ? AND credit_transfer = ? AND id != ?`,
+      [programId, intakeType, body.credit_transfer, ruleId],
+    );
 
-  if ((existingRules as any[]).length > 0) {
-    throw createError({
-      statusCode: 400,
-      statusMessage:
-        "Credit range overlaps with an existing rule for this intake",
-    });
+    if ((existingRules as any[]).length > 0) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `A rule for ${body.credit_transfer} credits already exists for this intake type`,
+      });
+    }
   }
 
   // Update rule
   await pool.query(
-    `UPDATE semester_entry_rules SET min_credit = ?, max_credit = ?, entry_semester = ? WHERE id = ?`,
-    [body.min_credit, body.max_credit, body.entry_semester, ruleId],
+    `UPDATE semester_entry_rules SET credit_transfer = ?, entry_semester = ? WHERE id = ?`,
+    [body.credit_transfer, body.entry_semester, ruleId],
   );
 
   return {
     id: ruleId,
     intake_type: intakeType,
-    min_credit: body.min_credit,
-    max_credit: body.max_credit,
+    credit_transfer: body.credit_transfer,
     entry_semester: body.entry_semester,
   };
 });

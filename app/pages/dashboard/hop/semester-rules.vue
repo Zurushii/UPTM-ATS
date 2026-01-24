@@ -16,8 +16,7 @@ if (!session.value) {
 interface Rule {
   id: number;
   intake_type: string;
-  min_credit: number;
-  max_credit: number;
+  credit_transfer: number;
   entry_semester: number;
 }
 
@@ -38,9 +37,8 @@ const isSubmitting = ref(false);
 // Form state for add/edit
 const formData = ref({
   intake_type: "",
-  min_credit: 0,
-  max_credit: 0,
-  entry_semester: 1,
+  credit_transfer: 0,
+  entry_semester: 2,
 });
 
 // Fetch intakes data
@@ -75,9 +73,9 @@ const rulesByIntakeType = computed(() => {
     }
     grouped[rule.intake_type]!.push(rule);
   }
-  // Sort rules within each intake type by min_credit
+  // Sort rules within each intake type by credit_transfer (descending)
   for (const intakeType in grouped) {
-    grouped[intakeType]!.sort((a, b) => a.min_credit - b.min_credit);
+    grouped[intakeType]!.sort((a, b) => b.credit_transfer - a.credit_transfer);
   }
   return grouped;
 });
@@ -86,9 +84,8 @@ const rulesByIntakeType = computed(() => {
 const openAddModal = (intakeType?: string) => {
   formData.value = {
     intake_type: intakeType || "",
-    min_credit: 0,
-    max_credit: 0,
-    entry_semester: 1,
+    credit_transfer: 0,
+    entry_semester: 2,
   };
   isAddModalOpen.value = true;
 };
@@ -98,8 +95,7 @@ const openEditModal = (rule: Rule) => {
   editingRule.value = rule;
   formData.value = {
     intake_type: rule.intake_type,
-    min_credit: rule.min_credit,
-    max_credit: rule.max_credit,
+    credit_transfer: rule.credit_transfer,
     entry_semester: rule.entry_semester,
   };
   isEditModalOpen.value = true;
@@ -130,8 +126,8 @@ const addRule = async () => {
     return;
   }
 
-  if (formData.value.max_credit < formData.value.min_credit) {
-    alert("Max credit must be greater than or equal to min credit");
+  if (formData.value.credit_transfer < 0) {
+    alert("Credit transfer must be a non-negative number");
     return;
   }
 
@@ -142,8 +138,7 @@ const addRule = async () => {
       method: "POST",
       body: {
         intake_type: formData.value.intake_type.trim(),
-        min_credit: formData.value.min_credit,
-        max_credit: formData.value.max_credit,
+        credit_transfer: formData.value.credit_transfer,
         entry_semester: formData.value.entry_semester,
       },
     });
@@ -162,8 +157,8 @@ const addRule = async () => {
 const updateRule = async () => {
   if (isSubmitting.value || !editingRule.value) return;
 
-  if (formData.value.max_credit < formData.value.min_credit) {
-    alert("Max credit must be greater than or equal to min credit");
+  if (formData.value.credit_transfer < 0) {
+    alert("Credit transfer must be a non-negative number");
     return;
   }
 
@@ -173,8 +168,7 @@ const updateRule = async () => {
     await $fetch(`/api/hop/semester-rules/${editingRule.value.id}`, {
       method: "PUT",
       body: {
-        min_credit: formData.value.min_credit,
-        max_credit: formData.value.max_credit,
+        credit_transfer: formData.value.credit_transfer,
         entry_semester: formData.value.entry_semester,
       },
     });
@@ -217,8 +211,7 @@ const deleteRule = async () => {
       <h1 class="text-2xl font-semibold">Semester Entry Rules</h1>
       <p class="text-sm text-base-content/60">
         Define rules to determine a student's starting semester based on
-        transferred credit hours. Create intake types (e.g., May Intake, Aug Intake)
-        that can be reused across years.
+        transferred credit hours. These rules are applied during Intake Assessment.
       </p>
     </div>
 
@@ -227,7 +220,7 @@ const deleteRule = async () => {
       <div class="card-body space-y-4">
         <!-- Table Header -->
         <div class="flex flex-wrap items-center justify-between gap-4">
-          <h2 class="font-medium">Credit-to-Semester Mapping</h2>
+          <h2 class="font-medium">Credit Transfer → Entry Semester Mapping</h2>
 
           <div class="flex items-center gap-3">
             <!-- Intake Type Filter -->
@@ -289,16 +282,17 @@ const deleteRule = async () => {
               <table class="table table-sm w-full">
                 <thead>
                   <tr>
-                    <th class="w-1/4">Min Credit</th>
-                    <th class="w-1/4">Max Credit</th>
-                    <th class="w-1/4">Entry Semester</th>
-                    <th class="w-1/4 text-right">Actions</th>
+                    <th class="w-1/3">Credit Transfer</th>
+                    <th class="w-1/3">Entry Semester</th>
+                    <th class="w-1/3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="rule in intakeRules" :key="rule.id">
-                    <td>{{ rule.min_credit }}</td>
-                    <td>{{ rule.max_credit }}</td>
+                    <td>
+                      <span class="font-medium">{{ rule.credit_transfer }}</span>
+                      <span class="text-base-content/50 text-xs ml-1">credits</span>
+                    </td>
                     <td>
                       <span class="badge badge-info badge-sm">
                         Semester {{ rule.entry_semester }}
@@ -331,7 +325,7 @@ const deleteRule = async () => {
           <h3 class="font-medium mb-2">No semester entry rules defined</h3>
           <p class="text-sm mb-4">
             Add rules to define how transferred credits map to starting
-            semesters. Create intake types like "May Intake", "Aug Intake", or "Dec Intake".
+            semesters for each intake type.
           </p>
           <button class="btn btn-primary btn-sm" @click="openAddModal()">
             + Add First Rule
@@ -339,10 +333,14 @@ const deleteRule = async () => {
         </div>
 
         <!-- Info -->
-        <p class="text-sm text-base-content/60">
-          Rules define credit ranges and their corresponding entry semesters.
-          Credit ranges within the same intake type cannot overlap.
-        </p>
+        <div class="bg-info/10 rounded-lg p-4 text-sm">
+          <h4 class="font-medium mb-2">How it works:</h4>
+          <p class="text-base-content/70">
+            During Intake Assessment, students with credits <strong>≥</strong> the defined 
+            credit transfer value will be assigned to that entry semester. Rules are 
+            evaluated from highest to lowest credit transfer value.
+          </p>
+        </div>
       </div>
     </div>
 
@@ -372,35 +370,27 @@ const deleteRule = async () => {
             </datalist>
             <label class="label">
               <span class="label-text-alt text-base-content/50">
-                Enter a reusable intake name (e.g., May Intake, Aug Intake)
+                Enter the intake period name
               </span>
             </label>
           </div>
 
-          <!-- Credit Range -->
-          <div class="grid grid-cols-2 gap-4">
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Min Credit</span>
-              </label>
-              <input
-                v-model.number="formData.min_credit"
-                type="number"
-                min="0"
-                class="input input-bordered w-full"
-              />
-            </div>
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Max Credit</span>
-              </label>
-              <input
-                v-model.number="formData.max_credit"
-                type="number"
-                min="0"
-                class="input input-bordered w-full"
-              />
-            </div>
+          <!-- Credit Transfer -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Credit Transfer</span>
+            </label>
+            <input
+              v-model.number="formData.credit_transfer"
+              type="number"
+              min="0"
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt text-base-content/50">
+                Students with ≥ this credit will be assigned to the entry semester
+              </span>
+            </label>
           </div>
 
           <!-- Entry Semester -->
@@ -412,12 +402,12 @@ const deleteRule = async () => {
               v-model.number="formData.entry_semester"
               type="number"
               min="1"
-              max="8"
+              max="9"
               class="input input-bordered w-full"
             />
             <label class="label">
               <span class="label-text-alt text-base-content/50">
-                Students with credits in this range will start at this semester
+                Which semester the student will start in
               </span>
             </label>
           </div>
@@ -462,30 +452,17 @@ const deleteRule = async () => {
             />
           </div>
 
-          <!-- Credit Range -->
-          <div class="grid grid-cols-2 gap-4">
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Min Credit</span>
-              </label>
-              <input
-                v-model.number="formData.min_credit"
-                type="number"
-                min="0"
-                class="input input-bordered w-full"
-              />
-            </div>
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Max Credit</span>
-              </label>
-              <input
-                v-model.number="formData.max_credit"
-                type="number"
-                min="0"
-                class="input input-bordered w-full"
-              />
-            </div>
+          <!-- Credit Transfer -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Credit Transfer</span>
+            </label>
+            <input
+              v-model.number="formData.credit_transfer"
+              type="number"
+              min="0"
+              class="input input-bordered w-full"
+            />
           </div>
 
           <!-- Entry Semester -->
@@ -497,7 +474,7 @@ const deleteRule = async () => {
               v-model.number="formData.entry_semester"
               type="number"
               min="1"
-              max="8"
+              max="9"
               class="input input-bordered w-full"
             />
           </div>
@@ -536,8 +513,7 @@ const deleteRule = async () => {
             {{ deletingRule.intake_type }}
           </p>
           <p>
-            <strong>Credit Range:</strong> {{ deletingRule.min_credit }} -
-            {{ deletingRule.max_credit }}
+            <strong>Credit Transfer:</strong> {{ deletingRule.credit_transfer }} credits
           </p>
           <p>
             <strong>Entry Semester:</strong> Semester

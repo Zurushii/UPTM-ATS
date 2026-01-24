@@ -41,10 +41,10 @@ export default defineEventHandler(async (event) => {
 
   // Get semester entry rules for the specified intake type
   const [rules] = await pool.query(
-    `SELECT id, min_credit, max_credit, entry_semester 
+    `SELECT id, credit_transfer, entry_semester 
      FROM semester_entry_rules 
      WHERE program_id = ? AND intake_type = ?
-     ORDER BY min_credit ASC`,
+     ORDER BY credit_transfer DESC`,
     [programId, intakeType],
   );
 

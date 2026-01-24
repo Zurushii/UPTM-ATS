@@ -55,15 +55,14 @@ interface ConfigData {
   ruleSets: Array<{
     intake_type: string;
     rule_count: number;
-    min_credit_floor: number;
-    max_credit_ceiling: number;
+    min_credit: number;
+    max_credit: number;
   }>;
 }
 
 interface RuleData {
   id: number;
-  min_credit: number;
-  max_credit: number;
+  credit_transfer: number;
   entry_semester: number;
 }
 
@@ -377,8 +376,8 @@ const resetProcess = () => {
                 {{ ruleSet.intake_type }} ({{
                   ruleSet.rule_count
                 }}
-                rules, {{ ruleSet.min_credit_floor }}-{{
-                  ruleSet.max_credit_ceiling
+                rules, {{ ruleSet.min_credit }}-{{
+                  ruleSet.max_credit
                 }}
                 credits)
               </option>
@@ -401,15 +400,13 @@ const resetProcess = () => {
             <table class="table table-sm">
               <thead>
                 <tr>
-                  <th>Min Credit</th>
-                  <th>Max Credit</th>
+                  <th>Credit Transfer</th>
                   <th>Entry Semester</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="rule in rulesData" :key="rule.id">
-                  <td>{{ rule.min_credit }}</td>
-                  <td>{{ rule.max_credit }}</td>
+                  <td>≥ {{ rule.credit_transfer }} credits</td>
                   <td>Semester {{ rule.entry_semester }}</td>
                 </tr>
               </tbody>

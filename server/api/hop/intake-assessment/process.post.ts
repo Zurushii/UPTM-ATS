@@ -24,8 +24,7 @@ interface FailedRecord {
 }
 
 interface SemesterRule {
-  min_credit: number;
-  max_credit: number;
+  credit_transfer: number;
   entry_semester: number;
 }
 
@@ -103,10 +102,10 @@ export default defineEventHandler(async (event) => {
 
   // Get semester entry rules for the selected intake type
   const [ruleRows] = await pool.query(
-    `SELECT min_credit, max_credit, entry_semester 
+    `SELECT credit_transfer, entry_semester 
      FROM semester_entry_rules 
      WHERE program_id = ? AND intake_type = ?
-     ORDER BY min_credit ASC`,
+     ORDER BY credit_transfer DESC`,
     [programId, intakeType],
   );
 
@@ -266,18 +265,17 @@ export default defineEventHandler(async (event) => {
     }
 
     // Determine entry semester based on rules
+    // Find the rule where student's credits >= credit_transfer (sorted DESC)
     let entrySemester = 1; // Default to semester 1
     for (const rule of rules) {
-      if (credits >= rule.min_credit && credits <= rule.max_credit) {
+      if (credits >= rule.credit_transfer) {
         entrySemester = rule.entry_semester;
         break;
       }
     }
 
-    // If credits exceed all rules, use the highest entry semester
-    if (credits > rules[rules.length - 1].max_credit) {
-      entrySemester = rules[rules.length - 1].entry_semester;
-    }
+    // If no matching rule found and rules exist, use entry semester 1
+    // (student has fewer credits than any defined rule)
 
     processedMatricNos.add(student.matric_no.toLowerCase());
     processedStudents.push({

@@ -3,8 +3,7 @@ import { auth } from "~~/utils/auth";
 
 interface RuleInput {
   intake_type: string;
-  min_credit: number;
-  max_credit: number;
+  credit_transfer: number;
   entry_semester: number;
 }
 
@@ -56,17 +55,10 @@ export default defineEventHandler(async (event) => {
 
   const intakeType = body.intake_type.trim();
 
-  if (body.min_credit === undefined || body.min_credit < 0) {
+  if (body.credit_transfer === undefined || body.credit_transfer < 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "Min credit must be a non-negative number",
-    });
-  }
-
-  if (body.max_credit === undefined || body.max_credit < body.min_credit) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: "Max credit must be greater than or equal to min credit",
+      statusMessage: "Credit transfer must be a non-negative number",
     });
   }
 
@@ -77,47 +69,25 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Check for overlapping ranges in the same intake type
+  // Check for duplicate credit_transfer value in same intake type
   const [existingRules] = await pool.query(
-    `SELECT id, min_credit, max_credit FROM semester_entry_rules
-     WHERE program_id = ? AND intake_type = ?
-     AND (
-       (? BETWEEN min_credit AND max_credit) OR
-       (? BETWEEN min_credit AND max_credit) OR
-       (min_credit BETWEEN ? AND ?) OR
-       (max_credit BETWEEN ? AND ?)
-     )`,
-    [
-      programId,
-      intakeType,
-      body.min_credit,
-      body.max_credit,
-      body.min_credit,
-      body.max_credit,
-      body.min_credit,
-      body.max_credit,
-    ],
+    `SELECT id FROM semester_entry_rules
+     WHERE program_id = ? AND intake_type = ? AND credit_transfer = ?`,
+    [programId, intakeType, body.credit_transfer],
   );
 
   if ((existingRules as any[]).length > 0) {
     throw createError({
       statusCode: 400,
-      statusMessage:
-        "Credit range overlaps with an existing rule for this intake",
+      statusMessage: `A rule for ${body.credit_transfer} credits already exists for this intake type`,
     });
   }
 
   // Insert new rule
   const [result] = await pool.query(
-    `INSERT INTO semester_entry_rules (program_id, intake_type, min_credit, max_credit, entry_semester)
-     VALUES (?, ?, ?, ?, ?)`,
-    [
-      programId,
-      intakeType,
-      body.min_credit,
-      body.max_credit,
-      body.entry_semester,
-    ],
+    `INSERT INTO semester_entry_rules (program_id, intake_type, credit_transfer, entry_semester)
+     VALUES (?, ?, ?, ?)`,
+    [programId, intakeType, body.credit_transfer, body.entry_semester],
   );
 
   const insertResult = result as any;
@@ -125,8 +95,7 @@ export default defineEventHandler(async (event) => {
   return {
     id: insertResult.insertId,
     intake_type: intakeType,
-    min_credit: body.min_credit,
-    max_credit: body.max_credit,
+    credit_transfer: body.credit_transfer,
     entry_semester: body.entry_semester,
   };
 });

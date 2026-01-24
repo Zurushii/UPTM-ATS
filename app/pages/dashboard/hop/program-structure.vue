@@ -225,6 +225,13 @@ const semesterOptions = computed(() => {
   return Array.from({ length: duration }, (_, i) => i + 1);
 });
 
+// Format semester number as "Semester X / Year Y"
+const formatSemester = (semester: number, semestersPerYear: number = 3): string => {
+  const year = Math.ceil(semester / semestersPerYear);
+  const semInYear = ((semester - 1) % semestersPerYear) + 1;
+  return `Semester ${semInYear} / Year ${year}`;
+};
+
 // Get selected session details
 const selectedSession = computed(() =>
   sessions.value?.find((s: any) => s.id === selectedSessionId.value),
@@ -484,9 +491,7 @@ function openImportModal() {
 // Handle file selection for import
 function handleImportFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
-  if (target.files && target.files.length > 0) {
-    importFile.value = target.files[0];
-  }
+  importFile.value = target.files?.[0] ?? null;
 }
 
 // Handle import
@@ -693,7 +698,7 @@ async function handleImport() {
           <div class="card-body p-4">
             <!-- Semester Header -->
             <div class="flex items-center justify-between mb-3">
-              <h3 class="font-semibold">Semester {{ sem.semester }}</h3>
+              <h3 class="font-semibold">{{ formatSemester(sem.semester) }}</h3>
               <div class="badge badge-outline">
                 {{ sem.totalCredits }} Credits · {{ sem.courseCount }} Courses
               </div>
@@ -1030,7 +1035,7 @@ async function handleImport() {
               required
             >
               <option v-for="sem in semesterOptions" :key="sem" :value="sem">
-                Semester {{ sem }}
+                {{ formatSemester(sem) }}
               </option>
             </select>
           </div>
@@ -1230,7 +1235,7 @@ async function handleImport() {
               required
             >
               <option v-for="sem in semesterOptions" :key="sem" :value="sem">
-                Semester {{ sem }}
+                {{ formatSemester(sem) }}
               </option>
             </select>
           </div>

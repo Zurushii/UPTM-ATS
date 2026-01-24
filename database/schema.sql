@@ -166,16 +166,15 @@ CREATE TABLE semester_entry_rules (
   id INT AUTO_INCREMENT PRIMARY KEY,
   program_id INT NOT NULL,
   intake_type VARCHAR(20) NOT NULL,             -- Flexible intake name (e.g., "May Intake", "Aug Intake")
-  min_credit INT NOT NULL,
-  max_credit INT NOT NULL,
-  entry_semester INT NOT NULL,
+  credit_transfer INT NOT NULL,                 -- Exact credit transfer value
+  entry_semester INT NOT NULL,                  -- Starting semester for this credit level
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_ser_program
     FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
   
   INDEX idx_program_intake (program_id, intake_type),
-  CONSTRAINT chk_credit_range CHECK (max_credit >= min_credit)
+  UNIQUE KEY unique_program_intake_credit (program_id, intake_type, credit_transfer)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
