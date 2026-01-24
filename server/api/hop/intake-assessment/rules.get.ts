@@ -14,12 +14,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const query = getQuery(event);
-  const ruleSetIntake = query.rule_set_intake as string | undefined;
+  const intakeType = query.intake_type as string | undefined;
 
-  if (!ruleSetIntake) {
+  if (!intakeType) {
     throw createError({
       statusCode: 400,
-      statusMessage: "rule_set_intake parameter is required",
+      statusMessage: "intake_type parameter is required",
     });
   }
 
@@ -39,13 +39,13 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  // Get semester entry rules for the specified intake
+  // Get semester entry rules for the specified intake type
   const [rules] = await pool.query(
     `SELECT id, min_credit, max_credit, entry_semester 
      FROM semester_entry_rules 
-     WHERE program_id = ? AND intake_year = ?
+     WHERE program_id = ? AND intake_type = ?
      ORDER BY min_credit ASC`,
-    [programId, ruleSetIntake],
+    [programId, intakeType],
   );
 
   return rules;

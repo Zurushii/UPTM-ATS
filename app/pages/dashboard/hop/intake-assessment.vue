@@ -53,7 +53,7 @@ interface ConfigData {
   programId: number;
   intakes: string[];
   ruleSets: Array<{
-    intake_year: string;
+    intake_type: string;
     rule_count: number;
     min_credit_floor: number;
     max_credit_ceiling: number;
@@ -74,7 +74,7 @@ const { data: configData, pending: configPending } = await useFetch<ConfigData>(
 
 // Fetch rules when rule set is selected
 const rulesQuery = computed(() => ({
-  rule_set_intake: selectedRuleSet.value || undefined,
+  intake_type: selectedRuleSet.value || undefined,
 }));
 
 const { data: rulesData } = await useFetch<RuleData[]>(
@@ -192,7 +192,7 @@ const processFile = async () => {
     const formData = new FormData();
     formData.append("file", selectedFile.value);
     formData.append("intake", selectedIntake.value);
-    formData.append("rule_set_intake", selectedRuleSet.value);
+    formData.append("intake_type", selectedRuleSet.value);
 
     const response = await $fetch("/api/hop/intake-assessment/process", {
       method: "POST",
@@ -371,10 +371,10 @@ const resetProcess = () => {
               <option value="">Select rule set...</option>
               <option
                 v-for="ruleSet in configData?.ruleSets"
-                :key="ruleSet.intake_year"
-                :value="ruleSet.intake_year"
+                :key="ruleSet.intake_type"
+                :value="ruleSet.intake_type"
               >
-                {{ formatIntake(ruleSet.intake_year) }} ({{
+                {{ ruleSet.intake_type }} ({{
                   ruleSet.rule_count
                 }}
                 rules, {{ ruleSet.min_credit_floor }}-{{
@@ -503,7 +503,7 @@ const resetProcess = () => {
             <div>
               <span class="text-base-content/60">Rule Set:</span>
               <span class="ml-2 font-medium">{{
-                formatIntake(selectedRuleSet)
+                selectedRuleSet
               }}</span>
             </div>
           </div>

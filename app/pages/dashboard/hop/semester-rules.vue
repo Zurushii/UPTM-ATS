@@ -15,7 +15,7 @@ if (!session.value) {
 // Types
 interface Rule {
   id: number;
-  intake_year: string;
+  intake_type: string;
   min_credit: number;
   max_credit: number;
   entry_semester: number;
@@ -27,7 +27,7 @@ interface IntakesData {
 }
 
 // State
-const selectedIntake = ref<string>("");
+const selectedIntakeType = ref<string>("");
 const isAddModalOpen = ref(false);
 const isEditModalOpen = ref(false);
 const isDeleteModalOpen = ref(false);
@@ -37,19 +37,19 @@ const isSubmitting = ref(false);
 
 // Form state for add/edit
 const formData = ref({
-  intake_year: "",
+  intake_type: "",
   min_credit: 0,
   max_credit: 0,
   entry_semester: 1,
 });
 
-// Fetch intakes
+// Fetch intakes data
 const { data: intakesData, refresh: refreshIntakes } =
   await useFetch<IntakesData>("/api/hop/semester-rules/intakes");
 
-// Fetch rules based on selected intake
+// Fetch rules based on selected intake type
 const rulesQuery = computed(() => ({
-  intake_year: selectedIntake.value || undefined,
+  intake_type: selectedIntakeType.value || undefined,
 }));
 
 const {
@@ -60,66 +60,32 @@ const {
   query: rulesQuery,
 });
 
-// Computed: all available intakes (from rules + students)
-const allIntakes = computed(() => {
-  const intakes = new Set<string>();
-  intakesData.value?.rule_intakes?.forEach((i) => intakes.add(i));
-  intakesData.value?.student_intakes?.forEach((i) => intakes.add(i));
-  return Array.from(intakes).sort().reverse();
+// Computed: all available intake types (from rules)
+const allIntakeTypes = computed(() => {
+  return intakesData.value?.rule_intakes || [];
 });
 
-// Computed: intakes without rules (for suggestions)
-const intakesWithoutRules = computed(() => {
-  const ruleIntakes = new Set(intakesData.value?.rule_intakes || []);
-  return (intakesData.value?.student_intakes || []).filter(
-    (i) => !ruleIntakes.has(i),
-  );
-});
-
-// Computed: group rules by intake
-const rulesByIntake = computed(() => {
+// Computed: group rules by intake type
+const rulesByIntakeType = computed(() => {
   if (!rules.value) return {};
   const grouped: Record<string, Rule[]> = {};
   for (const rule of rules.value) {
-    if (!grouped[rule.intake_year]) {
-      grouped[rule.intake_year] = [];
+    if (!grouped[rule.intake_type]) {
+      grouped[rule.intake_type] = [];
     }
-    grouped[rule.intake_year]!.push(rule);
+    grouped[rule.intake_type]!.push(rule);
   }
-  // Sort rules within each intake by min_credit
-  for (const intake in grouped) {
-    grouped[intake]!.sort((a, b) => a.min_credit - b.min_credit);
+  // Sort rules within each intake type by min_credit
+  for (const intakeType in grouped) {
+    grouped[intakeType]!.sort((a, b) => a.min_credit - b.min_credit);
   }
   return grouped;
 });
 
-// Format intake year (MMYY -> Month Year)
-const formatIntake = (intake: string) => {
-  if (!intake || intake.length !== 4) return intake;
-  const month = parseInt(intake.substring(0, 2));
-  const year = parseInt(intake.substring(2, 4));
-  const monthNames = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const fullYear = year >= 50 ? 1900 + year : 2000 + year;
-  return `${monthNames[month - 1]} ${fullYear}`;
-};
-
 // Open add modal
-const openAddModal = (intakeYear?: string) => {
+const openAddModal = (intakeType?: string) => {
   formData.value = {
-    intake_year: intakeYear || "",
+    intake_type: intakeType || "",
     min_credit: 0,
     max_credit: 0,
     entry_semester: 1,
@@ -131,7 +97,7 @@ const openAddModal = (intakeYear?: string) => {
 const openEditModal = (rule: Rule) => {
   editingRule.value = rule;
   formData.value = {
-    intake_year: rule.intake_year,
+    intake_type: rule.intake_type,
     min_credit: rule.min_credit,
     max_credit: rule.max_credit,
     entry_semester: rule.entry_semester,
@@ -159,8 +125,8 @@ const addRule = async () => {
   if (isSubmitting.value) return;
 
   // Validation
-  if (!formData.value.intake_year || formData.value.intake_year.length !== 4) {
-    alert("Please enter a valid intake year (MMYY format)");
+  if (!formData.value.intake_type || formData.value.intake_type.trim().length === 0) {
+    alert("Please enter an intake type name");
     return;
   }
 
@@ -175,7 +141,7 @@ const addRule = async () => {
     await $fetch("/api/hop/semester-rules", {
       method: "POST",
       body: {
-        intake_year: formData.value.intake_year,
+        intake_type: formData.value.intake_type.trim(),
         min_credit: formData.value.min_credit,
         max_credit: formData.value.max_credit,
         entry_semester: formData.value.entry_semester,
@@ -251,42 +217,9 @@ const deleteRule = async () => {
       <h1 class="text-2xl font-semibold">Semester Entry Rules</h1>
       <p class="text-sm text-base-content/60">
         Define rules to determine a student's starting semester based on
-        transferred credit hours. These rules are used during intake assessment.
+        transferred credit hours. Create intake types (e.g., May Intake, Aug Intake)
+        that can be reused across years.
       </p>
-    </div>
-
-    <!-- Intakes Without Rules Alert -->
-    <div v-if="intakesWithoutRules.length > 0" class="alert alert-info">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-        class="stroke-current shrink-0 w-6 h-6"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-      <div>
-        <h3 class="font-bold">Intakes need rules</h3>
-        <p class="text-sm">
-          The following intakes have students but no entry rules:
-          <span
-            v-for="(intake, idx) in intakesWithoutRules"
-            :key="intake"
-            class="font-medium"
-          >
-            {{ formatIntake(intake)
-            }}<span v-if="idx < intakesWithoutRules.length - 1">, </span>
-          </span>
-        </p>
-      </div>
-      <button class="btn btn-sm" @click="openAddModal(intakesWithoutRules[0])">
-        Add Rules
-      </button>
     </div>
 
     <!-- Rules Table Card -->
@@ -297,18 +230,18 @@ const deleteRule = async () => {
           <h2 class="font-medium">Credit-to-Semester Mapping</h2>
 
           <div class="flex items-center gap-3">
-            <!-- Intake Filter -->
+            <!-- Intake Type Filter -->
             <select
-              v-model="selectedIntake"
+              v-model="selectedIntakeType"
               class="select select-sm select-bordered"
             >
-              <option value="">All Intakes</option>
+              <option value="">All Intake Types</option>
               <option
-                v-for="intake in allIntakes"
-                :key="intake"
-                :value="intake"
+                v-for="intakeType in allIntakeTypes"
+                :key="intakeType"
+                :value="intakeType"
               >
-                {{ formatIntake(intake) }}
+                {{ intakeType }}
               </option>
             </select>
 
@@ -327,16 +260,16 @@ const deleteRule = async () => {
         <!-- Rules Table -->
         <template v-else-if="rules && rules.length > 0">
           <div
-            v-for="(intakeRules, intake) in rulesByIntake"
-            :key="intake"
+            v-for="(intakeRules, intakeType) in rulesByIntakeType"
+            :key="intakeType"
             class="space-y-2"
           >
-            <!-- Intake Header -->
+            <!-- Intake Type Header -->
             <div
               class="flex items-center justify-between bg-base-200 px-4 py-2 rounded-lg"
             >
               <h3 class="font-medium text-sm">
-                {{ formatIntake(intake as string) }}
+                {{ intakeType }}
                 <span class="text-base-content/50 font-normal ml-2">
                   ({{ intakeRules.length }} rule{{
                     intakeRules.length > 1 ? "s" : ""
@@ -345,13 +278,13 @@ const deleteRule = async () => {
               </h3>
               <button
                 class="btn btn-xs btn-ghost"
-                @click="openAddModal(intake as string)"
+                @click="openAddModal(intakeType as string)"
               >
                 + Add
               </button>
             </div>
 
-            <!-- Rules for this intake -->
+            <!-- Rules for this intake type -->
             <div class="overflow-x-auto">
               <table class="table table-sm w-full">
                 <thead>
@@ -398,7 +331,7 @@ const deleteRule = async () => {
           <h3 class="font-medium mb-2">No semester entry rules defined</h3>
           <p class="text-sm mb-4">
             Add rules to define how transferred credits map to starting
-            semesters.
+            semesters. Create intake types like "May Intake", "Aug Intake", or "Dec Intake".
           </p>
           <button class="btn btn-primary btn-sm" @click="openAddModal()">
             + Add First Rule
@@ -408,7 +341,7 @@ const deleteRule = async () => {
         <!-- Info -->
         <p class="text-sm text-base-content/60">
           Rules define credit ranges and their corresponding entry semesters.
-          Credit ranges within the same intake cannot overlap.
+          Credit ranges within the same intake type cannot overlap.
         </p>
       </div>
     </div>
@@ -419,21 +352,27 @@ const deleteRule = async () => {
         <h3 class="font-bold text-lg mb-4">Add Semester Entry Rule</h3>
 
         <div class="space-y-4">
-          <!-- Intake Year -->
+          <!-- Intake Type -->
           <div class="form-control">
             <label class="label">
-              <span class="label-text">Intake Year</span>
+              <span class="label-text">Intake Type</span>
             </label>
             <input
-              v-model="formData.intake_year"
+              v-model="formData.intake_type"
               type="text"
-              placeholder="MMYY (e.g., 0524 for May 2024)"
-              maxlength="4"
+              placeholder="e.g., May Intake, Aug Intake, Dec Intake"
+              maxlength="20"
               class="input input-bordered w-full"
+              list="intake-suggestions"
             />
+            <datalist id="intake-suggestions">
+              <option value="May Intake" />
+              <option value="Aug Intake" />
+              <option value="Dec Intake" />
+            </datalist>
             <label class="label">
               <span class="label-text-alt text-base-content/50">
-                Format: MMYY (month + year, e.g., 0524 = May 2024)
+                Enter a reusable intake name (e.g., May Intake, Aug Intake)
               </span>
             </label>
           </div>
@@ -510,13 +449,13 @@ const deleteRule = async () => {
         <h3 class="font-bold text-lg mb-4">Edit Semester Entry Rule</h3>
 
         <div class="space-y-4">
-          <!-- Intake Year (read-only) -->
+          <!-- Intake Type (read-only) -->
           <div class="form-control">
             <label class="label">
-              <span class="label-text">Intake Year</span>
+              <span class="label-text">Intake Type</span>
             </label>
             <input
-              :value="formatIntake(formData.intake_year)"
+              :value="formData.intake_type"
               type="text"
               disabled
               class="input input-bordered w-full bg-base-200"
@@ -593,8 +532,8 @@ const deleteRule = async () => {
 
         <div v-if="deletingRule" class="bg-base-200 rounded-lg p-4 text-sm">
           <p>
-            <strong>Intake:</strong>
-            {{ formatIntake(deletingRule.intake_year) }}
+            <strong>Intake Type:</strong>
+            {{ deletingRule.intake_type }}
           </p>
           <p>
             <strong>Credit Range:</strong> {{ deletingRule.min_credit }} -

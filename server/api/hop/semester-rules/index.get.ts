@@ -29,24 +29,24 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  // Get query param for filtering by intake
+  // Get query param for filtering by intake type
   const query = getQuery(event);
-  const intakeFilter = query.intake_year as string | undefined;
+  const intakeFilter = query.intake_type as string | undefined;
 
   // Build query
   let sql = `
-    SELECT id, intake_year, min_credit, max_credit, entry_semester
+    SELECT id, intake_type, min_credit, max_credit, entry_semester
     FROM semester_entry_rules
     WHERE program_id = ?
   `;
   const params: any[] = [programId];
 
   if (intakeFilter) {
-    sql += ` AND intake_year = ?`;
+    sql += ` AND intake_type = ?`;
     params.push(intakeFilter);
   }
 
-  sql += ` ORDER BY intake_year DESC, min_credit ASC`;
+  sql += ` ORDER BY intake_type ASC, min_credit ASC`;
 
   const [rows] = await pool.query(sql, params);
 

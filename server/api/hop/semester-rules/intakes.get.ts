@@ -29,20 +29,20 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  // Get distinct intakes from semester_entry_rules
+  // Get distinct intake types from semester_entry_rules
   const [ruleIntakes] = await pool.query(
-    `SELECT DISTINCT intake_year FROM semester_entry_rules WHERE program_id = ? ORDER BY intake_year DESC`,
+    `SELECT DISTINCT intake_type FROM semester_entry_rules WHERE program_id = ? ORDER BY intake_type ASC`,
     [programId],
   );
 
-  // Get distinct intakes from students (to suggest new intakes)
+  // Get distinct intakes from students (to show student intake info)
   const [studentIntakes] = await pool.query(
     `SELECT DISTINCT intake_year FROM students WHERE program_id = ? ORDER BY intake_year DESC`,
     [programId],
   );
 
   return {
-    rule_intakes: (ruleIntakes as any[]).map((r) => r.intake_year),
+    rule_intakes: (ruleIntakes as any[]).map((r) => r.intake_type),
     student_intakes: (studentIntakes as any[]).map((r) => r.intake_year),
   };
 });

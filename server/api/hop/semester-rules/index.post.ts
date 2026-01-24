@@ -2,7 +2,7 @@ import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
 
 interface RuleInput {
-  intake_year: string;
+  intake_type: string;
   min_credit: number;
   max_credit: number;
   entry_semester: number;
@@ -39,13 +39,22 @@ export default defineEventHandler(async (event) => {
   // Parse request body
   const body = await readBody<RuleInput>(event);
 
-  // Validate input
-  if (!body.intake_year || body.intake_year.length !== 4) {
+  // Validate intake_type
+  if (!body.intake_type || body.intake_type.trim().length === 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "Invalid intake year format. Use MMYY (e.g., 0524)",
+      statusMessage: "Intake type is required",
     });
   }
+
+  if (body.intake_type.length > 20) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Intake type must be 20 characters or less",
+    });
+  }
+
+  const intakeType = body.intake_type.trim();
 
   if (body.min_credit === undefined || body.min_credit < 0) {
     throw createError({
@@ -68,10 +77,10 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Check for overlapping ranges in the same intake
+  // Check for overlapping ranges in the same intake type
   const [existingRules] = await pool.query(
     `SELECT id, min_credit, max_credit FROM semester_entry_rules
-     WHERE program_id = ? AND intake_year = ?
+     WHERE program_id = ? AND intake_type = ?
      AND (
        (? BETWEEN min_credit AND max_credit) OR
        (? BETWEEN min_credit AND max_credit) OR
@@ -80,7 +89,7 @@ export default defineEventHandler(async (event) => {
      )`,
     [
       programId,
-      body.intake_year,
+      intakeType,
       body.min_credit,
       body.max_credit,
       body.min_credit,
@@ -100,11 +109,11 @@ export default defineEventHandler(async (event) => {
 
   // Insert new rule
   const [result] = await pool.query(
-    `INSERT INTO semester_entry_rules (program_id, intake_year, min_credit, max_credit, entry_semester)
+    `INSERT INTO semester_entry_rules (program_id, intake_type, min_credit, max_credit, entry_semester)
      VALUES (?, ?, ?, ?, ?)`,
     [
       programId,
-      body.intake_year,
+      intakeType,
       body.min_credit,
       body.max_credit,
       body.entry_semester,
@@ -115,7 +124,7 @@ export default defineEventHandler(async (event) => {
 
   return {
     id: insertResult.insertId,
-    intake_year: body.intake_year,
+    intake_type: intakeType,
     min_credit: body.min_credit,
     max_credit: body.max_credit,
     entry_semester: body.entry_semester,

@@ -46,7 +46,7 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id, intake_year FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, intake_type FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -58,7 +58,7 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const intakeYear = ruleData[0].intake_year;
+  const intakeType = ruleData[0].intake_type;
 
   // Parse request body
   const body = await readBody<RuleInput>(event);
@@ -88,7 +88,7 @@ export default defineEventHandler(async (event) => {
   // Check for overlapping ranges (excluding current rule)
   const [existingRules] = await pool.query(
     `SELECT id, min_credit, max_credit FROM semester_entry_rules
-     WHERE program_id = ? AND intake_year = ? AND id != ?
+     WHERE program_id = ? AND intake_type = ? AND id != ?
      AND (
        (? BETWEEN min_credit AND max_credit) OR
        (? BETWEEN min_credit AND max_credit) OR
@@ -97,7 +97,7 @@ export default defineEventHandler(async (event) => {
      )`,
     [
       programId,
-      intakeYear,
+      intakeType,
       ruleId,
       body.min_credit,
       body.max_credit,
@@ -124,7 +124,7 @@ export default defineEventHandler(async (event) => {
 
   return {
     id: ruleId,
-    intake_year: intakeYear,
+    intake_type: intakeType,
     min_credit: body.min_credit,
     max_credit: body.max_credit,
     entry_semester: body.entry_semester,

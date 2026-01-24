@@ -68,15 +68,15 @@ export default defineEventHandler(async (event) => {
 
   let fileBuffer: Buffer | null = null;
   let intake: string | null = null;
-  let ruleSetIntake: string | null = null;
+  let intakeType: string | null = null;
 
   for (const field of formData) {
     if (field.name === "file" && field.data) {
       fileBuffer = field.data;
     } else if (field.name === "intake" && field.data) {
       intake = field.data.toString();
-    } else if (field.name === "rule_set_intake" && field.data) {
-      ruleSetIntake = field.data.toString();
+    } else if (field.name === "intake_type" && field.data) {
+      intakeType = field.data.toString();
     }
   }
 
@@ -94,27 +94,27 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (!ruleSetIntake) {
+  if (!intakeType) {
     throw createError({
       statusCode: 400,
-      statusMessage: "Semester entry rule set is required",
+      statusMessage: "Intake type (rule set) is required",
     });
   }
 
-  // Get semester entry rules
+  // Get semester entry rules for the selected intake type
   const [ruleRows] = await pool.query(
     `SELECT min_credit, max_credit, entry_semester 
      FROM semester_entry_rules 
-     WHERE program_id = ? AND intake_year = ?
+     WHERE program_id = ? AND intake_type = ?
      ORDER BY min_credit ASC`,
-    [programId, ruleSetIntake],
+    [programId, intakeType],
   );
 
   const rules = ruleRows as SemesterRule[];
   if (rules.length === 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "No semester entry rules found for the selected rule set",
+      statusMessage: "No semester entry rules found for the selected intake type",
     });
   }
 
