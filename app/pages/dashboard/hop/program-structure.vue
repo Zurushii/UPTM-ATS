@@ -1,6 +1,60 @@
 <script setup lang="ts">
 import { authClient } from "@@/utils/auth-client";
 
+type ProgramSessionRow = {
+  id: number;
+  session_name: string;
+  intake_year: string;
+  is_active?: number | boolean;
+  created_at?: string;
+  course_count: number;
+  total_credits: number;
+};
+
+type CourseRow = {
+  id: number;
+  course_code: string;
+  course_name: string;
+  credit_hour: number;
+};
+
+type ProgramStructureCourse = {
+  id: number;
+  semester: number;
+  prerequisite_course_id: number | null;
+  course_id: number;
+  course_code: string;
+  course_name: string;
+  credit_hour: number;
+  prerequisite_code: string | null;
+  prerequisite_name: string | null;
+};
+
+type ProgramStructureSemester = {
+  semester: number;
+  courses: ProgramStructureCourse[];
+  totalCredits: number;
+  courseCount: number;
+};
+
+type ProgramStructureResponse = {
+  program: {
+    id: number;
+    program_code: string;
+    program_name: string;
+    total_credit_required: number;
+    duration_semesters: number;
+  };
+  session: {
+    id: number;
+    session_name: string;
+    intake_year: string;
+  };
+  semesters: ProgramStructureSemester[];
+  totalCourses: number;
+  totalCredits: number;
+};
+
 definePageMeta({
   layout: "dashboard",
   middleware: ["hop"],
@@ -17,38 +71,58 @@ const {
   data: sessions,
   pending: sessionsPending,
   refresh: refreshSessions,
-} = await useFetch<any[]>("/api/hop/sessions");
+} = await useFetch<ProgramSessionRow[]>("/api/hop/sessions");
 
 // Currently selected session
-const selectedSessionId = ref<number | null>(null);
+const selectedSessionId = ref<number | null>(sessions.value?.[0]?.id ?? null);
 
-// Auto-select first session when loaded
+// Keep a valid selection when sessions list changes
 watch(
   sessions,
   (newSessions) => {
-    if (newSessions?.length && !selectedSessionId.value) {
-      selectedSessionId.value = newSessions[0].id;
+    if (!newSessions?.length) {
+      selectedSessionId.value = null;
+      return;
+    }
+
+    const stillExists = newSessions.some(
+      (s) => s.id === selectedSessionId.value,
+    );
+    if (!selectedSessionId.value || !stillExists) {
+      selectedSessionId.value = newSessions.at(0)!.id;
     }
   },
   { immediate: true },
-);
-
-// Fetch program structure for selected session
-const structureUrl = computed(() =>
-  selectedSessionId.value
-    ? `/api/hop/program-structure?session_id=${selectedSessionId.value}`
-    : null,
 );
 
 const {
   data: structureData,
   pending: structurePending,
   refresh: refreshStructure,
-} = await useFetch<any>(structureUrl, { watch: [selectedSessionId] });
+} = await useFetch<ProgramStructureResponse | null>(
+  () =>
+    `/api/hop/program-structure?session_id=${selectedSessionId.value as number}`,
+  {
+    immediate: selectedSessionId.value !== null,
+    default: () => null,
+  },
+);
+
+watch(
+  selectedSessionId,
+  async (newId) => {
+    if (newId === null) {
+      structureData.value = null;
+      return;
+    }
+    await refreshStructure();
+  },
+  { immediate: false },
+);
 
 // Fetch available courses for the dropdown
 const { data: allCourses, refresh: refreshCourses } =
-  await useFetch<any[]>("/api/hop/courses");
+  await useFetch<CourseRow[]>("/api/hop/courses");
 
 // Modal state
 const showAddModal = ref(false);
@@ -106,8 +180,8 @@ const availableCourses = computed(() => {
   if (!allCourses.value || !structureData.value) return [];
 
   const existingCourseIds = new Set(
-    structureData.value.semesters.flatMap((s: any) =>
-      s.courses.map((c: any) => c.course_id),
+    structureData.value.semesters.flatMap((s) =>
+      s.courses.map((c) => c.course_id),
     ),
   );
 
@@ -121,14 +195,14 @@ const getPrerequisiteOptions = (targetSemester: number) => {
   if (!structureData.value) return [];
 
   return structureData.value.semesters
-    .filter((s: any) => s.semester < targetSemester)
-    .flatMap((s: any) => s.courses);
+    .filter((s) => s.semester < targetSemester)
+    .flatMap((s) => s.courses);
 };
 
 const getEditPrerequisiteOptions = (targetSemester: number) => {
   const currentCourseId = editingCourse.value?.course_id;
   return getPrerequisiteOptions(targetSemester).filter(
-    (course: any) => course.course_id !== currentCourseId,
+    (course) => course.course_id !== currentCourseId,
   );
 };
 
