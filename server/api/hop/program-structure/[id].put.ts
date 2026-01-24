@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event);
-  const { semester, prerequisite_course_id } = body;
+  const { semester, course_type, prerequisite_course_id } = body;
 
   if (!semester) {
     throw createError({
@@ -116,8 +116,8 @@ export default defineEventHandler(async (event) => {
 
   // Update program course
   await pool.query(
-    `UPDATE program_courses SET semester = ?, prerequisite_course_id = ? WHERE id = ?`,
-    [semester, prerequisite_course_id || null, id],
+    `UPDATE program_courses SET semester = ?, course_type = COALESCE(?, course_type), prerequisite_course_id = ? WHERE id = ?`,
+    [semester, course_type, prerequisite_course_id || null, id],
   );
 
   return {

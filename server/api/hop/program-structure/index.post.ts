@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
 
   // Parse body
   const body = await readBody(event);
-  const { session_id, course_id, semester, prerequisite_course_id } = body;
+  const { session_id, course_id, semester, course_type, prerequisite_course_id } = body;
 
   if (!session_id) {
     throw createError({
@@ -112,9 +112,9 @@ export default defineEventHandler(async (event) => {
 
   // Insert new program course
   const [result] = await pool.query(
-    `INSERT INTO program_courses (session_id, course_id, semester, prerequisite_course_id)
-     VALUES (?, ?, ?, ?)`,
-    [session_id, course_id, semester, prerequisite_course_id || null],
+    `INSERT INTO program_courses (session_id, course_id, semester, course_type, prerequisite_course_id)
+     VALUES (?, ?, ?, ?, ?)`,
+    [session_id, course_id, semester, course_type || 'Core Computing', prerequisite_course_id || null],
   );
 
   return {

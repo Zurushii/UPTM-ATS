@@ -21,6 +21,7 @@ type CourseRow = {
 type ProgramStructureCourse = {
   id: number;
   semester: number;
+  course_type: string;
   prerequisite_course_id: number | null;
   course_id: number;
   course_code: string;
@@ -136,6 +137,7 @@ const reopenAddAfterCreate = ref(false);
 const newCourse = ref({
   course_id: "",
   semester: 1,
+  course_type: "Core Computing",
   prerequisite_course_id: "",
 });
 
@@ -143,6 +145,7 @@ const newCourse = ref({
 const editingCourse = ref<any>(null);
 const editForm = ref({
   semester: 1,
+  course_type: "Core Computing",
   prerequisite_course_id: "",
 });
 
@@ -217,6 +220,17 @@ const semesterOptions = computed(() => {
 const selectedSession = computed(() =>
   sessions.value?.find((s: any) => s.id === selectedSessionId.value),
 );
+
+// Course type options
+const courseTypeOptions = [
+  "Core Computing",
+  "Free Elective",
+  "Compulsory",
+  "Specialization",
+  "Discipline Core",
+  "Final Year Project",
+  "Industrial Training",
+];
 
 // Create session handler
 async function handleCreateSession() {
@@ -315,6 +329,7 @@ async function handleAddCourse() {
         session_id: selectedSessionId.value,
         course_id: parseInt(newCourse.value.course_id),
         semester: newCourse.value.semester,
+        course_type: newCourse.value.course_type,
         prerequisite_course_id: newCourse.value.prerequisite_course_id
           ? parseInt(newCourse.value.prerequisite_course_id)
           : null,
@@ -325,6 +340,7 @@ async function handleAddCourse() {
     newCourse.value = {
       course_id: "",
       semester: 1,
+      course_type: "Core Computing",
       prerequisite_course_id: "",
     };
     await refreshStructure();
@@ -378,6 +394,7 @@ function openEditModal(course: any) {
   editingCourse.value = course;
   editForm.value = {
     semester: course.semester,
+    course_type: course.course_type || "Core Computing",
     prerequisite_course_id: course.prerequisite_course_id?.toString() || "",
   };
   showEditModal.value = true;
@@ -393,6 +410,7 @@ async function handleUpdateCourse() {
       method: "PUT",
       body: {
         semester: editForm.value.semester,
+        course_type: editForm.value.course_type,
         prerequisite_course_id: editForm.value.prerequisite_course_id
           ? parseInt(editForm.value.prerequisite_course_id)
           : null,
@@ -617,27 +635,43 @@ function openCloneModal(sourceSession: any) {
             <div class="overflow-x-auto">
               <table class="table table-sm">
                 <thead>
-                  <tr class="text-xs text-base-content/60">
-                    <th>Code</th>
+                  <tr class="text-xs text-base-content/60 bg-base-200">
+                    <th class="w-10">#</th>
+                    <th>Course Code</th>
                     <th>Course Name</th>
-                    <th class="text-center">Credits</th>
-                    <th>Prerequisite</th>
+                    <th class="text-center">Credit</th>
+                    <th>Status</th>
+                    <th>Pre-Req</th>
                     <th class="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="course in sem.courses" :key="course.id">
+                  <tr v-for="(course, index) in sem.courses" :key="course.id">
+                    <td class="font-medium">{{ index + 1 }}</td>
                     <td class="font-mono text-sm">{{ course.course_code }}</td>
                     <td>{{ course.course_name }}</td>
                     <td class="text-center">{{ course.credit_hour }}</td>
                     <td>
+                      <span class="badge badge-sm" :class="{
+                        'badge-primary': course.course_type === 'Core Computing',
+                        'badge-secondary': course.course_type === 'Specialization',
+                        'badge-accent': course.course_type === 'Discipline Core',
+                        'badge-info': course.course_type === 'Compulsory',
+                        'badge-success': course.course_type === 'Free Elective',
+                        'badge-warning': course.course_type === 'Final Year Project',
+                        'badge-error': course.course_type === 'Industrial Training',
+                      }">
+                        {{ course.course_type }}
+                      </span>
+                    </td>
+                    <td>
                       <span
                         v-if="course.prerequisite_code"
-                        class="badge badge-sm badge-ghost"
+                        class="font-mono text-sm"
                       >
                         {{ course.prerequisite_code }}
                       </span>
-                      <span v-else class="text-base-content/40">—</span>
+                      <span v-else class="text-base-content/40">None</span>
                     </td>
                     <td class="text-right">
                       <div class="flex gap-1 justify-end">
@@ -662,6 +696,14 @@ function openCloneModal(sourceSession: any) {
                     </td>
                   </tr>
                 </tbody>
+                <!-- Total row -->
+                <tfoot>
+                  <tr class="bg-base-200 font-semibold">
+                    <td colspan="3" class="text-right">Total</td>
+                    <td class="text-center">{{ sem.totalCredits }}</td>
+                    <td colspan="3"></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -913,6 +955,22 @@ function openCloneModal(sourceSession: any) {
             </select>
           </div>
 
+          <!-- Course Type Selection -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Course Type (Status)</span>
+            </label>
+            <select
+              v-model="newCourse.course_type"
+              class="select select-bordered w-full"
+              required
+            >
+              <option v-for="type in courseTypeOptions" :key="type" :value="type">
+                {{ type }}
+              </option>
+            </select>
+          </div>
+
           <!-- Prerequisite Selection -->
           <div class="form-control">
             <label class="label">
@@ -922,7 +980,7 @@ function openCloneModal(sourceSession: any) {
               v-model="newCourse.prerequisite_course_id"
               class="select select-bordered w-full"
             >
-              <option value="">No prerequisite</option>
+              <option value="">None</option>
               <option
                 v-for="course in getPrerequisiteOptions(newCourse.semester)"
                 :key="course.course_id"
@@ -931,11 +989,6 @@ function openCloneModal(sourceSession: any) {
                 {{ course.course_code }} - {{ course.course_name }}
               </option>
             </select>
-            <label class="label">
-              <span class="label-text-alt text-base-content/60">
-                Prerequisite must be from an earlier semester
-              </span>
-            </label>
           </div>
 
           <!-- Actions -->
@@ -1084,6 +1137,22 @@ function openCloneModal(sourceSession: any) {
             </select>
           </div>
 
+          <!-- Course Type Selection -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Course Type (Status)</span>
+            </label>
+            <select
+              v-model="editForm.course_type"
+              class="select select-bordered w-full"
+              required
+            >
+              <option v-for="type in courseTypeOptions" :key="type" :value="type">
+                {{ type }}
+              </option>
+            </select>
+          </div>
+
           <!-- Prerequisite Selection -->
           <div class="form-control">
             <label class="label">
@@ -1093,7 +1162,7 @@ function openCloneModal(sourceSession: any) {
               v-model="editForm.prerequisite_course_id"
               class="select select-bordered w-full"
             >
-              <option value="">No prerequisite</option>
+              <option value="">None</option>
               <option
                 v-for="course in getEditPrerequisiteOptions(editForm.semester)"
                 :key="course.course_id"

@@ -83,8 +83,8 @@ export default defineEventHandler(async (event) => {
 
   // Clone all courses from source session
   await pool.query(
-    `INSERT INTO program_courses (session_id, course_id, semester, prerequisite_course_id)
-     SELECT ?, course_id, semester, prerequisite_course_id
+    `INSERT INTO program_courses (session_id, course_id, semester, course_type, prerequisite_course_id)
+     SELECT ?, course_id, semester, course_type, prerequisite_course_id
      FROM program_courses
      WHERE session_id = ?`,
     [newSessionId, sourceId],

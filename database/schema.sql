@@ -146,6 +146,7 @@ CREATE TABLE program_courses (
   session_id INT NOT NULL,
   course_id INT NOT NULL,
   semester INT NOT NULL,
+  course_type ENUM('Core Computing', 'Free Elective', 'Compulsory', 'Specialization', 'Discipline Core', 'Final Year Project', 'Industrial Training') NOT NULL DEFAULT 'Core Computing',
   prerequisite_course_id INT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
