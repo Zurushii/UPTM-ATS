@@ -128,16 +128,29 @@ CREATE TABLE students (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
-CREATE TABLE program_courses (
+CREATE TABLE program_sessions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   program_id INT NOT NULL,
+  session_name VARCHAR(100) NOT NULL,           -- e.g., "2024/2025 Session 1"
+  intake_year VARCHAR(4) NOT NULL,              -- Format: MMYY (e.g., 0824 = Aug 2024)
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_ps_program
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE program_courses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  session_id INT NOT NULL,
   course_id INT NOT NULL,
   semester INT NOT NULL,
   prerequisite_course_id INT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-  CONSTRAINT fk_pc_program
-    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pc_session
+    FOREIGN KEY (session_id) REFERENCES program_sessions(id) ON DELETE CASCADE,
 
   CONSTRAINT fk_pc_course
     FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
