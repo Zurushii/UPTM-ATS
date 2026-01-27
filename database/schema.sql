@@ -192,15 +192,39 @@ CREATE TABLE semester_credit_plans (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE academic_planning_intakes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  program_id INT NOT NULL,
+  intake_year VARCHAR(4) NOT NULL,           -- e.g., "0824"
+  intake_name VARCHAR(100) NOT NULL,         -- e.g., "August 2024 Intake"
+  session_id INT NOT NULL,                   -- Program structure to apply
+  intake_type VARCHAR(50) NOT NULL,          -- Semester rules intake type
+  status ENUM('draft', 'generated', 'finalized') DEFAULT 'draft',
+  total_students INT DEFAULT 0,
+  successful_plans INT DEFAULT 0,
+  failed_plans INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  
+  CONSTRAINT fk_api_program FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_api_session FOREIGN KEY (session_id) REFERENCES program_sessions(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_program_intake (program_id, intake_year)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 CREATE TABLE academic_plans (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
+  intake_id INT DEFAULT NULL,                -- Links to academic_planning_intakes batch
   start_semester INT NOT NULL,
   status ENUM('draft', 'approved', 'completed') DEFAULT 'draft',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_ap_student
-    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+  
+  CONSTRAINT fk_ap_intake
+    FOREIGN KEY (intake_id) REFERENCES academic_planning_intakes(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -219,3 +243,4 @@ CREATE TABLE academic_plan_details (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
