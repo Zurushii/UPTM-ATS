@@ -48,6 +48,8 @@ const isImporting = ref(false);
 const importFile = ref<File | null>(null);
 const importFileInput = ref<HTMLInputElement | null>(null);
 const importResult = ref<{ total_rules_parsed: number; rules_inserted: number; credit_plans_inserted: number } | null>(null);
+const isDeleteIntakeModalOpen = ref(false);
+const deletingIntakeType = ref<string | null>(null);
 
 // Form state for add/edit rule
 const formData = ref({
@@ -168,8 +170,10 @@ const closeModals = () => {
   isEditModalOpen.value = false;
   isDeleteModalOpen.value = false;
   isCreditPlanModalOpen.value = false;
+  isDeleteIntakeModalOpen.value = false;
   editingRule.value = null;
   deletingRule.value = null;
+  deletingIntakeType.value = null;
   creditPlanRule.value = null;
   creditPlans.value = [];
 };
@@ -271,6 +275,34 @@ const deleteRule = async () => {
     await refreshIntakes();
   } catch (error: any) {
     alert(error.data?.message || error.message || "Failed to delete rule");
+  } finally {
+    isSubmitting.value = false;
+  }
+};
+
+// Open delete intake modal
+const openDeleteIntakeModal = (intakeType: string) => {
+  deletingIntakeType.value = intakeType;
+  isDeleteIntakeModalOpen.value = true;
+};
+
+// Delete all rules for intake type
+const deleteIntakeRules = async () => {
+  if (isSubmitting.value || !deletingIntakeType.value) return;
+
+  isSubmitting.value = true;
+
+  try {
+    await $fetch(`/api/hop/semester-rules/delete-intake`, {
+      method: "DELETE",
+      query: { intake_type: deletingIntakeType.value },
+    });
+
+    closeModals();
+    await refreshRules();
+    await refreshIntakes();
+  } catch (error: any) {
+    alert(error.data?.message || error.message || "Failed to delete intake rules");
   } finally {
     isSubmitting.value = false;
   }
@@ -430,12 +462,21 @@ const closeImportModal = () => {
                   }})
                 </span>
               </h3>
-              <button
-                class="btn btn-xs btn-ghost"
-                @click="openAddModal(intakeType as string)"
-              >
-                + Add
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  class="btn btn-xs btn-ghost"
+                  @click="openAddModal(intakeType as string)"
+                >
+                  + Add
+                </button>
+                <button
+                  class="btn btn-xs btn-ghost text-error"
+                  @click="openDeleteIntakeModal(intakeType as string)"
+                  title="Delete semester entry rules"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
 
             <!-- Rules for this intake type -->
@@ -672,6 +713,37 @@ const closeImportModal = () => {
           >
             <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
             {{ isSubmitting ? "Deleting..." : "Delete" }}
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="closeModals">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- Delete Intake Confirmation Modal -->
+    <dialog class="modal" :class="{ 'modal-open': isDeleteIntakeModalOpen }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4 text-error">Delete Semester Entry</h3>
+        <p class="py-4">
+          Are you sure you want to delete <strong>all rules</strong> for this intake type?
+          This action cannot be undone.
+        </p>
+
+        <div v-if="deletingIntakeType" class="bg-base-200 rounded-lg p-4 text-sm">
+          <p><strong>Intake Type:</strong> {{ deletingIntakeType }}</p>
+          <p><strong>Rules to delete:</strong> {{ rulesByIntakeType[deletingIntakeType]?.length || 0 }}</p>
+        </div>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
+          <button
+            class="btn btn-error"
+            :disabled="isSubmitting"
+            @click="deleteIntakeRules"
+          >
+            <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
+            {{ isSubmitting ? "Deleting..." : "Delete Semester Entry" }}
           </button>
         </div>
       </div>

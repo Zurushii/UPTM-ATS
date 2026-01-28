@@ -2,18 +2,13 @@ import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
-interface StudentRecord {
-  student_id?: number;
-  matric_no?: string;
-  transferred_credits: number;
-}
-
 interface ProcessedStudent {
   student_id: number;
   matric_no: string;
   intake: string;
   total_transferred_credit: number;
   entry_semester: number;
+  transferred_course_ids: number[];
 }
 
 interface FailedRecord {
@@ -137,6 +132,18 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  // Get all courses for lookup (bulk fetch for performance) - include credit_hour
+  const [courseRows] = await pool.query(
+    `SELECT id, course_code, credit_hour FROM courses`,
+  );
+  
+  const courseCodeToId = new Map<string, number>();
+  const courseIdToCreditHour = new Map<number, number>();
+  for (const course of courseRows as any[]) {
+    courseCodeToId.set(course.course_code.toUpperCase(), course.id);
+    courseIdToCreditHour.set(course.id, course.credit_hour);
+  }
+
   // Parse Excel file
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(fileBuffer as unknown as ExcelJS.Buffer);
@@ -154,6 +161,7 @@ export default defineEventHandler(async (event) => {
   let studentIdCol = -1;
   let matricNoCol = -1;
   let creditCol = -1;
+  let transferredCoursesCol = -1;
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value || "")
@@ -178,6 +186,12 @@ export default defineEventHandler(async (event) => {
       value === "credit_hours"
     ) {
       creditCol = colNumber;
+    } else if (
+      value === "transferred_courses" ||
+      value === "transferredcourses" ||
+      value === "transfer_courses"
+    ) {
+      transferredCoursesCol = colNumber;
     }
   });
 
@@ -201,6 +215,7 @@ export default defineEventHandler(async (event) => {
   const processedStudents: ProcessedStudent[] = [];
   const failedRecords: FailedRecord[] = [];
   const processedMatricNos = new Set<string>();
+  const invalidCourses: { row: number; matric_no: string; courses: string[] }[] = [];
 
   for (let rowNum = 2; rowNum <= worksheet.rowCount; rowNum++) {
     const row = worksheet.getRow(rowNum);
@@ -213,6 +228,8 @@ export default defineEventHandler(async (event) => {
     const matricNoValue =
       matricNoCol !== -1 ? row.getCell(matricNoCol).value : null;
     const creditValue = row.getCell(creditCol).value;
+    const transferredCoursesValue =
+      transferredCoursesCol !== -1 ? row.getCell(transferredCoursesCol).value : null;
 
     // Parse credit value
     let credits = 0;
@@ -265,7 +282,6 @@ export default defineEventHandler(async (event) => {
     }
 
     // Determine entry semester based on rules
-    // Find the rule where student's credits >= credit_transfer (sorted DESC)
     let entrySemester = 1; // Default to semester 1
     for (const rule of rules) {
       if (credits >= rule.credit_transfer) {
@@ -274,8 +290,48 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // If no matching rule found and rules exist, use entry semester 1
-    // (student has fewer credits than any defined rule)
+    // Parse transferred courses and calculate their total credit hours
+    const transferredCourseIds: number[] = [];
+    const invalidCoursesList: string[] = [];
+    let transferredCoursesCredits = 0;
+
+    if (transferredCoursesValue) {
+      const courseCodes = String(transferredCoursesValue)
+        .split(",")
+        .map((code) => code.trim().toUpperCase())
+        .filter((code) => code.length > 0);
+
+      for (const code of courseCodes) {
+        const courseId = courseCodeToId.get(code);
+        if (courseId) {
+          transferredCourseIds.push(courseId);
+          // Add credit hour to total
+          const creditHour = courseIdToCreditHour.get(courseId) || 0;
+          transferredCoursesCredits += creditHour;
+        } else {
+          invalidCoursesList.push(code);
+        }
+      }
+
+      if (invalidCoursesList.length > 0) {
+        invalidCourses.push({
+          row: rowNum,
+          matric_no: student.matric_no,
+          courses: invalidCoursesList,
+        });
+      }
+
+      // Validate that total_credit_transferred matches the sum of transferred courses
+      if (transferredCourseIds.length > 0 && credits !== transferredCoursesCredits) {
+        failedRecords.push({
+          row: rowNum,
+          matric_no: student.matric_no,
+          student_id: student.id,
+          reason: `Credit mismatch: total_credit_transferred (${credits}) does not match sum of transferred courses (${transferredCoursesCredits})`,
+        });
+        continue;
+      }
+    }
 
     processedMatricNos.add(student.matric_no.toLowerCase());
     processedStudents.push({
@@ -284,6 +340,7 @@ export default defineEventHandler(async (event) => {
       intake: intake,
       total_transferred_credit: credits,
       entry_semester: entrySemester,
+      transferred_course_ids: transferredCourseIds,
     });
   }
 
@@ -292,6 +349,7 @@ export default defineEventHandler(async (event) => {
   try {
     await connection.beginTransaction();
 
+    // Batch update students
     for (const student of processedStudents) {
       await connection.query(
         `UPDATE students 
@@ -303,6 +361,24 @@ export default defineEventHandler(async (event) => {
           student.student_id,
         ],
       );
+
+      // Delete existing transferred courses for this student
+      await connection.query(
+        `DELETE FROM student_transferred_courses WHERE student_id = ?`,
+        [student.student_id],
+      );
+
+      // Insert new transferred courses (batch insert)
+      if (student.transferred_course_ids.length > 0) {
+        const values = student.transferred_course_ids.map((courseId) => [
+          student.student_id,
+          courseId,
+        ]);
+        await connection.query(
+          `INSERT INTO student_transferred_courses (student_id, course_id) VALUES ?`,
+          [values],
+        );
+      }
     }
 
     await connection.commit();
@@ -322,7 +398,15 @@ export default defineEventHandler(async (event) => {
       successful: processedStudents.length,
       failed: failedRecords.length,
     },
-    processed_students: processedStudents,
+    processed_students: processedStudents.map((s) => ({
+      student_id: s.student_id,
+      matric_no: s.matric_no,
+      intake: s.intake,
+      total_transferred_credit: s.total_transferred_credit,
+      entry_semester: s.entry_semester,
+      transferred_courses_count: s.transferred_course_ids.length,
+    })),
     failed_records: failedRecords,
+    invalid_courses: invalidCourses.length > 0 ? invalidCourses : undefined,
   };
 });

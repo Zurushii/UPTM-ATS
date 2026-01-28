@@ -1,23 +1,91 @@
+import { pool } from "~~/server/utils/db";
+import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
-interface StudentData {
-  student_id: number;
-  matric_no: string;
-  intake: string;
-  total_transferred_credit: number;
-  entry_semester: number;
-}
-
 export default defineEventHandler(async (event) => {
-  // Read the processed students from request body
-  const body = await readBody(event);
-  const students: StudentData[] = body.students;
+  // Authenticate user
+  const session = await auth.api.getSession({ headers: event.headers });
 
-  if (!students || !Array.isArray(students) || students.length === 0) {
+  if (!session?.user) {
+    throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
+  }
+
+  if (session.user.role !== "HOP") {
+    throw createError({ statusCode: 403, statusMessage: "HOP only" });
+  }
+
+  // Get the HoP's assigned program
+  const [hopRows] = await pool.query(
+    `SELECT hp.program_id, p.program_code 
+     FROM head_of_programs hp
+     JOIN programs p ON hp.program_id = p.id
+     WHERE hp.user_id = ?`,
+    [session.user.id],
+  );
+
+  const hopData = hopRows as any[];
+  if (hopData.length === 0) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "HOP profile not found",
+    });
+  }
+
+  const programId = hopData[0].program_id;
+  const programCode = hopData[0].program_code;
+
+  // Read intake year from request body
+  const body = await readBody(event);
+  const intakeYear: string = body?.intake_year;
+
+  if (!intakeYear) {
     throw createError({
       statusCode: 400,
-      statusMessage: "No student data provided for export",
+      statusMessage: "intake_year is required",
     });
+  }
+
+  // Get all students for this program and intake with their transferred courses
+  const [studentRows] = await pool.query(
+    `SELECT 
+      s.id,
+      s.matric_no,
+      s.intake_year,
+      s.total_credit_transferred,
+      s.starting_semester
+    FROM students s
+    WHERE s.program_id = ? AND s.intake_year = ?
+    ORDER BY s.matric_no`,
+    [programId, intakeYear],
+  );
+
+  const students = studentRows as any[];
+
+  if (students.length === 0) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "No students found for this intake",
+    });
+  }
+
+  // Get transferred courses for all students (bulk query)
+  const studentIds = students.map((s) => s.id);
+  const [transferredRows] = await pool.query(
+    `SELECT stc.student_id, c.course_code
+     FROM student_transferred_courses stc
+     JOIN courses c ON stc.course_id = c.id
+     WHERE stc.student_id IN (?)
+     ORDER BY stc.student_id, c.course_code`,
+    [studentIds],
+  );
+
+  // Group transferred courses by student
+  const transferredByStudent = new Map<number, string[]>();
+  for (const row of transferredRows as any[]) {
+    if (!transferredByStudent.has(row.student_id)) {
+      transferredByStudent.set(row.student_id, []);
+    }
+    transferredByStudent.get(row.student_id)!.push(row.course_code);
   }
 
   // Create Excel workbook
@@ -25,19 +93,16 @@ export default defineEventHandler(async (event) => {
   workbook.creator = "UTPM ATS";
   workbook.created = new Date();
 
-  const worksheet = workbook.addWorksheet("Academic Planning Input");
+  const worksheet = workbook.addWorksheet("Intake Assessment Export");
 
-  // Define columns
+  // Define columns - matching the import format exactly
   worksheet.columns = [
-    { header: "student_id", key: "student_id", width: 12 },
     { header: "matric_no", key: "matric_no", width: 18 },
-    { header: "intake", key: "intake", width: 10 },
-    {
-      header: "total_transferred_credit",
-      key: "total_transferred_credit",
-      width: 24,
-    },
-    { header: "entry_semester", key: "entry_semester", width: 16 },
+    { header: "intake_year", key: "intake_year", width: 12 },
+    { header: "total_credit_transferred", key: "total_credit_transferred", width: 24 },
+    { header: "starting_semester", key: "starting_semester", width: 18 },
+    { header: "program_code", key: "program_code", width: 15 },
+    { header: "transferred_courses", key: "transferred_courses", width: 40 },
   ];
 
   // Style header row
@@ -52,21 +117,17 @@ export default defineEventHandler(async (event) => {
 
   // Add data rows
   for (const student of students) {
+    const transferredCourses = transferredByStudent.get(student.id) || [];
+    
     worksheet.addRow({
-      student_id: student.student_id,
       matric_no: student.matric_no,
-      intake: student.intake,
-      total_transferred_credit: student.total_transferred_credit,
-      entry_semester: student.entry_semester,
+      intake_year: student.intake_year,
+      total_credit_transferred: student.total_credit_transferred || 0,
+      starting_semester: student.starting_semester || 1,
+      program_code: programCode,
+      transferred_courses: transferredCourses.join(","),
     });
   }
-
-  // Auto-fit columns (approximate)
-  worksheet.columns.forEach((column) => {
-    if (column.width && column.width < 12) {
-      column.width = 12;
-    }
-  });
 
   // Generate buffer
   const buffer = await workbook.xlsx.writeBuffer();
@@ -75,7 +136,7 @@ export default defineEventHandler(async (event) => {
   setResponseHeaders(event, {
     "Content-Type":
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "Content-Disposition": `attachment; filename="academic_planning_input_${students[0]?.intake || "export"}.xlsx"`,
+    "Content-Disposition": `attachment; filename="intake_assessment_${intakeYear}.xlsx"`,
   });
 
   return buffer;

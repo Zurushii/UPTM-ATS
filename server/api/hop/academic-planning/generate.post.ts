@@ -2,12 +2,6 @@ import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
-interface CreditPlan {
-  semester_number: number;
-  semester_type: "L" | "S";
-  target_credits: number;
-}
-
 interface ProgramCourse {
   id: number;
   course_id: number;
@@ -23,6 +17,13 @@ interface FailedStudent {
   student_id: number;
   matric_no: string;
   reason: string;
+}
+
+interface StudentFromExcel {
+  student_id: number;
+  matric_no: string;
+  starting_semester: number;
+  transferred_course_ids: Set<number>;
 }
 
 export default defineEventHandler(async (event) => {
@@ -116,6 +117,20 @@ export default defineEventHandler(async (event) => {
     [programId, intake.intake_year],
   );
 
+  // Check if intake assessment has been completed
+  // At least some students must have starting_semester set
+  const studentsWithAssessment = (studentRows as any[]).filter(
+    (s) => s.starting_semester !== null && s.starting_semester > 0
+  );
+
+  if (studentsWithAssessment.length === 0) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        "Intake assessment must be completed before generating academic plans. No students in this intake have been processed through intake assessment.",
+    });
+  }
+
   const studentsMap = new Map<string, any>();
   for (const student of studentRows as any[]) {
     studentsMap.set(student.matric_no.toLowerCase(), student);
@@ -132,31 +147,7 @@ export default defineEventHandler(async (event) => {
     studentsWithPlans.add(row.student_id);
   }
 
-  // Get semester entry rules with credit plans for this intake type
-  const [ruleRows] = await pool.query(
-    `SELECT id, credit_transfer, entry_semester 
-     FROM semester_entry_rules 
-     WHERE program_id = ? AND intake_type = ?`,
-    [programId, intake.intake_type],
-  );
-
-  // Get credit plans for each rule
-  const creditPlansByRule = new Map<number, CreditPlan[]>();
-  const creditPlansByEntrySem = new Map<number, CreditPlan[]>();
-
-  for (const rule of ruleRows as any[]) {
-    const [planRows] = await pool.query(
-      `SELECT semester_number, semester_type, target_credits 
-       FROM semester_credit_plans 
-       WHERE rule_id = ?
-       ORDER BY semester_number`,
-      [rule.id],
-    );
-    creditPlansByRule.set(rule.id, planRows as CreditPlan[]);
-    creditPlansByEntrySem.set(rule.entry_semester, planRows as CreditPlan[]);
-  }
-
-  // Get program structure (courses by semester) for the session
+  // Get ALL program courses for the session (entire program structure)
   const [courseRows] = await pool.query(
     `SELECT 
       pc.id,
@@ -174,16 +165,18 @@ export default defineEventHandler(async (event) => {
     [intake.session_id],
   );
 
-  // Group courses by semester
-  const coursesBySemester = new Map<number, ProgramCourse[]>();
-  for (const course of courseRows as any[]) {
-    if (!coursesBySemester.has(course.semester)) {
-      coursesBySemester.set(course.semester, []);
-    }
-    coursesBySemester.get(course.semester)!.push(course as ProgramCourse);
+  const allProgramCourses: ProgramCourse[] = courseRows as ProgramCourse[];
+
+  // Get all courses for code-to-ID lookup and credit hours
+  const [allCoursesRows] = await pool.query(`SELECT id, course_code, credit_hour FROM courses`);
+  const courseCodeToId = new Map<string, number>();
+  const courseIdToCreditHour = new Map<number, number>();
+  for (const course of allCoursesRows as any[]) {
+    courseCodeToId.set(course.course_code.toUpperCase(), course.id);
+    courseIdToCreditHour.set(course.id, course.credit_hour);
   }
 
-  // Parse Excel file to get list of matric numbers to process
+  // Parse Excel file to get list of students with their transferred courses
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(fileBuffer as unknown as ExcelJS.Buffer);
 
@@ -195,9 +188,10 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Find matric_no column
+  // Find column indices
   const headerRow = worksheet.getRow(1);
   let matricNoCol = -1;
+  let transferredCoursesCol = -1;
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value || "")
@@ -211,6 +205,12 @@ export default defineEventHandler(async (event) => {
       value === "matric_number"
     ) {
       matricNoCol = colNumber;
+    } else if (
+      value === "transferred_courses" ||
+      value === "transferredcourses" ||
+      value === "transfer_courses"
+    ) {
+      transferredCoursesCol = colNumber;
     }
   });
 
@@ -221,8 +221,8 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Collect students to process
-  const studentsToProcess: any[] = [];
+  // Collect students to process with their transferred courses
+  const studentsToProcess: StudentFromExcel[] = [];
   const failedStudents: FailedStudent[] = [];
   const processedMatricNos = new Set<string>();
 
@@ -257,7 +257,56 @@ export default defineEventHandler(async (event) => {
       continue;
     }
 
-    studentsToProcess.push(student);
+    // Parse transferred courses from Excel and validate credit sum
+    const transferredCourseIds = new Set<number>();
+    let transferredCoursesCredits = 0;
+    let validationFailed = false;
+    
+    if (transferredCoursesCol !== -1) {
+      const transferredCoursesValue = row.getCell(transferredCoursesCol).value;
+      if (transferredCoursesValue) {
+        const courseCodes = String(transferredCoursesValue)
+          .split(",")
+          .map((code) => code.trim().toUpperCase())
+          .filter((code) => code.length > 0);
+
+        for (const code of courseCodes) {
+          const courseId = courseCodeToId.get(code);
+          if (courseId) {
+            transferredCourseIds.add(courseId);
+            // Add credit hour to total
+            const creditHour = courseIdToCreditHour.get(courseId) || 0;
+            transferredCoursesCredits += creditHour;
+          }
+        }
+      }
+    }
+
+    // Validate that total_credit_transferred matches the sum of transferred courses
+    // Only validate if either value is non-zero
+    const dbCredits = student.total_credit_transferred || 0;
+    if (transferredCourseIds.size > 0 || dbCredits > 0) {
+      if (dbCredits !== transferredCoursesCredits) {
+        failedStudents.push({
+          student_id: student.id,
+          matric_no: student.matric_no,
+          reason: `Credit mismatch: total_credit_transferred (${dbCredits}) does not match sum of transferred courses (${transferredCoursesCredits})`,
+        });
+        validationFailed = true;
+      }
+    }
+
+    // Skip this student if validation failed
+    if (validationFailed) {
+      continue;
+    }
+
+    studentsToProcess.push({
+      student_id: student.id,
+      matric_no: student.matric_no,
+      starting_semester: student.starting_semester,
+      transferred_course_ids: transferredCourseIds,
+    });
   }
 
   // Generate academic plans
@@ -269,75 +318,60 @@ export default defineEventHandler(async (event) => {
 
     for (const student of studentsToProcess) {
       try {
-        const entrySemester = student.starting_semester;
-        
-        // Get credit plan for this entry semester
-        const creditPlan = creditPlansByEntrySem.get(entrySemester);
-        
-        if (!creditPlan || creditPlan.length === 0) {
-          failedStudents.push({
-            student_id: student.id,
-            matric_no: student.matric_no,
-            reason: `No credit plan found for entry semester ${entrySemester}`,
-          });
-          continue;
-        }
-
         // Create academic plan
         const [planResult] = await connection.query(
           `INSERT INTO academic_plans (student_id, intake_id, start_semester, status)
            VALUES (?, ?, ?, 'draft')`,
-          [student.id, intakeId, entrySemester],
+          [student.student_id, intakeId, student.starting_semester],
         );
 
         const planId = (planResult as any).insertId;
 
-        // Assign courses to semesters based on credit plan
-        // Start from entry semester and work through the credit plan
-        const coursesToAssign: Array<{ course_id: number; semester: number }> = [];
-        const assignedCourseGroups = new Set<string>();
+        // Prepare course assignments for the ENTIRE program structure
+        const courseAssignments: Array<{
+          course_id: number;
+          semester: number;
+          status: string;
+        }> = [];
 
-        for (let i = 0; i < creditPlan.length; i++) {
-          const semPlan = creditPlan[i];
-          const actualSemester = entrySemester + i;
-          
-          // Get courses for this semester from program structure
-          // Map from program structure semester to actual student semester
-          const structureSemester = i + 1; // Program structure starts from semester 1
-          const semesterCourses = coursesBySemester.get(structureSemester) || [];
-          
-          let creditsAssigned = 0;
-          
-          for (const course of semesterCourses) {
-            // Handle grouped courses (MPU, electives) - only take one from each group
-            if (course.course_group) {
-              if (assignedCourseGroups.has(course.course_group)) {
-                continue; // Skip, already assigned a course from this group
-              }
-              assignedCourseGroups.add(course.course_group);
-            }
+        // Track assigned course groups PER SEMESTER to handle grouped courses properly
+        // Key: "semester:group_name", e.g., "1:MPU Elective"
+        const assignedCourseGroupsPerSem = new Set<string>();
 
-            // Check credit limit for this semester
-            if (creditsAssigned + course.credit_hour <= semPlan.target_credits) {
-              coursesToAssign.push({
-                course_id: course.course_id,
-                semester: actualSemester,
-              });
-              creditsAssigned += course.credit_hour;
+        // Process ALL courses from program structure
+        for (const course of allProgramCourses) {
+          // Handle grouped courses - only take one from each group PER SEMESTER
+          if (course.course_group) {
+            const groupKey = `${course.semester}:${course.course_group}`;
+            if (assignedCourseGroupsPerSem.has(groupKey)) {
+              continue; // Skip, already assigned a course from this group for this semester
             }
+            assignedCourseGroupsPerSem.add(groupKey);
           }
+
+          // Determine status: Transferred if in transferred list, otherwise Planned
+          const status = student.transferred_course_ids.has(course.course_id)
+            ? "Transferred"
+            : "Planned";
+
+          courseAssignments.push({
+            course_id: course.course_id,
+            semester: course.semester, // Use original program structure semester
+            status: status,
+          });
         }
 
-        // Insert course assignments
-        if (coursesToAssign.length > 0) {
-          const values = coursesToAssign.map((c) => [
+        // Insert all course assignments
+        if (courseAssignments.length > 0) {
+          const values = courseAssignments.map((c) => [
             planId,
             c.course_id,
             c.semester,
+            c.status,
           ]);
 
           await connection.query(
-            `INSERT INTO academic_plan_details (academic_plan_id, course_id, semester)
+            `INSERT INTO academic_plan_details (academic_plan_id, course_id, semester, status)
              VALUES ?`,
             [values],
           );
@@ -346,7 +380,7 @@ export default defineEventHandler(async (event) => {
         successfulPlans++;
       } catch (err: any) {
         failedStudents.push({
-          student_id: student.id,
+          student_id: student.student_id,
           matric_no: student.matric_no,
           reason: err.message || "Unknown error during plan generation",
         });

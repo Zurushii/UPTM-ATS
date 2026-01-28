@@ -21,6 +21,7 @@ interface Course {
   course_code: string;
   course_name: string;
   credit_hour: number;
+  status: "Planned" | "Transferred";
 }
 
 interface Semester {
@@ -49,6 +50,9 @@ interface PlanData {
   summary: {
     total_semesters: number;
     total_credits: number;
+    transferred_credits: number;
+    planned_credits: number;
+    total_courses: number;
   };
 }
 
@@ -83,7 +87,7 @@ const formatSemester = (semesterNum: number) => {
   return `Semester ${semesterNum} / Year ${year}`;
 };
 
-// Get status badge class
+// Get status badge class for plan status
 const getStatusBadgeClass = (status: string) => {
   switch (status) {
     case "draft":
@@ -95,6 +99,23 @@ const getStatusBadgeClass = (status: string) => {
     default:
       return "badge-ghost";
   }
+};
+
+// Get status badge class for course status
+const getCourseStatusClass = (status: string) => {
+  switch (status) {
+    case "Transferred":
+      return "badge-success";
+    case "Planned":
+      return "badge-primary";
+    default:
+      return "badge-ghost";
+  }
+};
+
+// Check if semester contains transferred courses
+const hasTransferredCourses = (semester: Semester) => {
+  return semester.courses.some((c) => c.status === "Transferred");
 };
 
 // Go back
@@ -156,14 +177,16 @@ const goBack = () => {
               <div class="font-medium">Semester {{ planData.plan.start_semester }}</div>
             </div>
             <div>
-              <span class="text-base-content/60">Credits Transferred:</span>
-              <div class="font-medium">
-                {{ planData.student.total_credit_transferred ?? 0 }}
+              <span class="text-base-content/60">Transferred Credits:</span>
+              <div class="font-medium text-success">
+                {{ planData.summary.transferred_credits ?? 0 }}
               </div>
             </div>
             <div>
-              <span class="text-base-content/60">Total Plan Credits:</span>
-              <div class="font-medium">{{ planData.summary.total_credits }}</div>
+              <span class="text-base-content/60">Planned Credits:</span>
+              <div class="font-medium text-primary">
+                {{ planData.summary.planned_credits ?? 0 }}
+              </div>
             </div>
           </div>
         </div>
@@ -178,12 +201,27 @@ const goBack = () => {
         <div class="stat">
           <div class="stat-title">Total Credits</div>
           <div class="stat-value text-2xl">{{ planData.summary.total_credits }}</div>
+          <div class="stat-desc">
+            {{ planData.summary.transferred_credits }} transferred + {{ planData.summary.planned_credits }} planned
+          </div>
         </div>
         <div class="stat">
           <div class="stat-title">Total Courses</div>
           <div class="stat-value text-2xl">
-            {{ planData.semesters.reduce((sum, s) => sum + s.courses.length, 0) }}
+            {{ planData.summary.total_courses }}
           </div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-2">
+          <span class="badge badge-success badge-sm">Transferred</span>
+          <span class="text-base-content/60">Credited from previous study</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="badge badge-primary badge-sm">Planned</span>
+          <span class="text-base-content/60">To be taken</span>
         </div>
       </div>
 
@@ -194,16 +232,25 @@ const goBack = () => {
         <div
           v-for="semester in planData.semesters"
           :key="semester.semester"
-          class="card bg-base-100 border border-base-300 shadow-sm"
+          class="card bg-base-100 border shadow-sm"
+          :class="hasTransferredCourses(semester) ? 'border-success/30' : 'border-base-300'"
         >
           <div class="card-body">
             <div class="flex items-center justify-between mb-2">
               <h3 class="font-medium">
                 {{ formatSemester(semester.semester) }}
               </h3>
-              <span class="badge badge-outline">
-                {{ semester.total_credits }} credits
-              </span>
+              <div class="flex items-center gap-2">
+                <span
+                  v-if="hasTransferredCourses(semester)"
+                  class="badge badge-success badge-sm"
+                >
+                  Transferred
+                </span>
+                <span class="badge badge-outline">
+                  {{ semester.total_credits }} credits
+                </span>
+              </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -212,19 +259,32 @@ const goBack = () => {
                   <tr>
                     <th>Course Code</th>
                     <th>Course Name</th>
+                    <th class="text-center">Status</th>
                     <th class="text-right">Credits</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="course in semester.courses" :key="course.course_id">
+                  <tr
+                    v-for="course in semester.courses"
+                    :key="course.course_id"
+                    :class="course.status === 'Transferred' ? 'bg-success/5' : ''"
+                  >
                     <td class="font-mono text-sm">{{ course.course_code }}</td>
                     <td>{{ course.course_name }}</td>
+                    <td class="text-center">
+                      <span
+                        class="badge badge-sm"
+                        :class="getCourseStatusClass(course.status)"
+                      >
+                        {{ course.status }}
+                      </span>
+                    </td>
                     <td class="text-right">{{ course.credit_hour }}</td>
                   </tr>
                 </tbody>
                 <tfoot>
                   <tr class="font-medium">
-                    <td colspan="2" class="text-right">Total:</td>
+                    <td colspan="3" class="text-right">Total:</td>
                     <td class="text-right">{{ semester.total_credits }}</td>
                   </tr>
                 </tfoot>

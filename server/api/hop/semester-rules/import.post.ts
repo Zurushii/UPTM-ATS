@@ -95,6 +95,8 @@ export default defineEventHandler(async (event) => {
       headerRow = rowValues.map((cell: any) =>
         String(cell || "").trim().toUpperCase(),
       );
+      console.log("=== Header Row Found ===");
+      console.log("Headers:", headerRow);
       return;
     }
 
@@ -117,6 +119,9 @@ export default defineEventHandler(async (event) => {
     const creditTransfer = parseInt(rowValues[creditTransferIdx]);
     if (isNaN(creditTransfer)) return;
 
+    console.log(`=== Parsing row for credit transfer: ${creditTransfer} ===`);
+    console.log("Row values:", rowValues);
+
     // Parse semester credits from columns
     const creditPlans: ParsedRule["credit_plans"] = [];
 
@@ -124,24 +129,36 @@ export default defineEventHandler(async (event) => {
       const header = headerRow[colIdx];
       if (!header) continue;
 
-      // Match SEM columns like "SEM 2", "SEM 3 L", "SEM 6 (FYP1)", etc.
+      // Match SEM columns like "SEM 2", "SEM 3 L", "SEM 6 (FYP1) S", etc.
       const semMatch = header.match(/^SEM\s*(\d+)/i);
       if (semMatch) {
         const semNumber = parseInt(semMatch[1]);
         const credits = parseInt(rowValues[colIdx]);
 
         if (!isNaN(credits) && credits > 0) {
-          // Determine semester type (L or S) from header or default
+          // Determine semester type from header - look for explicit S or L markers
+          // Check if header ends with S or contains (S) or has " S " or "_S"
+          const headerUpper = header.toUpperCase();
           const isShort =
-            header.includes("(S)") ||
-            header.includes(" S") ||
-            header.includes("FYP1") ||
-            header.includes("LI") ||
-            [6, 8, 9].includes(semNumber);
+            headerUpper.endsWith(" S") ||
+            headerUpper.endsWith("_S") ||
+            headerUpper.includes("(S)") ||
+            /\bS\s*$/.test(headerUpper);
+
+          // If not explicitly short, check if explicitly long or default to long
+          // FYP and LI don't automatically mean short - check the header suffix
+          const isLong =
+            headerUpper.endsWith(" L") ||
+            headerUpper.endsWith("_L") ||
+            headerUpper.includes("(L)") ||
+            /\bL\s*$/.test(headerUpper);
+
+          // Default: if neither explicitly marked, default to Long
+          const semesterType: "L" | "S" = isShort ? "S" : "L";
 
           creditPlans.push({
             semester_number: semNumber,
-            semester_type: isShort ? "S" : "L",
+            semester_type: semesterType,
             target_credits: credits,
           });
         }

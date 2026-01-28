@@ -217,7 +217,7 @@ const exportToExcel = async () => {
     const response = await $fetch("/api/hop/intake-assessment/export", {
       method: "POST",
       body: {
-        students: processingResult.value.processed_students,
+        intake_year: selectedIntake.value,
       },
       responseType: "blob",
     });
@@ -229,7 +229,7 @@ const exportToExcel = async () => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `academic_planning_input_${selectedIntake.value}.xlsx`;
+    link.download = `intake_assessment_${selectedIntake.value}.xlsx`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

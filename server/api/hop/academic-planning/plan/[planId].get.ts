@@ -66,12 +66,13 @@ export default defineEventHandler(async (event) => {
 
   const plan = (planRows as any[])[0];
 
-  // Get the plan details (courses by semester)
+  // Get the plan details (courses by semester) with status
   const [detailRows] = await pool.query(
     `SELECT 
       apd.id,
       apd.semester,
       apd.course_id,
+      apd.status,
       c.course_code,
       c.course_name,
       c.credit_hour
@@ -85,6 +86,9 @@ export default defineEventHandler(async (event) => {
   // Group courses by semester
   const coursesBySemester: Record<number, any[]> = {};
   let totalCredits = 0;
+  let transferredCredits = 0;
+  let plannedCredits = 0;
+  let totalCourses = 0;
 
   for (const detail of detailRows as any[]) {
     if (!coursesBySemester[detail.semester]) {
@@ -95,8 +99,16 @@ export default defineEventHandler(async (event) => {
       course_code: detail.course_code,
       course_name: detail.course_name,
       credit_hour: detail.credit_hour,
+      status: detail.status || 'Planned',
     });
     totalCredits += detail.credit_hour;
+    totalCourses++;
+    
+    if (detail.status === 'Transferred') {
+      transferredCredits += detail.credit_hour;
+    } else {
+      plannedCredits += detail.credit_hour;
+    }
   }
 
   // Convert to array format for easier frontend consumption
@@ -128,6 +140,9 @@ export default defineEventHandler(async (event) => {
     summary: {
       total_semesters: semesters.length,
       total_credits: totalCredits,
+      transferred_credits: transferredCredits,
+      planned_credits: plannedCredits,
+      total_courses: totalCourses,
     },
   };
 });
