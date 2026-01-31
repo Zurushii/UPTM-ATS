@@ -9,8 +9,27 @@ if (!session.value) {
   await navigateTo("/sign-in");
 }
 
-const { data, pending } = await useFetch("/api/student/academic-plan");
-const { data: profile } = await useFetch("/api/student/profile");
+// Types
+interface Course {
+  course_id: number;
+  course_code: string;
+  course_name: string;
+  credit_hour: number;
+  semester: number;
+}
+
+interface AcademicPlan {
+  status: "draft" | "approved" | "completed";
+  start_semester: number;
+}
+
+interface PlanResponse {
+  plan: AcademicPlan | null;
+  courses: Course[];
+}
+
+const { data, pending } = await useFetch<PlanResponse>("/api/student/academic-plan");
+const { data: profile } = await useFetch<any>("/api/student/profile");
 
 // Track which semesters are expanded
 const expandedSemesters = ref<Set<number>>(new Set());
@@ -24,7 +43,7 @@ const coursesBySemester = computed(() => {
     if (!grouped[course.semester]) {
       grouped[course.semester] = [];
     }
-    grouped[course.semester].push(course);
+    grouped[course.semester]!.push(course);
   }
   return grouped;
 });
@@ -109,358 +128,175 @@ const statusInfo = computed(() => {
     <div class="skeleton h-64"></div>
   </div>
 
-  <div v-else>
+  <div v-else class="space-y-8">
     <!-- Header -->
-    <div
-      class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6"
-    >
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div>
         <div class="flex items-center gap-3">
-          <span class="text-3xl">📚</span>
+          <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+             </svg>
+          </div>
           <div>
             <h1 class="text-2xl font-bold">My Academic Plan</h1>
-            <p class="text-base-content/60 flex items-center gap-2">
-              <span class="badge badge-primary badge-sm">{{
-                profile?.program_code
-              }}</span>
-              {{ profile?.program_name }}
+            <p class="text-base-content/60 text-sm">
+                {{ profile?.program_code }} • {{ profile?.program_name }}
             </p>
           </div>
         </div>
       </div>
+      
+      <NuxtLink to="/dashboard/student" class="btn btn-ghost btn-sm gap-2">
+         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+         </svg>
+         Back to Dashboard
+      </NuxtLink>
     </div>
 
     <!-- No Plan Yet -->
-    <div v-if="!data?.plan" class="hero bg-base-200 rounded-box min-h-[400px]">
-      <div class="hero-content text-center">
-        <div class="max-w-md">
-          <div class="text-8xl mb-6">📋</div>
-          <h2 class="text-2xl font-bold">No Academic Plan Yet</h2>
-          <p class="py-6 text-base-content/70">
-            Your academic plan is being prepared by your Head of Program. Please
-            check back later or contact your HOP for updates.
-          </p>
-          <div class="flex justify-center gap-2">
-            <NuxtLink to="/dashboard/student" class="btn btn-primary">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-5 h-5"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                />
-              </svg>
-              Back to Dashboard
-            </NuxtLink>
+    <div v-if="!data?.plan" class="card bg-base-100 border border-base-200 shadow-sm text-center py-12">
+      <div class="card-body items-center max-w-md mx-auto">
+          <div class="w-20 h-20 bg-base-200 rounded-full flex items-center justify-center mb-6">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-10 h-10 text-base-content/40">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+             </svg>
           </div>
-        </div>
+          <h2 class="text-xl font-bold">Plan Pending</h2>
+          <p class="text-base-content/60 mt-2">
+            Your academic plan is currently being prepared by the Head of Program.
+          </p>
       </div>
     </div>
 
     <!-- Has Plan -->
     <template v-else>
       <!-- Stats Overview -->
-      <div
-        class="stats stats-vertical lg:stats-horizontal shadow w-full bg-base-100 mb-6"
-      >
-        <div class="stat">
-          <div class="stat-figure">
-            <div :class="['badge badge-lg gap-1', statusInfo.color]">
-              {{ statusInfo.icon }} {{ statusInfo.text }}
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- Status -->
+        <div class="card bg-base-100 shadow-sm border border-base-200">
+            <div class="card-body p-4 flex flex-row items-center gap-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold"
+                     :class="statusInfo.color.replace('badge-', 'bg-').replace('success', 'success/10 text-success').replace('warning', 'warning/10 text-warning').replace('info', 'info/10 text-info')">
+                    {{ statusInfo.icon }}
+                </div>
+                <div>
+                   <div class="text-xs uppercase tracking-wide text-base-content/60">Plan Status</div>
+                   <div class="font-bold text-lg capitalize">{{ data.plan.status }}</div>
+                </div>
             </div>
-          </div>
-          <div class="stat-title">Plan Status</div>
-          <div class="stat-value text-lg">{{ data.plan.status }}</div>
-          <div class="stat-desc">Academic plan review</div>
         </div>
 
-        <div class="stat">
-          <div class="stat-figure text-primary">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              class="inline-block h-8 w-8 stroke-current"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              ></path>
-            </svg>
-          </div>
-          <div class="stat-title">Starting Semester</div>
-          <div class="stat-value text-primary">
-            {{ data.plan.start_semester }}
-          </div>
-          <div class="stat-desc">Entry point</div>
-        </div>
-
-        <div class="stat">
-          <div class="stat-figure text-secondary">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              class="inline-block h-8 w-8 stroke-current"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              ></path>
-            </svg>
-          </div>
-          <div class="stat-title">Total Semesters</div>
-          <div class="stat-value text-secondary">{{ semesters.length }}</div>
-          <div class="stat-desc">In your plan</div>
-        </div>
-
-        <div class="stat">
-          <div class="stat-figure text-accent">
-            <div
-              class="radial-progress text-accent"
-              :style="`--value:${creditProgress}; --size:3.5rem; --thickness:4px;`"
-              role="progressbar"
-            >
-              {{ creditProgress }}%
+        <!-- Start Sem -->
+        <div class="card bg-base-100 shadow-sm border border-base-200">
+            <div class="card-body p-4 flex flex-row items-center gap-4">
+                 <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                       <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                    </svg>
+                 </div>
+                 <div>
+                   <div class="text-xs uppercase tracking-wide text-base-content/60">Starting</div>
+                   <div class="font-bold text-lg">Semester {{ data.plan.start_semester }}</div>
+                </div>
             </div>
-          </div>
-          <div class="stat-title">Total Credits</div>
-          <div class="stat-value text-accent">{{ totalCredits }}</div>
-          <div class="stat-desc">
-            of {{ profile?.total_credit_required }} required
-          </div>
         </div>
-      </div>
 
-      <!-- Progress Bar -->
-      <div class="card bg-base-100 shadow mb-6">
-        <div class="card-body py-4">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-medium">Credit Progress</span>
-            <span class="text-sm text-base-content/60"
-              >{{ totalCredits }} /
-              {{ profile?.total_credit_required }} credits</span
-            >
-          </div>
-          <progress
-            class="progress progress-accent w-full h-3"
-            :value="totalCredits"
-            :max="profile?.total_credit_required"
-          ></progress>
+        <!-- Progress -->
+        <div class="card bg-base-100 shadow-sm border border-base-200 md:col-span-2">
+            <div class="card-body p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs uppercase tracking-wide text-base-content/60">Total Progress</span>
+                    <span class="font-bold text-primary">{{ creditProgress }}%</span>
+                </div>
+                <progress class="progress progress-primary w-full h-3 bg-base-200" :value="totalCredits" :max="profile?.total_credit_required"></progress>
+                <div class="flex justify-between mt-1 text-xs text-base-content/50">
+                    <span>{{ totalCredits }} credits planned/earned</span>
+                    <span>Target: {{ profile?.total_credit_required }}</span>
+                </div>
+            </div>
         </div>
       </div>
 
       <!-- Semester Controls -->
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-lg font-semibold">Course Schedule</h2>
-        <div class="join">
-          <button class="btn btn-sm btn-ghost join-item" @click="expandAll">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-4 h-4"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="m4.5 5.25 7.5 7.5 7.5-7.5m-15 6 7.5 7.5 7.5-7.5"
-              />
+      <div class="flex justify-between items-center mt-4">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 opacity-60">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0h18M5 21h14a2 2 0 0 0 2-2v-3.28m-16 5.28M5 21a2 2 0 0 1-2-2v-3.28m0 0h.008v.008H3V12" />
             </svg>
-            Expand All
+            Course Schedule
+        </h2>
+        <div class="join shadow-sm border border-base-200 rounded-lg">
+          <button class="btn btn-sm btn-ghost join-item" @click="expandAll">
+             Expand All
           </button>
           <button class="btn btn-sm btn-ghost join-item" @click="collapseAll">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-4 h-4"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="m4.5 18.75 7.5-7.5 7.5 7.5m-15-6 7.5-7.5 7.5 7.5"
-              />
-            </svg>
-            Collapse All
+             Collapse All
           </button>
         </div>
       </div>
 
-      <!-- Timeline Semesters -->
-      <ul
-        class="timeline timeline-snap-icon max-md:timeline-compact timeline-vertical"
-      >
-        <li v-for="(semester, index) in semesters" :key="semester">
-          <div class="timeline-middle">
-            <div
-              :class="[
-                'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
-                semester <= data.plan.start_semester
-                  ? 'bg-primary text-primary-content'
-                  : 'bg-base-300',
-              ]"
-            >
-              {{ semester }}
-            </div>
-          </div>
+      <!-- Accordion Semesters -->
+      <div class="space-y-4">
+        <div v-for="semester in semesters" :key="semester" class="card bg-base-100 border border-base-200 shadow-sm transition-all duration-200" :class="expandedSemesters.has(semester) ? 'ring-2 ring-base-200 shadow-md' : 'hover:border-base-300'">
+           <!-- Header Trigger -->
+           <div class="p-4 flex items-center justify-between cursor-pointer select-none" @click="toggleSemester(semester)">
+               <div class="flex items-center gap-3">
+                   <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors"
+                        :class="semester <= data.plan.start_semester ? 'bg-primary/10 text-primary' : 'bg-base-200 text-base-content/60'">
+                       {{ semester }}
+                   </div>
+                   <div>
+                       <div class="font-bold">Semester {{ semester }}</div>
+                       <div class="text-xs text-base-content/60">{{ coursesBySemester[semester]?.length }} courses</div>
+                   </div>
+               </div>
 
-          <div
-            :class="[
-              'timeline-box shadow-lg mb-6 w-full',
-              index % 2 === 0 ? 'timeline-start md:text-end' : 'timeline-end',
-            ]"
-          >
-            <!-- Semester Header -->
-            <button
-              class="w-full text-left md:text-inherit"
-              @click="toggleSemester(semester)"
-            >
-              <div class="flex items-center justify-between gap-4 flex-wrap">
-                <div class="flex items-center gap-2">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke-width="2"
-                    stroke="currentColor"
-                    :class="[
-                      'w-4 h-4 transition-transform',
-                      expandedSemesters.has(semester) ? 'rotate-90' : '',
-                    ]"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="m8.25 4.5 7.5 7.5-7.5 7.5"
-                    />
-                  </svg>
-                  <span class="font-bold text-lg">Semester {{ semester }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="badge badge-ghost"
-                    >{{ coursesBySemester[semester]?.length }} courses</span
-                  >
-                  <span class="badge badge-primary"
-                    >{{ semesterCredits(semester) }} cr</span
-                  >
-                </div>
-              </div>
-            </button>
+               <div class="flex items-center gap-4">
+                   <div class="badge badge-lg variant-soft font-mono">{{ semesterCredits(semester) }} Credits</div>
+                   <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      class="w-5 h-5 transition-transform duration-200 text-base-content/40"
+                      :class="expandedSemesters.has(semester) ? 'rotate-180' : ''"
+                   >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                   </svg>
+               </div>
+           </div>
 
-            <!-- Courses Table (Collapsible) -->
-            <div v-show="expandedSemesters.has(semester)" class="mt-4">
-              <div class="overflow-x-auto">
-                <table class="table table-sm">
-                  <thead>
-                    <tr class="bg-base-200">
-                      <th class="rounded-tl-lg">Code</th>
-                      <th>Course Name</th>
-                      <th class="text-center rounded-tr-lg">Credits</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="(course, cIndex) in coursesBySemester[semester]"
-                      :key="course.course_id"
-                      class="hover"
-                    >
-                      <td>
-                        <span class="font-mono text-sm badge badge-outline">{{
-                          course.course_code
-                        }}</span>
-                      </td>
-                      <td>{{ course.course_name }}</td>
-                      <td class="text-center">
-                        <span class="badge badge-sm">{{
-                          course.credit_hour
-                        }}</span>
-                      </td>
-                    </tr>
-                  </tbody>
-                  <tfoot>
-                    <tr class="bg-base-200">
-                      <td colspan="2" class="font-semibold rounded-bl-lg">
-                        Semester Total
-                      </td>
-                      <td class="text-center font-bold rounded-br-lg">
-                        {{ semesterCredits(semester) }}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <hr v-if="index < semesters.length - 1" />
-        </li>
-      </ul>
-
-      <!-- Summary Card -->
-      <div
-        class="card bg-gradient-to-r from-primary/10 to-secondary/10 shadow-xl mt-6"
-      >
-        <div class="card-body">
-          <h3 class="card-title">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-6 h-6"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-              />
-            </svg>
-            Plan Summary
-          </h3>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-            <div class="text-center p-3 bg-base-100 rounded-box">
-              <div class="text-2xl font-bold text-primary">
-                {{ semesters.length }}
-              </div>
-              <div class="text-xs text-base-content/60">Semesters</div>
-            </div>
-            <div class="text-center p-3 bg-base-100 rounded-box">
-              <div class="text-2xl font-bold text-secondary">
-                {{ data.courses?.length || 0 }}
-              </div>
-              <div class="text-xs text-base-content/60">Courses</div>
-            </div>
-            <div class="text-center p-3 bg-base-100 rounded-box">
-              <div class="text-2xl font-bold text-accent">
-                {{ totalCredits }}
-              </div>
-              <div class="text-xs text-base-content/60">Total Credits</div>
-            </div>
-            <div class="text-center p-3 bg-base-100 rounded-box">
-              <div class="text-2xl font-bold">
-                {{ profile?.total_credit_required - totalCredits }}
-              </div>
-              <div class="text-xs text-base-content/60">Remaining</div>
-            </div>
-          </div>
+           <!-- Collapsible Content -->
+           <div v-if="expandedSemesters.has(semester)" class="border-t border-base-100">
+               <div class="overflow-x-auto">
+                 <table class="table table-sm">
+                   <thead class="bg-base-100/50">
+                     <tr>
+                       <th class="w-32 pl-6">Code</th>
+                       <th>Course Name</th>
+                       <th class="text-center w-24">Credits</th>
+                       <th class="text-right pr-6 w-32">Type</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     <tr v-for="course in coursesBySemester[semester]" :key="course.course_id" class="hover:bg-base-100/50 transition-colors">
+                       <td class="pl-6">
+                         <span class="font-mono text-sm font-semibold">{{ course.course_code }}</span>
+                       </td>
+                       <td>{{ course.course_name }}</td>
+                       <td class="text-center font-mono">{{ course.credit_hour }}</td>
+                       <td class="text-right pr-6">
+                           <span class="badge badge-sm badge-ghost text-xs">Core</span>
+                       </td>
+                     </tr>
+                   </tbody>
+                 </table>
+               </div>
+           </div>
         </div>
       </div>
+
     </template>
   </div>
 </template>

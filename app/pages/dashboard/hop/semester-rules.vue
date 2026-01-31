@@ -50,6 +50,15 @@ const importFileInput = ref<HTMLInputElement | null>(null);
 const importResult = ref<{ total_rules_parsed: number; rules_inserted: number; credit_plans_inserted: number } | null>(null);
 const isDeleteIntakeModalOpen = ref(false);
 const deletingIntakeType = ref<string | null>(null);
+const collapsedIntakes = ref<Set<string>>(new Set());
+
+const toggleIntake = (intake: string) => {
+  if (collapsedIntakes.value.has(intake)) {
+    collapsedIntakes.value.delete(intake);
+  } else {
+    collapsedIntakes.value.add(intake);
+  }
+};
 
 // Form state for add/edit rule
 const formData = ref({
@@ -393,236 +402,274 @@ const closeImportModal = () => {
 </script>
 
 <template>
-  <div class="p-6 max-w-5xl space-y-6">
+  <div class="p-6 w-full space-y-8">
     <!-- Page Header -->
-    <div class="space-y-1">
-      <h1 class="text-2xl font-semibold">Semester Entry Rules</h1>
-      <p class="text-sm text-base-content/60">
-        Define rules to determine a student's starting semester and credit plan
-        based on transferred credit hours.
-      </p>
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="space-y-1">
+        <h1 class="text-3xl font-bold">Semester Entry Rules</h1>
+        <p class="text-base text-base-content/70">
+          Define how transferred credits determine a student's starting semester.
+        </p>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <button class="btn btn-primary shadow-lg shadow-primary/20 gap-2" @click="openAddModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Add New Rule
+        </button>
+      </div>
     </div>
 
-    <!-- Rules Table Card -->
-    <div class="card bg-base-100 border border-base-300 shadow-sm">
-      <div class="card-body space-y-4">
-        <!-- Table Header -->
+    <!-- Main Content Card -->
+    <div class="card bg-base-100 shadow-xl border border-base-200 overflow-hidden">
+      <!-- Filter Bar -->
+      <div class="p-4 border-b border-base-200 bg-base-100/80 backdrop-blur sticky top-0 z-20">
         <div class="flex flex-wrap items-center justify-between gap-4">
-          <h2 class="font-medium">Credit Transfer → Entry Semester Mapping</h2>
-
-          <div class="flex items-center gap-3">
-            <!-- Intake Type Filter -->
-            <select
-              v-model="selectedIntakeType"
-              class="select select-sm select-bordered"
-            >
-              <option value="">All Intake Types</option>
-              <option
-                v-for="intakeType in allIntakeTypes"
-                :key="intakeType"
-                :value="intakeType"
-              >
-                {{ intakeType }}
-              </option>
-            </select>
-
-            <!-- Import Button -->
-            <button class="btn btn-sm btn-outline" @click="openImportModal()">
-              📥 Import Rules
-            </button>
-
-            <!-- Add Rule Button -->
-            <button class="btn btn-sm btn-primary" @click="openAddModal()">
-              + Add Rule
-            </button>
-          </div>
+           <div class="flex items-center gap-2 text-sm font-medium text-base-content/70">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+              </svg>
+              Filters:
+           </div>
+           
+           <div class="flex items-center gap-3 flex-1">
+             <select
+               v-model="selectedIntakeType"
+               class="select select-sm select-bordered w-full max-w-xs"
+             >
+               <option value="">All Intake Types</option>
+               <option
+                 v-for="intakeType in allIntakeTypes"
+                 :key="intakeType"
+                 :value="intakeType"
+               >
+                 {{ intakeType }}
+               </option>
+             </select>
+           </div>
+           
+           <button class="btn btn-sm btn-ghost gap-2" @click="openImportModal()">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+              </svg>
+              Import Rules
+           </button>
         </div>
+      </div>
 
+      <div class="card-body p-0">
         <!-- Loading State -->
-        <div v-if="rulesPending" class="flex justify-center py-8">
-          <span class="loading loading-spinner loading-md"></span>
+        <div v-if="rulesPending" class="flex flex-col items-center justify-center py-20">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <p class="text-base-content/60 mt-4 animate-pulse">Loading rules configuration...</p>
         </div>
 
-        <!-- Rules Table -->
+        <!-- Rules List -->
         <template v-else-if="rules && rules.length > 0">
-          <div
-            v-for="(intakeRules, intakeType) in rulesByIntakeType"
-            :key="intakeType"
-            class="space-y-2"
-          >
-            <!-- Intake Type Header -->
+          <div class="flex flex-col">
             <div
-              class="flex items-center justify-between bg-base-200 px-4 py-2 rounded-lg"
+              v-for="(intakeRules, intakeType) in rulesByIntakeType"
+              :key="intakeType"
+              class="border-b border-base-200 last:border-0 group"
+              :class="collapsedIntakes.has(intakeType as string) ? 'bg-base-200/30' : 'bg-base-100'"
             >
-              <h3 class="font-medium text-sm">
-                {{ intakeType }}
-                <span class="text-base-content/50 font-normal ml-2">
-                  ({{ intakeRules.length }} rule{{
-                    intakeRules.length > 1 ? "s" : ""
-                  }})
-                </span>
-              </h3>
-              <div class="flex items-center gap-2">
-                <button
-                  class="btn btn-xs btn-ghost"
-                  @click="openAddModal(intakeType as string)"
-                >
-                  + Add
-                </button>
-                <button
-                  class="btn btn-xs btn-ghost text-error"
-                  @click="openDeleteIntakeModal(intakeType as string)"
-                  title="Delete semester entry rules"
-                >
-                  🗑️ Delete
-                </button>
-              </div>
-            </div>
+              <!-- Intake Header -->
+              <div
+                class="p-4 flex items-center justify-between cursor-pointer hover:bg-base-200/50 transition-colors select-none"
+                @click="toggleIntake(intakeType as string)"
+              >
+                <div class="flex items-center gap-4">
+                  <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-content transition-colors">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 transition-transform duration-300" :class="collapsedIntakes.has(intakeType as string) ? '-rotate-90 text-base-content/40' : 'rotate-0'">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                     </svg>
+                  </div>
+                  <div>
+                    <h3 class="font-bold text-lg">{{ intakeType }}</h3>
+                    <div class="text-xs text-base-content/60">{{ intakeRules.length }} rules configured</div>
+                  </div>
+                </div>
 
-            <!-- Rules for this intake type -->
-            <div class="overflow-x-auto">
-              <table class="table table-sm w-full">
-                <thead>
-                  <tr>
-                    <th class="w-1/4">Credit Transfer</th>
-                    <th class="w-1/4">Entry Semester</th>
-                    <th class="w-1/4">Credit Plan</th>
-                    <th class="w-1/4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="rule in intakeRules" :key="rule.id">
-                    <td>
-                      <span class="font-medium">{{ rule.credit_transfer }}</span>
-                      <span class="text-base-content/50 text-xs ml-1">credits</span>
-                    </td>
-                    <td>
-                      <span class="badge badge-info badge-sm">
-                        Semester {{ rule.entry_semester }}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        class="btn btn-xs btn-outline"
-                        @click="openCreditPlanModal(rule)"
-                      >
-                        📅 Configure
-                      </button>
-                    </td>
-                    <td class="text-right">
-                      <button
-                        class="btn btn-xs btn-ghost"
-                        @click="openEditModal(rule)"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        class="btn btn-xs btn-ghost text-error"
-                        @click="openDeleteModal(rule)"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                <div class="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                   <button
+                    class="btn btn-sm btn-ghost gap-2"
+                    @click.stop="openAddModal(intakeType as string)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add Rule
+                  </button>
+                  <div class="tooltip" data-tip="Delete Intake Type">
+                    <button
+                      class="btn btn-sm btn-ghost btn-square text-error"
+                      @click.stop="openDeleteIntakeModal(intakeType as string)"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Rules Table -->
+              <div v-show="!collapsedIntakes.has(intakeType as string)" class="overflow-x-auto">
+                 <table class="table table-zebra w-full">
+                    <thead class="bg-base-200/40 text-xs uppercase font-bold text-base-content/50">
+                       <tr>
+                          <th class="w-1/3 pl-16">Min. Credit Transfer</th>
+                          <th class="w-1/3">Target Entry Semester</th>
+                          <th class="w-1/3 text-right pr-6">Management</th>
+                       </tr>
+                    </thead>
+                    <tbody>
+                       <tr v-for="rule in intakeRules" :key="rule.id" class="hover:bg-base-100 transition-colors">
+                          <td class="pl-16">
+                             <div class="flex items-center gap-2">
+                                <span class="font-mono text-xl font-bold">{{ rule.credit_transfer }}</span>
+                                <span class="text-xs font-semibold uppercase tracking-wider text-base-content/50">Credits</span>
+                             </div>
+                          </td>
+                          <td>
+                             <span class="badge badge-lg" :class="rule.entry_semester === 1 ? 'badge-primary' : 'badge-outline'">
+                                Semester {{ rule.entry_semester }}
+                             </span>
+                          </td>
+                          <td class="pr-6">
+                            <div class="flex items-center justify-end gap-2">
+                               <button 
+                                 class="btn btn-sm btn-ghost gap-2 font-normal"
+                                 @click="openCreditPlanModal(rule)"
+                               >
+                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-base-content/70">
+                                   <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0h18M5 21h14a2 2 0 0 0 2-2v-3.28m-16 5.28M5 21a2 2 0 0 1-2-2v-3.28m0 0h.008v.008H3V12" />
+                                 </svg>
+                                 Plan
+                               </button>
+                               <div class="divider divider-horizontal mx-0 h-4"></div>
+                               <button class="btn btn-square btn-sm btn-ghost" @click="openEditModal(rule)">
+                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                                   <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                                 </svg>
+                               </button>
+                               <button class="btn btn-square btn-sm btn-ghost text-error" @click="openDeleteModal(rule)">
+                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                                   <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                 </svg>
+                               </button>
+                            </div>
+                          </td>
+                       </tr>
+                    </tbody>
+                 </table>
+              </div>
             </div>
           </div>
         </template>
 
         <!-- Empty State -->
-        <div v-else class="text-center py-12 text-base-content/60">
-          <div class="text-4xl mb-4">📐</div>
-          <h3 class="font-medium mb-2">No semester entry rules defined</h3>
-          <p class="text-sm mb-4">
-            Add rules to define how transferred credits map to starting
-            semesters for each intake type.
+        <div v-else class="flex flex-col items-center justify-center py-20 text-center">
+          <div class="w-24 h-24 bg-base-200 rounded-full flex items-center justify-center mb-6">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" class="w-12 h-12 text-base-content/40">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+             </svg>
+          </div>
+          <h3 class="text-xl font-bold">No Rules Defined</h3>
+          <p class="text-base-content/60 mt-2 max-w-sm">
+             Start by adding a rule to map credit transfers to entry semesters.
           </p>
-          <button class="btn btn-primary btn-sm" @click="openAddModal()">
-            + Add First Rule
+          <button class="btn btn-primary mt-6" @click="openAddModal()">
+            Create First Rule
           </button>
         </div>
-
-        <!-- Info -->
-        <div class="bg-info/10 rounded-lg p-4 text-sm">
-          <h4 class="font-medium mb-2">How it works:</h4>
-          <p class="text-base-content/70">
-            During Intake Assessment, students with credits <strong>≥</strong> the defined
-            credit transfer value will be assigned to that entry semester. Configure the
-            credit plan to define target credits per semester.
-          </p>
+      </div>
+       <!-- Info Footer -->
+      <div class="bg-base-200/50 p-4 border-t border-base-200 text-sm flex gap-4">
+        <div class="flex-none pt-0.5">
+           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-info">
+             <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+           </svg>
+        </div>
+        <div class="text-base-content/70">
+           <strong>Logic:</strong> During Intake Assessment, if a student's total transferred credits are greater than or equal to a rule's <strong>Credit Transfer</strong> value, they will be assigned the corresponding <strong>Entry Semester</strong>. The system checks rules from highest credit value to lowest.
         </div>
       </div>
     </div>
 
+    <!-- Modals -->
     <!-- Add Rule Modal -->
-    <dialog class="modal" :class="{ 'modal-open': isAddModalOpen }">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Add Semester Entry Rule</h3>
-
-        <div class="space-y-4">
-          <!-- Intake Type -->
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Intake Type</span>
+    <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': isAddModalOpen }">
+      <div class="modal-box p-0 overflow-hidden">
+        <div class="p-6 bg-primary text-primary-content">
+           <h3 class="font-bold text-lg">Add New Rule</h3>
+           <p class="text-primary-content/70 text-sm">Create a new entry mapping for an intake type.</p>
+        </div>
+        
+        <div class="p-6 space-y-6">
+          <div class="form-control hover:bg-transparent">
+            <label class="label pl-0">
+              <span class="label-text font-semibold">Intake Type</span>
             </label>
             <input
               v-model="formData.intake_type"
               type="text"
-              placeholder="e.g., May Intake, Aug Intake, Dec Intake"
-              maxlength="20"
-              class="input input-bordered w-full"
+              placeholder="e.g. May Intake"
               list="intake-suggestions"
+              class="input input-bordered w-full focus:input-primary"
             />
-            <datalist id="intake-suggestions">
+             <datalist id="intake-suggestions">
               <option value="May Intake" />
               <option value="Aug Intake" />
               <option value="Dec Intake" />
             </datalist>
           </div>
 
-          <!-- Credit Transfer -->
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Credit Transfer</span>
-            </label>
-            <input
-              v-model.number="formData.credit_transfer"
-              type="number"
-              min="0"
-              class="input input-bordered w-full"
-            />
-            <label class="label">
-              <span class="label-text-alt text-base-content/50">
-                Students with ≥ this credit will be assigned to the entry semester
-              </span>
-            </label>
-          </div>
+          <div class="grid grid-cols-2 gap-6">
+              <div class="form-control hover:bg-transparent">
+                <label class="label pl-0">
+                  <span class="label-text font-semibold">Min. Credits</span>
+                </label>
+                <div class="relative">
+                    <input
+                      v-model.number="formData.credit_transfer"
+                      type="number"
+                      min="0"
+                      class="input input-bordered w-full pl-12 font-mono"
+                    />
+                    <div class="absolute left-4 top-3 text-base-content/40 font-bold">≥</div>
+                </div>
+              </div>
 
-          <!-- Entry Semester -->
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Entry Semester</span>
-            </label>
-            <input
-              v-model.number="formData.entry_semester"
-              type="number"
-              min="1"
-              max="9"
-              class="input input-bordered w-full"
-            />
+               <div class="form-control hover:bg-transparent">
+                <label class="label pl-0">
+                  <span class="label-text font-semibold">Entry Level</span>
+                </label>
+                <div class="relative">
+                     <input
+                      v-model.number="formData.entry_semester"
+                      type="number"
+                      min="1"
+                      max="9"
+                      class="input input-bordered w-full pl-12 font-mono"
+                    />
+                    <div class="absolute left-4 top-3 text-base-content/40 text-xs font-bold uppercase tracking-wider mt-0.5">Sem</div>
+                </div>
+              </div>
           </div>
         </div>
 
-        <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
-          <button
-            class="btn btn-primary"
+        <div class="p-6 bg-base-200/50 flex justify-end gap-3">
+           <button class="btn btn-ghost" @click="closeModals">Cancel</button>
+           <button
+            class="btn btn-primary min-w-[100px]"
             :disabled="isSubmitting"
             @click="addRule"
           >
             <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
-            {{ isSubmitting ? "Adding..." : "Add Rule" }}
+            {{ isSubmitting ? "Saving..." : "Create Rule" }}
           </button>
         </div>
       </div>
@@ -630,54 +677,58 @@ const closeImportModal = () => {
         <button>close</button>
       </form>
     </dialog>
-
-    <!-- Edit Rule Modal -->
-    <dialog class="modal" :class="{ 'modal-open': isEditModalOpen }">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Edit Semester Entry Rule</h3>
-
-        <div class="space-y-4">
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Intake Type</span>
+    
+     <!-- Edit Rule Modal -->
+    <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': isEditModalOpen }">
+      <div class="modal-box p-0 overflow-hidden">
+        <div class="p-6 bg-base-200 border-b border-base-300">
+           <h3 class="font-bold text-lg">Edit Rule</h3>
+        </div>
+        
+        <div class="p-6 space-y-6">
+          <div class="form-control hover:bg-transparent">
+            <label class="label pl-0">
+              <span class="label-text font-semibold">Intake Type</span>
             </label>
             <input
               :value="formData.intake_type"
               type="text"
               disabled
-              class="input input-bordered w-full bg-base-200"
+              class="input input-bordered w-full bg-base-200/50 text-base-content/60"
             />
           </div>
 
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Credit Transfer</span>
-            </label>
-            <input
-              v-model.number="formData.credit_transfer"
-              type="number"
-              min="0"
-              class="input input-bordered w-full"
-            />
-          </div>
+          <div class="grid grid-cols-2 gap-6">
+              <div class="form-control hover:bg-transparent">
+                <label class="label pl-0">
+                  <span class="label-text font-semibold">Min. Credits</span>
+                </label>
+                <input
+                  v-model.number="formData.credit_transfer"
+                  type="number"
+                  min="0"
+                  class="input input-bordered w-full font-mono"
+                />
+              </div>
 
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Entry Semester</span>
-            </label>
-            <input
-              v-model.number="formData.entry_semester"
-              type="number"
-              min="1"
-              max="9"
-              class="input input-bordered w-full"
-            />
+               <div class="form-control hover:bg-transparent">
+                <label class="label pl-0">
+                  <span class="label-text font-semibold">Entry Level</span>
+                </label>
+                <input
+                  v-model.number="formData.entry_semester"
+                  type="number"
+                  min="1"
+                  max="9"
+                  class="input input-bordered w-full font-mono"
+                />
+              </div>
           </div>
         </div>
 
-        <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
-          <button
+        <div class="p-6 bg-base-200/50 flex justify-end gap-3">
+           <button class="btn btn-ghost" @click="closeModals">Cancel</button>
+           <button
             class="btn btn-primary"
             :disabled="isSubmitting"
             @click="updateRule"
@@ -687,167 +738,132 @@ const closeImportModal = () => {
           </button>
         </div>
       </div>
-      <form method="dialog" class="modal-backdrop" @click="closeModals">
+       <form method="dialog" class="modal-backdrop" @click="closeModals">
         <button>close</button>
       </form>
     </dialog>
 
     <!-- Delete Confirmation Modal -->
-    <dialog class="modal" :class="{ 'modal-open': isDeleteModalOpen }">
+     <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': isDeleteModalOpen }">
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Delete Rule</h3>
-        <p class="py-4">Are you sure you want to delete this rule?</p>
-
-        <div v-if="deletingRule" class="bg-base-200 rounded-lg p-4 text-sm">
-          <p><strong>Intake Type:</strong> {{ deletingRule.intake_type }}</p>
-          <p><strong>Credit Transfer:</strong> {{ deletingRule.credit_transfer }} credits</p>
-          <p><strong>Entry Semester:</strong> Semester {{ deletingRule.entry_semester }}</p>
+        <h3 class="font-bold text-lg text-error">Delete Rule?</h3>
+        <p class="py-4 text-base-content/70">
+           Are you sure you want to remove this rule? This will affect new student assessments.
+        </p>
+        
+        <div v-if="deletingRule" class="alert alert-warning shadow-sm">
+           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+           <span class="text-sm">
+             <strong>{{ deletingRule.intake_type }}</strong>: ≥ {{ deletingRule.credit_transfer }} credits → Sem {{ deletingRule.entry_semester }}
+           </span>
         </div>
 
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
-          <button
-            class="btn btn-error"
-            :disabled="isSubmitting"
-            @click="deleteRule"
-          >
-            <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
-            {{ isSubmitting ? "Deleting..." : "Delete" }}
-          </button>
+           <button class="btn btn-ghost" @click="closeModals">Cancel</button>
+           <button class="btn btn-error" :disabled="isSubmitting" @click="deleteRule">
+              {{ isSubmitting ? "Deleting..." : "Yes, Delete Rule" }}
+           </button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="closeModals">
         <button>close</button>
       </form>
     </dialog>
-
-    <!-- Delete Intake Confirmation Modal -->
-    <dialog class="modal" :class="{ 'modal-open': isDeleteIntakeModalOpen }">
+    
+     <!-- Delete Intake Confirmation Modal -->
+     <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': isDeleteIntakeModalOpen }">
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4 text-error">Delete Semester Entry</h3>
+        <h3 class="font-bold text-lg text-error">Delete Entire Intake?</h3>
         <p class="py-4">
-          Are you sure you want to delete <strong>all rules</strong> for this intake type?
-          This action cannot be undone.
+           You are about to delete <strong>{{ rulesByIntakeType[deletingIntakeType!]?.length }} rules</strong> for <span class="font-bold badge badge-neutral">{{ deletingIntakeType }}</span>.
+           <br><br>
+           This action cannot be undone.
         </p>
 
-        <div v-if="deletingIntakeType" class="bg-base-200 rounded-lg p-4 text-sm">
-          <p><strong>Intake Type:</strong> {{ deletingIntakeType }}</p>
-          <p><strong>Rules to delete:</strong> {{ rulesByIntakeType[deletingIntakeType]?.length || 0 }}</p>
-        </div>
-
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
-          <button
-            class="btn btn-error"
-            :disabled="isSubmitting"
-            @click="deleteIntakeRules"
-          >
-            <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
-            {{ isSubmitting ? "Deleting..." : "Delete Semester Entry" }}
-          </button>
+           <button class="btn btn-ghost" @click="closeModals">Cancel</button>
+           <button class="btn btn-error" :disabled="isSubmitting" @click="deleteIntakeRules">
+              {{ isSubmitting ? "Deleting..." : "Delete All Rules" }}
+           </button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="closeModals">
         <button>close</button>
       </form>
     </dialog>
-
+    
+    <!-- Credit Plan Modal -->
     <!-- Credit Plan Modal -->
     <dialog class="modal" :class="{ 'modal-open': isCreditPlanModalOpen }">
-      <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-4">
-          Semester Credit Plan
-          <span v-if="creditPlanRule" class="font-normal text-base-content/60 text-sm ml-2">
-            {{ creditPlanRule.intake_type }} - {{ creditPlanRule.credit_transfer }} credits
-          </span>
-        </h3>
-
-        <!-- Loading -->
-        <div v-if="isLoadingCreditPlans" class="flex justify-center py-8">
-          <span class="loading loading-spinner loading-md"></span>
-        </div>
-
-        <template v-else>
-          <p class="text-sm text-base-content/60 mb-4">
-            Define target credits for each semester. Students will see this plan after intake assessment.
-          </p>
-
-          <!-- Credit Plans Table -->
-          <div class="overflow-x-auto mb-4">
-            <table class="table table-sm w-full">
-              <thead>
-                <tr>
-                  <th>Semester</th>
-                  <th>Type</th>
-                  <th>Target Credits</th>
-                  <th class="text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(plan, index) in creditPlans" :key="index">
-                  <td>
-                    <input
-                      v-model.number="plan.semester_number"
-                      type="number"
-                      min="1"
-                      max="12"
-                      class="input input-bordered input-sm w-20"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      v-model="plan.semester_type"
-                      class="select select-bordered select-sm"
-                    >
-                      <option value="L">Long (L)</option>
-                      <option value="S">Short (S)</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      v-model.number="plan.target_credits"
-                      type="number"
-                      min="0"
-                      max="24"
-                      class="input input-bordered input-sm w-20"
-                    />
-                  </td>
-                  <td class="text-right">
-                    <button
-                      class="btn btn-xs btn-ghost text-error"
-                      @click="removeSemesterFromPlan(index)"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colspan="2" class="font-medium">Total Credits</td>
-                  <td class="font-bold">{{ totalPlanCredits }}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          <button class="btn btn-sm btn-outline" @click="addSemesterToPlan">
-            + Add Semester
-          </button>
-        </template>
-
-        <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeModals">Cancel</button>
-          <button
-            class="btn btn-primary"
-            :disabled="isSubmitting || isLoadingCreditPlans"
-            @click="saveCreditPlans"
-          >
-            <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
-            {{ isSubmitting ? "Saving..." : "Save Credit Plan" }}
-          </button>
-        </div>
+      <div class="modal-box w-11/12 max-w-4xl p-0 h-[80vh] flex flex-col">
+          <!-- Header -->
+         <div class="p-6 bg-base-100 border-b border-base-200 flex justify-between items-start">
+             <div>
+                <h3 class="font-bold text-xl">Credit Plan Configuration</h3>
+                <div v-if="creditPlanRule" class="text-sm mt-1 flex items-center gap-2 text-base-content/60">
+                   <span class="badge badge-sm badge-ghost">{{ creditPlanRule.intake_type }}</span>
+                   <span>Entry at <strong>Sem {{ creditPlanRule.entry_semester }}</strong> (≥ {{ creditPlanRule.credit_transfer }} credits)</span>
+                </div>
+             </div>
+             <div class="flex flex-col items-end">
+                <div class="text-3xl font-mono font-bold">{{ totalPlanCredits }}</div>
+                <div class="text-xs uppercase tracking-wide font-bold text-base-content/40">Total Plan Credits</div>
+             </div>
+         </div>
+         
+         <!-- Content -->
+         <div class="flex-1 overflow-y-auto p-6 bg-base-200/30">
+             <div v-if="isLoadingCreditPlans" class="flex justify-center py-20">
+                <span class="loading loading-spinner loading-lg"></span>
+             </div>
+             
+             <div v-else class="space-y-4">
+                 <div v-for="(plan, index) in creditPlans" :key="index" class="card bg-base-100 shadow-sm border border-base-200">
+                    <div class="card-body p-4 flex flex-row items-center gap-4">
+                       <div class="w-10 h-10 rounded-lg bg-base-200 flex items-center justify-center font-bold text-base-content/60">
+                          {{ plan.semester_number }}
+                       </div>
+                       
+                       <div class="flex-1 grid grid-cols-2 gap-4">
+                           <div class="form-control hover:bg-transparent">
+                             <label class="label pl-0 pt-0 pb-1">
+                                <span class="label-text text-xs uppercase font-bold text-base-content/40">Semester Type</span>
+                             </label>
+                             <select v-model="plan.semester_type" class="select select-sm select-bordered w-full">
+                               <option value="L">Long Semester</option>
+                               <option value="S">Short Semester</option>
+                             </select>
+                           </div>
+                           
+                           <div class="form-control hover:bg-transparent">
+                             <label class="label pl-0 pt-0 pb-1">
+                                <span class="label-text text-xs uppercase font-bold text-base-content/40">Target Credits</span>
+                             </label>
+                             <input type="number" v-model.number="plan.target_credits" min="0" class="input input-sm input-bordered font-mono" />
+                           </div>
+                       </div>
+                       
+                       <button class="btn btn-square btn-sm btn-ghost text-error" @click="removeSemesterFromPlan(index)">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                          </svg>
+                       </button>
+                    </div>
+                 </div>
+                 
+                 <button class="btn btn-outline btn-block border-dashed" @click="addSemesterToPlan">
+                    + Add Next Semester
+                 </button>
+             </div>
+         </div>
+         
+         <!-- Footer -->
+         <div class="p-4 bg-base-100 border-t border-base-200 flex justify-end gap-3 z-20">
+             <button class="btn btn-ghost" @click="closeModals">Discard Changes</button>
+             <button class="btn btn-primary" :disabled="isSubmitting" @click="saveCreditPlans">
+               {{ isSubmitting ? "Saving..." : "Save Configuration" }}
+             </button>
+         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="closeModals">
         <button>close</button>

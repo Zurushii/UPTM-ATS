@@ -32,23 +32,23 @@ const submit = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-md card bg-base-100 shadow">
+  <div class="min-h-screen flex items-center justify-center bg-base-200 p-4">
+    <div class="w-full max-w-md card bg-base-100 shadow-xl">
       <div class="card-body">
-        <h1 class="card-title">Forgot password</h1>
-        <p class="text-sm text-base-content/70">
+        <h1 class="card-title text-2xl font-bold justify-center">Forgot password</h1>
+        <p class="text-sm opacity-70 text-center">
           Enter your email and we’ll send a password reset link.
         </p>
 
-        <form class="mt-4 space-y-3" @submit.prevent="submit">
+        <form class="mt-4 space-y-4" @submit.prevent="submit">
           <label class="form-control w-full">
             <div class="label">
-              <span class="label-text">Email</span>
+              <span class="label-text font-medium">Email</span>
             </div>
             <input
               v-model="email"
               type="email"
-              class="input input-bordered w-full"
+              class="input input-bordered focus:input-primary w-full transition-all"
               placeholder="you@example.com"
               autocomplete="email"
               required
@@ -60,14 +60,15 @@ const submit = async () => {
             type="submit"
             :disabled="loading"
           >
+            <span v-if="loading" class="loading loading-spinner loading-sm"></span>
             {{ loading ? "Sending…" : "Send reset link" }}
           </button>
 
-          <p v-if="error" class="text-sm text-error">{{ error }}</p>
-          <p v-if="message" class="text-sm text-success">{{ message }}</p>
+          <p v-if="error" class="text-sm text-error text-center">{{ error }}</p>
+          <p v-if="message" class="text-sm text-success text-center">{{ message }}</p>
 
-          <div class="text-sm mt-2">
-            <NuxtLink to="/sign-in" class="link">Back to sign in</NuxtLink>
+          <div class="text-sm mt-4 text-center">
+            <NuxtLink to="/sign-in" class="link link-primary link-hover font-medium">Back to sign in</NuxtLink>
           </div>
         </form>
       </div>

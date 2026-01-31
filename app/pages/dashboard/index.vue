@@ -23,10 +23,8 @@ const { data: session } = await authClient.useSession(useFetch);
 </script>
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold mb-2">Dashboard</h1>
-    <p class="text-gray-600">
-      Redirecting to your dashboard...
-    </p>
+  <div class="h-[80vh] flex flex-col items-center justify-center gap-4">
+    <span class="loading loading-spinner loading-lg text-primary"></span>
+    <p class="text-base-content/70 font-medium">Redirecting to your dashboard...</p>
   </div>
 </template>

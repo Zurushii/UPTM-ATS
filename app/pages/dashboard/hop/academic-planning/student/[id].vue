@@ -118,6 +118,16 @@ const hasTransferredCourses = (semester: Semester) => {
   return semester.courses.some((c) => c.status === "Transferred");
 };
 
+// Collapsible state
+const collapsedSemesters = ref<Set<number>>(new Set());
+const toggleSemester = (sem: number) => {
+  if (collapsedSemesters.value.has(sem)) {
+    collapsedSemesters.value.delete(sem);
+  } else {
+    collapsedSemesters.value.add(sem);
+  }
+};
+
 // Go back
 const goBack = () => {
   window.history.back();
@@ -125,7 +135,7 @@ const goBack = () => {
 </script>
 
 <template>
-  <div class="p-6 max-w-5xl space-y-6">
+  <div class="p-6 w-full space-y-6">
     <!-- Back Button & Header -->
     <div class="flex items-start gap-4">
       <button class="btn btn-ghost btn-sm mt-1" @click="goBack">
@@ -236,10 +246,29 @@ const goBack = () => {
           :class="hasTransferredCourses(semester) ? 'border-success/30' : 'border-base-300'"
         >
           <div class="card-body">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="font-medium">
-                {{ formatSemester(semester.semester) }}
-              </h3>
+            <div 
+              class="flex items-center justify-between mb-2 cursor-pointer hover:bg-base-200/50 p-2 -mx-2 rounded-lg transition-colors select-none"
+              @click="toggleSemester(semester.semester)"
+            >
+              <div class="flex items-center gap-2">
+                <!-- Chevron Icon -->
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-5 h-5 transition-transform duration-200"
+                  :class="collapsedSemesters.has(semester.semester) ? '-rotate-90' : 'rotate-0'"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                <h3 class="font-medium">
+                  {{ formatSemester(semester.semester) }}
+                </h3>
+              </div>
               <div class="flex items-center gap-2">
                 <span
                   v-if="hasTransferredCourses(semester)"
@@ -253,7 +282,10 @@ const goBack = () => {
               </div>
             </div>
 
-            <div class="overflow-x-auto">
+            <div 
+              v-show="!collapsedSemesters.has(semester.semester)"
+              class="overflow-x-auto transition-all duration-300 origin-top"
+            >
               <table class="table table-sm">
                 <thead>
                   <tr>

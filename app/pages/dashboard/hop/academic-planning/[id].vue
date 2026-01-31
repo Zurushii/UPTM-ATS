@@ -155,7 +155,7 @@ const goBack = () => {
 </script>
 
 <template>
-  <div class="p-6 max-w-6xl space-y-6">
+  <div class="p-6 w-full space-y-6">
     <!-- Back Button & Header -->
     <div class="flex items-start gap-4">
       <button class="btn btn-ghost btn-sm mt-1" @click="goBack">

@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { useRoute } from "#app";
 
-const emit = defineEmits(["navigate"]);
+const props = defineProps<{
+  expanded: boolean;
+}>();
+
+const emit = defineEmits(["navigate", "toggle"]);
 const route = useRoute();
 const user = useState<any>("user");
 
@@ -11,149 +15,139 @@ const isActive = (basePath: string) => {
 };
 
 const handleClick = () => emit("navigate");
+const toggleSidebar = () => emit("toggle");
 </script>
 
 <template>
-  <aside class="w-64 bg-base-100 min-h-full border-r flex flex-col">
-    <!-- Brand -->
-    <div class="h-16 flex items-center px-6 border-b">
-      <div>
-        <h2 class="font-semibold text-sm">UPTM ATS</h2>
-        <p class="text-xs text-gray-500">
-          {{ user?.role === "HOP" ? "Head of Program" : "Student" }}
-        </p>
-      </div>
-    </div>
+  <aside 
+    class="bg-base-200 min-h-full flex flex-col gap-4 transition-all duration-300 ease-in-out"
+    :class="expanded ? 'w-80 p-4' : 'w-20 p-2'"
+  > 
+    
+    <!-- Menu -->
+    <ul class="menu bg-base-100 w-full rounded-box shadow-sm gap-2 transition-all duration-300">
+       <!-- Toggle Button (only visible on desktop mostly, but good to have) -->
+       <li class="hidden lg:block">
+          <button @click="toggleSidebar" class="flex justify-center items-center h-10">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 transition-transform duration-300" :class="{ 'rotate-180': !expanded }">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+       </li>
 
-    <!-- Navigation -->
-    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
-      <!-- Common -->
-      <NuxtLink
-        to="/dashboard"
-        @click="handleClick"
-        class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-        :class="
-          isActive('/dashboard')
-            ? 'bg-primary text-primary-content font-medium'
-            : 'hover:bg-base-200'
-        "
-      >
-        📊 Dashboard
-      </NuxtLink>
-
-      <!-- HoP -->
-      <template v-if="user?.role === 'HOP'">
-        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">Management</div>
-
-        <NuxtLink
-          to="/dashboard/hop/students"
+       <!-- Common -->
+      <li>
+        <NuxtLink 
+          to="/dashboard" 
           @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/hop/students')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
+          :class="[{ 'active': isActive('/dashboard') }, expanded ? '' : 'justify-center']"
+          class="flex items-center"
         >
-          🎓 Students
+          <span class="text-xl">📊</span>
+          <span v-if="expanded" class="ml-3 truncate">Dashboard</span>
         </NuxtLink>
+      </li>
 
-        <NuxtLink
-          to="/dashboard/hop/intake-assessment"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/hop/intake-assessment')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          📋 Intake Assessment
-        </NuxtLink>
+       <!-- HoP Section -->
+       <li v-if="user?.role === 'HOP' && expanded" class="menu-title transition-opacity duration-300">Management</li>
+       <li v-else-if="user?.role === 'HOP' && !expanded" class="menu-title text-center px-0">M</li>
+       
+       <template v-if="user?.role === 'HOP'">
+        <li>
+          <NuxtLink 
+            to="/dashboard/hop/students" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/hop/students') }, expanded ? '' : 'justify-center']"
+            class="flex items-center"
+            :title="!expanded ? 'Students' : ''"
+          >
+            <span class="text-xl">🎓</span> 
+            <span v-if="expanded" class="ml-3 truncate">Students</span>
+          </NuxtLink>
+        </li>
+        <li>
+          <NuxtLink 
+            to="/dashboard/hop/intake-assessment" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/hop/intake-assessment') }, expanded ? '' : 'justify-center']"
+            class="flex items-center"
+            :title="!expanded ? 'Intake Assessment' : ''"
+          >
+            <span class="text-xl">📋</span> 
+            <span v-if="expanded" class="ml-3 truncate">Intake Assessment</span>
+          </NuxtLink>
+        </li>
+        <li>
+          <NuxtLink 
+            to="/dashboard/hop/semester-rules" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/hop/semester-rules') }, expanded ? '' : 'justify-center']"
+             class="flex items-center"
+             :title="!expanded ? 'Semester Rules' : ''"
+          >
+            <span class="text-xl">📐</span> 
+            <span v-if="expanded" class="ml-3 truncate">Semester Rules</span>
+          </NuxtLink>
+        </li>
+        <li>
+           <NuxtLink 
+            to="/dashboard/hop/program-structure" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/hop/program-structure') }, expanded ? '' : 'justify-center']"
+             class="flex items-center"
+             :title="!expanded ? 'Program Structure' : ''"
+          >
+            <span class="text-xl">📚</span> 
+            <span v-if="expanded" class="ml-3 truncate">Program Structure</span>
+          </NuxtLink>
+        </li>
+        <li>
+          <NuxtLink 
+            to="/dashboard/hop/academic-planning" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/hop/academic-planning') }, expanded ? '' : 'justify-center']"
+             class="flex items-center"
+             :title="!expanded ? 'Academic Planning' : ''"
+          >
+            <span class="text-xl">🗂</span> 
+            <span v-if="expanded" class="ml-3 truncate">Academic Planning</span>
+          </NuxtLink>
+        </li>
+       </template>
 
-        <NuxtLink
-          to="/dashboard/hop/semester-rules"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/hop/semester-rules')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          📐 Semester Rules
-        </NuxtLink>
+       <!-- Student Section -->
+       <li v-if="user?.role === 'STUDENT' && expanded" class="menu-title transition-opacity duration-300">Academic</li>
+       <li v-else-if="user?.role === 'STUDENT' && !expanded" class="menu-title text-center px-0">A</li>
 
-        <NuxtLink
-          to="/dashboard/hop/program-structure"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/hop/program-structure')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          📚 Program Structure
-        </NuxtLink>
+       <template v-if="user?.role === 'STUDENT'">
+         <li>
+          <NuxtLink 
+            to="/dashboard/student/academic-plan" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/student/academic-plan') }, expanded ? '' : 'justify-center']"
+             class="flex items-center"
+             :title="!expanded ? 'My Academic Plan' : ''"
+          >
+            <span class="text-xl">📘</span> 
+            <span v-if="expanded" class="ml-3 truncate">My Academic Plan</span>
+          </NuxtLink>
+         </li>
+       </template>
 
-        <NuxtLink
-          to="/dashboard/hop/academic-planning"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/hop/academic-planning')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          🗂 Academic Planning
-        </NuxtLink>
-
-        <NuxtLink
-          to="/dashboard/profile"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/profile')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          👤 My Profile
-        </NuxtLink>
-      </template>
-
-      <!-- Student -->
-      <template v-if="user?.role === 'STUDENT'">
-        <div class="mt-4 px-3 text-xs text-gray-500 uppercase">Academic</div>
-
-        <NuxtLink
-          to="/dashboard/student/academic-plan"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/student/academic-plan')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          📘 My Academic Plan
-        </NuxtLink>
-
-        <NuxtLink
-          to="/dashboard/profile"
-          @click="handleClick"
-          class="flex items-center gap-3 px-3 py-2 rounded-md transition"
-          :class="
-            isActive('/dashboard/profile')
-              ? 'bg-primary text-primary-content font-medium'
-              : 'hover:bg-base-200'
-          "
-        >
-          👤 My Profile
-        </NuxtLink>
-      </template>
-    </nav>
+       <!-- Common Profile -->
+       <li class="mt-auto"></li> <!-- Spacer -->
+       <li>
+          <NuxtLink 
+            to="/dashboard/profile" 
+            @click="handleClick" 
+            :class="[{ 'active': isActive('/dashboard/profile') }, expanded ? '' : 'justify-center']"
+             class="flex items-center"
+             :title="!expanded ? 'My Profile' : ''"
+          >
+            <span class="text-xl">👤</span> 
+            <span v-if="expanded" class="ml-3 truncate">My Profile</span>
+          </NuxtLink>
+       </li>
+    </ul>
   </aside>
 </template>

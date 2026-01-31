@@ -2,6 +2,7 @@
 import { ref } from "vue";
 
 const drawerOpen = ref(false);
+const isSidebarExpanded = ref(true);
 </script>
 
 <template>
@@ -15,12 +16,14 @@ const drawerOpen = ref(false);
     />
 
     <!-- Page content -->
-    <div class="drawer-content flex flex-col min-h-screen bg-base-200">
-      <AppHeader v-model:drawerOpen="drawerOpen" />
+    <div class="drawer-content flex flex-col min-h-screen bg-base-200 transition-all duration-300">
+      <AppHeader />
 
-      <main class="p-6">
+      <main class="p-6 flex-1 flex flex-col">
         <NuxtPage />
       </main>
+
+      <ThemeSwitcher />
     </div>
 
     <!-- Sidebar -->
@@ -31,7 +34,11 @@ const drawerOpen = ref(false);
         @click="drawerOpen = false"
       ></label>
 
-      <SideNav @navigate="drawerOpen = false" />
+      <SideNav 
+        :expanded="isSidebarExpanded" 
+        @toggle="isSidebarExpanded = !isSidebarExpanded" 
+        @navigate="drawerOpen = false" 
+      />
     </div>
   </div>
 </template>
