@@ -16,6 +16,7 @@ if (!session.value) {
 const selectedIntake = ref<string>("");
 const selectedEntrySemester = ref<string>("");
 const selectedStatus = ref<string>("");
+const selectedAccountStatus = ref<string>("");
 const searchQuery = ref<string>("");
 
 // Build query params for filtering
@@ -25,6 +26,7 @@ const queryParams = computed(() => {
   if (selectedEntrySemester.value)
     params.entry_semester = selectedEntrySemester.value;
   if (selectedStatus.value) params.status = selectedStatus.value;
+  if (selectedAccountStatus.value) params.account_status = selectedAccountStatus.value;
   return params;
 });
 
@@ -54,7 +56,7 @@ const filteredStudents = computed(() => {
   );
 });
 
-// Status badge styling
+// Status badge styling for plan status
 const getStatusBadge = (status: string) => {
   switch (status) {
     case "approved":
@@ -63,6 +65,18 @@ const getStatusBadge = (status: string) => {
       return "badge-warning";
     case "completed":
       return "badge-info";
+    default:
+      return "badge-ghost";
+  }
+};
+
+// Status badge styling for account status
+const getAccountStatusBadge = (status: string) => {
+  switch (status) {
+    case "active":
+      return "badge-success";
+    case "reserved":
+      return "badge-warning";
     default:
       return "badge-ghost";
   }
@@ -96,6 +110,7 @@ const clearFilters = () => {
   selectedIntake.value = "";
   selectedEntrySemester.value = "";
   selectedStatus.value = "";
+  selectedAccountStatus.value = "";
   searchQuery.value = "";
 };
 </script>
@@ -169,11 +184,21 @@ const clearFilters = () => {
               v-model="selectedStatus"
               class="select select-sm select-bordered"
             >
-              <option value="">All Statuses</option>
+              <option value="">All Plan Status</option>
               <option value="none">No Plan</option>
               <option value="draft">Draft</option>
               <option value="approved">Approved</option>
               <option value="completed">Completed</option>
+            </select>
+
+            <!-- Account Status Filter -->
+            <select
+              v-model="selectedAccountStatus"
+              class="select select-sm select-bordered"
+            >
+              <option value="">All Account Status</option>
+              <option value="active">Active</option>
+              <option value="reserved">Pre-registered</option>
             </select>
 
             <!-- Clear Filters -->
@@ -182,6 +207,7 @@ const clearFilters = () => {
                 selectedIntake ||
                 selectedEntrySemester ||
                 selectedStatus ||
+                selectedAccountStatus ||
                 searchQuery
               "
               class="btn btn-sm btn-ghost"
@@ -208,6 +234,7 @@ const clearFilters = () => {
                 <th class="text-left">Intake</th>
                 <th class="text-left">Entry Semester</th>
                 <th class="text-left">Plan Status</th>
+                <th class="text-left">Account Status</th>
               </tr>
             </thead>
 
@@ -242,6 +269,14 @@ const clearFilters = () => {
                         ? "No Plan"
                         : student.academic_plan_status
                     }}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    class="badge badge-sm"
+                    :class="getAccountStatusBadge(student.account_status)"
+                  >
+                    {{ student.account_status === "reserved" ? "Pre-registered" : "Active" }}
                   </span>
                 </td>
               </tr>

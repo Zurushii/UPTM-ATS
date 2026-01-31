@@ -5,10 +5,15 @@ import ExcelJS from "exceljs";
 interface ProcessedStudent {
   student_id: number;
   matric_no: string;
-  intake: string;
-  total_transferred_credit: number;
+  intake_year: string;
+  total_credit_transferred: number;
+  starting_semester: number;
+  program_code: string;
+  transferred_courses: string;
+  // Internal fields
   entry_semester: number;
   transferred_course_ids: number[];
+  is_new_student: boolean; // true if student was created during processing
 }
 
 interface FailedRecord {
@@ -37,7 +42,10 @@ export default defineEventHandler(async (event) => {
 
   // Get the HoP's assigned program
   const [hopRows] = await pool.query(
-    `SELECT program_id FROM head_of_programs WHERE user_id = ?`,
+    `SELECT hp.program_id, p.program_code 
+     FROM head_of_programs hp
+     JOIN programs p ON hp.program_id = p.id
+     WHERE hp.user_id = ?`,
     [session.user.id],
   );
 
@@ -50,6 +58,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+  const programCode = hopData[0].program_code;
 
   // Parse multipart form data
   const formData = await readMultipartFormData(event);
@@ -112,23 +121,25 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Get all students for the selected intake in this program
+  // Get all students in this program (regardless of intake - they may already exist)
   const [studentRows] = await pool.query(
-    `SELECT id, matric_no FROM students WHERE program_id = ? AND intake_year = ?`,
-    [programId, intake],
+    `SELECT id, matric_no, intake_year, status FROM students WHERE program_id = ?`,
+    [programId],
   );
 
-  const studentsMap = new Map<string, { id: number; matric_no: string }>();
-  const studentsById = new Map<number, { id: number; matric_no: string }>();
+  const studentsMap = new Map<string, { id: number; matric_no: string; status: string }>();
+  const studentsById = new Map<number, { id: number; matric_no: string; status: string }>();
 
   for (const student of studentRows as any[]) {
     studentsMap.set(student.matric_no.toLowerCase(), {
       id: student.id,
       matric_no: student.matric_no,
+      status: student.status,
     });
     studentsById.set(student.id, {
       id: student.id,
       matric_no: student.matric_no,
+      status: student.status,
     });
   }
 
@@ -162,6 +173,9 @@ export default defineEventHandler(async (event) => {
   let matricNoCol = -1;
   let creditCol = -1;
   let transferredCoursesCol = -1;
+  let intakeYearCol = -1;
+  let startingSemesterCol = -1;
+  let programCodeCol = -1;
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value || "")
@@ -192,6 +206,25 @@ export default defineEventHandler(async (event) => {
       value === "transfer_courses"
     ) {
       transferredCoursesCol = colNumber;
+    } else if (
+      value === "intake_year" ||
+      value === "intakeyear" ||
+      value === "intake"
+    ) {
+      intakeYearCol = colNumber;
+    } else if (
+      value === "starting_semester" ||
+      value === "startingsemester" ||
+      value === "entry_semester" ||
+      value === "entrysemester"
+    ) {
+      startingSemesterCol = colNumber;
+    } else if (
+      value === "program_code" ||
+      value === "programcode" ||
+      value === "program"
+    ) {
+      programCodeCol = colNumber;
     }
   });
 
@@ -215,7 +248,6 @@ export default defineEventHandler(async (event) => {
   const processedStudents: ProcessedStudent[] = [];
   const failedRecords: FailedRecord[] = [];
   const processedMatricNos = new Set<string>();
-  const invalidCourses: { row: number; matric_no: string; courses: string[] }[] = [];
 
   for (let rowNum = 2; rowNum <= worksheet.rowCount; rowNum++) {
     const row = worksheet.getRow(rowNum);
@@ -230,8 +262,91 @@ export default defineEventHandler(async (event) => {
     const creditValue = row.getCell(creditCol).value;
     const transferredCoursesValue =
       transferredCoursesCol !== -1 ? row.getCell(transferredCoursesCol).value : null;
+    const intakeYearValue =
+      intakeYearCol !== -1 ? row.getCell(intakeYearCol).value : null;
+    const startingSemesterValue =
+      startingSemesterCol !== -1 ? row.getCell(startingSemesterCol).value : null;
+    const programCodeValue =
+      programCodeCol !== -1 ? row.getCell(programCodeCol).value : null;
 
-    // Parse credit value
+    // 1. First validate intake_year matches the selected intake from Step 1
+    if (intakeYearCol !== -1 && intakeYearValue !== null && intakeYearValue !== undefined) {
+      const excelIntakeYear = String(intakeYearValue).trim();
+      if (excelIntakeYear !== intake) {
+        failedRecords.push({
+          row: rowNum,
+          matric_no: matricNoValue ? String(matricNoValue) : null,
+          student_id: studentIdValue ? Number(studentIdValue) : null,
+          reason: `Intake mismatch: Excel intake_year (${excelIntakeYear}) does not match selected intake (${intake})`,
+        });
+        continue;
+      }
+    }
+
+    // 2. Validate program_code matches the HoP's program
+    if (programCodeCol !== -1 && programCodeValue !== null && programCodeValue !== undefined) {
+      const excelProgramCode = String(programCodeValue).trim().toUpperCase();
+      if (excelProgramCode !== programCode.toUpperCase()) {
+        failedRecords.push({
+          row: rowNum,
+          matric_no: matricNoValue ? String(matricNoValue) : null,
+          student_id: studentIdValue ? Number(studentIdValue) : null,
+          reason: `Program mismatch: Excel program_code (${excelProgramCode}) does not match your program (${programCode})`,
+        });
+        continue;
+      }
+    }
+
+    // 3. Validate starting_semester must be empty or 0
+    if (startingSemesterCol !== -1 && startingSemesterValue !== null && startingSemesterValue !== undefined) {
+      const semesterVal = typeof startingSemesterValue === "number" 
+        ? startingSemesterValue 
+        : parseFloat(String(startingSemesterValue).trim());
+      
+      // Must be empty (NaN after parse of empty string) or 0
+      if (!isNaN(semesterVal) && semesterVal !== 0) {
+        failedRecords.push({
+          row: rowNum,
+          matric_no: matricNoValue ? String(matricNoValue) : null,
+          student_id: studentIdValue ? Number(studentIdValue) : null,
+          reason: `Invalid starting_semester: must be empty or 0, got ${semesterVal}`,
+        });
+        continue;
+      }
+    }
+
+    // 4. Validate matric_no is provided
+    if (!matricNoValue) {
+      failedRecords.push({
+        row: rowNum,
+        matric_no: null,
+        student_id: studentIdValue ? Number(studentIdValue) : null,
+        reason: "matric_no is required for processing",
+      });
+      continue;
+    }
+
+    const matricNo = String(matricNoValue).trim();
+    const matricNoLower = matricNo.toLowerCase();
+
+    // 5. Find or mark student for creation
+    let student: { id: number; matric_no: string; status: string } | undefined;
+    let isNewStudent = false;
+
+    const existingStudent = studentsMap.get(matricNoLower);
+
+    if (existingStudent) {
+      student = existingStudent;
+      // If student is still reserved (not yet registered), treat as new
+      isNewStudent = existingStudent.status === "reserved";
+    } else {
+      // Student doesn't exist - will create as reserved
+      isNewStudent = true;
+      // Create a placeholder - actual ID will be assigned after INSERT
+      student = { id: -1, matric_no: matricNo, status: "reserved" };
+    }
+
+    // 5. Parse and validate credit value
     let credits = 0;
     if (typeof creditValue === "number") {
       credits = creditValue;
@@ -242,35 +357,14 @@ export default defineEventHandler(async (event) => {
     if (isNaN(credits) || credits < 0) {
       failedRecords.push({
         row: rowNum,
-        matric_no: matricNoValue ? String(matricNoValue) : null,
-        student_id: studentIdValue ? Number(studentIdValue) : null,
+        matric_no: student.matric_no,
+        student_id: student.id,
         reason: "Invalid credit value",
       });
       continue;
     }
 
-    // Find student
-    let student: { id: number; matric_no: string } | undefined;
-
-    if (matricNoValue) {
-      const matricNo = String(matricNoValue).toLowerCase().trim();
-      student = studentsMap.get(matricNo);
-    } else if (studentIdValue) {
-      const studentId = Number(studentIdValue);
-      student = studentsById.get(studentId);
-    }
-
-    if (!student) {
-      failedRecords.push({
-        row: rowNum,
-        matric_no: matricNoValue ? String(matricNoValue) : null,
-        student_id: studentIdValue ? Number(studentIdValue) : null,
-        reason: "Student not found or not in selected intake/program",
-      });
-      continue;
-    }
-
-    // Check for duplicates
+    // 6. Check for duplicates
     if (processedMatricNos.has(student.matric_no.toLowerCase())) {
       failedRecords.push({
         row: rowNum,
@@ -290,7 +384,7 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Parse transferred courses and calculate their total credit hours
+    // 7. Parse and validate transferred courses
     const transferredCourseIds: number[] = [];
     const invalidCoursesList: string[] = [];
     let transferredCoursesCredits = 0;
@@ -313,15 +407,18 @@ export default defineEventHandler(async (event) => {
         }
       }
 
+      // Fail if any course codes don't exist in the system
       if (invalidCoursesList.length > 0) {
-        invalidCourses.push({
+        failedRecords.push({
           row: rowNum,
           matric_no: student.matric_no,
-          courses: invalidCoursesList,
+          student_id: student.id,
+          reason: `Invalid course(s) not found in system: ${invalidCoursesList.join(", ")}`,
         });
+        continue;
       }
 
-      // Validate that total_credit_transferred matches the sum of transferred courses
+      // 8. Validate that total_credit_transferred matches the sum of transferred courses
       if (transferredCourseIds.length > 0 && credits !== transferredCoursesCredits) {
         failedRecords.push({
           row: rowNum,
@@ -337,10 +434,14 @@ export default defineEventHandler(async (event) => {
     processedStudents.push({
       student_id: student.id,
       matric_no: student.matric_no,
-      intake: intake,
-      total_transferred_credit: credits,
+      intake_year: intake,
+      total_credit_transferred: credits,
+      starting_semester: 0, // Always 0 as per validation
+      program_code: programCode,
+      transferred_courses: transferredCoursesValue ? String(transferredCoursesValue) : "",
       entry_semester: entrySemester,
       transferred_course_ids: transferredCourseIds,
+      is_new_student: isNewStudent,
     });
   }
 
@@ -349,18 +450,36 @@ export default defineEventHandler(async (event) => {
   try {
     await connection.beginTransaction();
 
-    // Batch update students
+    // Process students in database - create new or update existing
     for (const student of processedStudents) {
-      await connection.query(
-        `UPDATE students 
-         SET total_credit_transferred = ?, starting_semester = ?
-         WHERE id = ?`,
-        [
-          student.total_transferred_credit,
-          student.entry_semester,
-          student.student_id,
-        ],
-      );
+      if (student.student_id === -1) {
+        // Brand new student - create as reserved
+        const [insertResult] = await connection.query(
+          `INSERT INTO students (user_id, status, matric_no, program_id, intake_year, total_credit_transferred, starting_semester)
+           VALUES (NULL, 'reserved', ?, ?, ?, ?, ?)`,
+          [
+            student.matric_no,
+            programId,
+            student.intake_year,
+            student.total_credit_transferred,
+            student.entry_semester,
+          ],
+        );
+        // Update student_id with the newly created ID
+        student.student_id = (insertResult as any).insertId;
+      } else {
+        // Update existing student (either reserved or active)
+        await connection.query(
+          `UPDATE students 
+           SET total_credit_transferred = ?, starting_semester = ?
+           WHERE id = ?`,
+          [
+            student.total_credit_transferred,
+            student.entry_semester,
+            student.student_id,
+          ],
+        );
+      }
 
       // Delete existing transferred courses for this student
       await connection.query(
@@ -397,16 +516,20 @@ export default defineEventHandler(async (event) => {
       total_records: processedStudents.length + failedRecords.length,
       successful: processedStudents.length,
       failed: failedRecords.length,
+      new_students: processedStudents.filter(s => s.is_new_student).length,
+      updated_students: processedStudents.filter(s => !s.is_new_student).length,
     },
     processed_students: processedStudents.map((s) => ({
       student_id: s.student_id,
       matric_no: s.matric_no,
-      intake: s.intake,
-      total_transferred_credit: s.total_transferred_credit,
+      intake_year: s.intake_year,
+      total_credit_transferred: s.total_credit_transferred,
+      starting_semester: s.starting_semester,
+      program_code: s.program_code,
+      transferred_courses: s.transferred_courses,
       entry_semester: s.entry_semester,
-      transferred_courses_count: s.transferred_course_ids.length,
+      is_new_student: s.is_new_student,
     })),
     failed_records: failedRecords,
-    invalid_courses: invalidCourses.length > 0 ? invalidCourses : undefined,
   };
 });

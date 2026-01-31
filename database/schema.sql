@@ -112,7 +112,8 @@ CREATE TABLE head_of_programs (
 
 CREATE TABLE students (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id VARCHAR(36) NOT NULL,
+  user_id VARCHAR(36) NULL,                       -- NULL for reserved/pre-registered students
+  status ENUM('reserved', 'active') DEFAULT 'reserved',  -- reserved = HoP processed, active = student registered
   matric_no VARCHAR(30) UNIQUE NOT NULL,
   program_id INT NOT NULL,
   intake_year VARCHAR(4) NOT NULL,              -- Format: MMYY (e.g., 0824 = Aug 2024)
@@ -121,7 +122,7 @@ CREATE TABLE students (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_student_user
-    FOREIGN KEY (user_id) REFERENCES `user`(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES `user`(id) ON DELETE SET NULL,
 
   CONSTRAINT fk_student_program
     FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE

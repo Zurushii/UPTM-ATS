@@ -56,25 +56,75 @@ export default defineEventHandler(async (event) => {
 
   const connection = await pool.getConnection();
   try {
-    // Check for duplicate matric_no
+    // Check if a reserved student record exists with this matric_no
     const [existing] = await connection.query(
-      "SELECT id FROM students WHERE matric_no = ?",
+      "SELECT id, status, program_id, intake_year FROM students WHERE matric_no = ?",
       [matric_no],
     );
 
-    if ((existing as any[]).length > 0) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Student ID already registered",
-      });
+    const existingStudent = (existing as any[])[0];
+
+    if (existingStudent) {
+      // Student record exists
+      if (existingStudent.status === "active") {
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Student ID already registered",
+        });
+      }
+
+      // Reserved student found - verify program and intake match
+      if (existingStudent.program_id !== program_id) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Program does not match the pre-registered record. Please contact your Head of Program.",
+        });
+      }
+
+      if (existingStudent.intake_year !== intake_year) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: `Intake year does not match the pre-registered record (${existingStudent.intake_year}). Please verify your intake year.`,
+        });
+      }
+
+      await connection.beginTransaction();
+
+      // Link the reserved student to this user account and activate
+      await connection.query(
+        `UPDATE students 
+         SET user_id = ?, status = 'active'
+         WHERE id = ?`,
+        [session.user.id, existingStudent.id],
+      );
+
+      // Update user name and mark as onboarded
+      await connection.query(
+        "UPDATE user SET name = ?, is_onboarded = 1 WHERE id = ?",
+        [full_name.trim(), session.user.id],
+      );
+
+      // Hash password and create credential account for email/password login
+      const hashedPassword = await hashPassword(password);
+
+      await connection.query(
+        `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+         VALUES (UUID(), ?, 'credential', ?, ?, NOW(3), NOW(3))
+         ON DUPLICATE KEY UPDATE password = VALUES(password), updatedAt = NOW(3)`,
+        [session.user.email, session.user.id, hashedPassword],
+      );
+
+      await connection.commit();
+      return { success: true, linked_reserved: true };
     }
 
+    // No existing student - create new active student record
     await connection.beginTransaction();
 
     // Insert student record
     await connection.query(
-      `INSERT INTO students (user_id, matric_no, program_id, intake_year)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO students (user_id, status, matric_no, program_id, intake_year)
+       VALUES (?, 'active', ?, ?, ?)`,
       [session.user.id, matric_no, program_id, intake_year],
     );
 

@@ -32,13 +32,19 @@ const processingResult = ref<{
     total_records: number;
     successful: number;
     failed: number;
+    new_students: number;
+    updated_students: number;
   };
   processed_students: Array<{
     student_id: number;
     matric_no: string;
-    intake: string;
-    total_transferred_credit: number;
+    intake_year: string;
+    total_credit_transferred: number;
+    starting_semester: number;
+    program_code: string;
+    transferred_courses: string;
     entry_semester: number;
+    is_new_student: boolean;
   }>;
   failed_records: Array<{
     row: number;
@@ -565,15 +571,28 @@ const resetProcess = () => {
             class="text-sm text-base-content/70 list-disc list-inside space-y-1"
           >
             <li>
-              <code class="bg-base-300 px-1 rounded">student_id</code> or
               <code class="bg-base-300 px-1 rounded">matric_no</code> - Student
-              identifier
+              identifier (must exist in the system)
             </li>
             <li>
-              <code class="bg-base-300 px-1 rounded">transferred_credits</code>,
-              <code class="bg-base-300 px-1 rounded">credit</code>, or
-              <code class="bg-base-300 px-1 rounded">total_credit</code> -
-              Credit hours transferred
+              <code class="bg-base-300 px-1 rounded">intake_year</code> -
+              Must match the intake selected in Step 1 (e.g., 0824)
+            </li>
+            <li>
+              <code class="bg-base-300 px-1 rounded">total_credit_transferred</code> -
+              Must match the sum of transferred_courses credit hours
+            </li>
+            <li>
+              <code class="bg-base-300 px-1 rounded">starting_semester</code> -
+              Must be empty or 0
+            </li>
+            <li>
+              <code class="bg-base-300 px-1 rounded">program_code</code> -
+              Must match your program
+            </li>
+            <li>
+              <code class="bg-base-300 px-1 rounded">transferred_courses</code> -
+              Comma-separated course codes (optional)
             </li>
           </ul>
         </div>
@@ -697,7 +716,23 @@ const resetProcess = () => {
               <div class="stat-value text-2xl text-success">
                 {{ processingResult.summary.successful }}
               </div>
-              <div class="stat-desc">Students updated</div>
+              <div class="stat-desc">Students processed</div>
+            </div>
+
+            <div class="stat">
+              <div class="stat-title">Pre-registered</div>
+              <div class="stat-value text-2xl text-warning">
+                {{ processingResult.summary.new_students }}
+              </div>
+              <div class="stat-desc">New students reserved</div>
+            </div>
+
+            <div class="stat">
+              <div class="stat-title">Processed</div>
+              <div class="stat-value text-2xl text-success">
+                {{ processingResult.summary.updated_students }}
+              </div>
+              <div class="stat-desc">Existing students updated</div>
             </div>
 
             <div class="stat">
@@ -735,10 +770,12 @@ const resetProcess = () => {
               <thead class="sticky top-0 bg-base-100">
                 <tr>
                   <th>Student ID</th>
-                  <th>Matric No</th>
-                  <th>Intake</th>
-                  <th>Transferred Credits</th>
+                  <th>Intake Year</th>
+                  <th>Total Credit Transferred</th>
                   <th>Entry Semester</th>
+                  <th>Program</th>
+                  <th>Transferred Courses</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -746,13 +783,25 @@ const resetProcess = () => {
                   v-for="student in processingResult.processed_students"
                   :key="student.student_id"
                 >
-                  <td class="font-mono">{{ student.student_id }}</td>
                   <td class="font-mono">{{ student.matric_no }}</td>
-                  <td>{{ formatIntake(student.intake) }}</td>
-                  <td>{{ student.total_transferred_credit }}</td>
+                  <td>{{ student.intake_year }}</td>
+                  <td>{{ student.total_credit_transferred }}</td>
                   <td>
-                    <span class="badge badge-info badge-sm">
+                    <span class="badge badge-ghost badge-sm">
                       Semester {{ student.entry_semester }}
+                    </span>
+                  </td>
+                  <td>{{ student.program_code }}</td>
+                  <td class="font-mono text-xs max-w-xs truncate">{{ student.transferred_courses || '-' }}</td>
+                  <td>
+                    <span 
+                      v-if="student.is_new_student" 
+                      class="badge badge-warning badge-sm"
+                    >
+                      Pre-registered
+                    </span>
+                    <span v-else class="badge badge-success badge-sm">
+                      Processed
                     </span>
                   </td>
                 </tr>
@@ -776,7 +825,6 @@ const resetProcess = () => {
               <thead class="sticky top-0 bg-base-100">
                 <tr>
                   <th>Row</th>
-                  <th>Matric No</th>
                   <th>Student ID</th>
                   <th>Reason</th>
                 </tr>
@@ -789,7 +837,6 @@ const resetProcess = () => {
                 >
                   <td>{{ record.row }}</td>
                   <td class="font-mono">{{ record.matric_no || "-" }}</td>
-                  <td class="font-mono">{{ record.student_id || "-" }}</td>
                   <td>{{ record.reason }}</td>
                 </tr>
               </tbody>

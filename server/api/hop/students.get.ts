@@ -18,6 +18,7 @@ export default defineEventHandler(async (event) => {
   const intakeFilter = query.intake as string | undefined;
   const entrySemesterFilter = query.entry_semester as string | undefined;
   const statusFilter = query.status as string | undefined;
+  const accountStatusFilter = query.account_status as string | undefined;
 
   // Get the HoP's assigned program
   const [hopRows] = await pool.query(
@@ -42,12 +43,13 @@ export default defineEventHandler(async (event) => {
       s.matric_no,
       s.intake_year AS intake,
       s.starting_semester AS entry_semester,
+      s.status AS account_status,
       u.name AS student_name,
       u.email,
       ap.id AS academic_plan_id,
       ap.status AS plan_status
     FROM students s
-    JOIN user u ON s.user_id = u.id
+    LEFT JOIN user u ON s.user_id = u.id
     LEFT JOIN academic_plans ap ON ap.student_id = s.id
     WHERE s.program_id = ?
   `;
@@ -78,22 +80,28 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  if (accountStatusFilter) {
+    sql += ` AND s.status = ?`;
+    params.push(accountStatusFilter);
+  }
+
   sql += ` ORDER BY s.matric_no ASC`;
 
   const [rows] = await pool.query(sql, params);
   const students = rows as any[];
 
-  // Transform the result to include academic_plan_status
+  // Transform the result to include academic_plan_status and account_status
   const result = students.map((student) => ({
     student_id: student.student_id,
     matric_no: student.matric_no,
-    student_name: student.student_name,
-    email: student.email,
+    student_name: student.student_name || "Not registered",
+    email: student.email || null,
     intake: student.intake,
     entry_semester: student.entry_semester ?? null,
     academic_plan_status: student.academic_plan_id
       ? student.plan_status
       : "none",
+    account_status: student.account_status,
   }));
 
   return result;
