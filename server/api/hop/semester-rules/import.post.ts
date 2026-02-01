@@ -95,8 +95,7 @@ export default defineEventHandler(async (event) => {
       headerRow = rowValues.map((cell: any) =>
         String(cell || "").trim().toUpperCase(),
       );
-      console.log("=== Header Row Found ===");
-      console.log("Headers:", headerRow);
+
       return;
     }
 
@@ -119,8 +118,7 @@ export default defineEventHandler(async (event) => {
     const creditTransfer = parseInt(rowValues[creditTransferIdx]);
     if (isNaN(creditTransfer)) return;
 
-    console.log(`=== Parsing row for credit transfer: ${creditTransfer} ===`);
-    console.log("Row values:", rowValues);
+
 
     // Parse semester credits from columns
     const creditPlans: ParsedRule["credit_plans"] = [];

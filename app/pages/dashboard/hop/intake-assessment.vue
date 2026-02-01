@@ -19,6 +19,25 @@ const totalSteps = 4;
 // Step 1: Configuration state
 const selectedIntake = ref<string>("");
 const selectedRuleSet = ref<string>("");
+const intakeInputTouched = ref(false);
+
+// Validate intake format (MMYY)
+const isValidIntakeFormat = (value: string): boolean => {
+  if (!value || value.length !== 4) return false;
+  const month = parseInt(value.substring(0, 2));
+  const year = parseInt(value.substring(2, 4));
+  return !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12;
+};
+
+const intakeValidation = computed(() => {
+  if (!intakeInputTouched.value || !selectedIntake.value) {
+    return { valid: false, message: '' };
+  }
+  if (!isValidIntakeFormat(selectedIntake.value)) {
+    return { valid: false, message: 'Invalid format. Use MMYY (e.g., 0126 for Jan 2026)' };
+  }
+  return { valid: true, message: '' };
+});
 
 // Step 2: File upload state
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -93,7 +112,7 @@ const { data: rulesData } = await useFetch<RuleData[]>(
 
 // Computed
 const canProceedToStep2 = computed(
-  () => selectedIntake.value && selectedRuleSet.value,
+  () => selectedIntake.value && isValidIntakeFormat(selectedIntake.value) && selectedRuleSet.value,
 );
 
 const canProceedToStep3 = computed(() => selectedFile.value !== null);
@@ -275,6 +294,33 @@ const resetProcess = () => {
     fileInput.value.value = "";
   }
 };
+
+// Results filtering
+const processedSearchQuery = ref("");
+const processedStatusFilter = ref("");
+
+const filteredProcessedStudents = computed(() => {
+  if (!processingResult.value) return [];
+  
+  let result = processingResult.value.processed_students;
+
+  // Filter by status
+  if (processedStatusFilter.value) {
+    const isNew = processedStatusFilter.value === 'new';
+    result = result.filter(s => s.is_new_student === isNew);
+  }
+
+  // Filter by search query
+  if (processedSearchQuery.value) {
+    const query = processedSearchQuery.value.toLowerCase();
+    result = result.filter(s => 
+      s.matric_no.toLowerCase().includes(query) || 
+      (s.program_code && s.program_code.toLowerCase().includes(query))
+    );
+  }
+
+  return result;
+});
 </script>
 
 <template>
@@ -323,7 +369,7 @@ const resetProcess = () => {
       <span class="loading loading-spinner loading-lg text-primary"></span>
     </div>
 
-    <div v-else class="max-w-4xl mx-auto transition-all duration-300">
+    <div v-else :class="[currentStep === 4 ? 'w-full' : 'max-w-4xl mx-auto']" class="transition-all duration-300">
       <!-- Step 1: Configuration -->
       <div
         v-if="currentStep === 1"
@@ -345,27 +391,45 @@ const resetProcess = () => {
           </div>
 
           <div class="grid md:grid-cols-2 gap-6">
-            <!-- Intake Selection -->
+            <!-- Intake Selection (Combobox) -->
             <div class="form-control w-full">
               <label class="label">
-                <span class="label-text font-medium">Select Intake</span>
+                <span class="label-text font-medium">Intake Code</span>
               </label>
-              <select
-                v-model="selectedIntake"
-                class="select select-bordered w-full h-12"
-              >
-                <option value="">Choose an intake...</option>
-                <option
-                  v-for="intake in configData?.intakes"
-                  :key="intake"
-                  :value="intake"
-                >
-                  {{ formatIntake(intake) }} ({{ intake }})
-                </option>
-              </select>
+              <div class="relative">
+                <input
+                  v-model="selectedIntake"
+                  type="text"
+                  list="intake-options"
+                  placeholder="Enter intake (e.g., 0126)"
+                  maxlength="4"
+                  class="input input-bordered w-full h-12 font-mono tracking-wider"
+                  :class="{
+                    'input-error': intakeInputTouched && selectedIntake && !intakeValidation.valid,
+                    'input-success': intakeValidation.valid
+                  }"
+                  @blur="intakeInputTouched = true"
+                  @input="intakeInputTouched = true"
+                />
+                <datalist id="intake-options">
+                  <option
+                    v-for="intake in configData?.intakes"
+                    :key="intake"
+                    :value="intake"
+                  >
+                    {{ formatIntake(intake) }}
+                  </option>
+                </datalist>
+              </div>
               <label class="label">
-                <span class="label-text-alt text-base-content/50">
-                  Target student group
+                <span 
+                  class="label-text-alt" 
+                  :class="intakeValidation.message ? 'text-error' : 'text-base-content/50'"
+                >
+                  {{ intakeValidation.message || 'Format: MMYY (e.g., 0126 = Jan 2026)' }}
+                </span>
+                <span v-if="selectedIntake && intakeValidation.valid" class="label-text-alt text-success">
+                  {{ formatIntake(selectedIntake) }}
                 </span>
               </label>
             </div>
@@ -431,10 +495,10 @@ const resetProcess = () => {
             </div>
           </div>
 
-          <!-- Warnings -->
-          <div v-if="configData?.intakes?.length === 0" class="alert alert-warning shadow-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-            <span>No registered students found. Please register students first.</span>
+          <!-- Info about manual intake entry -->
+          <div v-if="configData?.intakes?.length === 0" class="alert alert-info shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <span>No existing students found. Enter the intake code manually (format: MMYY).</span>
           </div>
 
           <div v-if="configData?.ruleSets?.length === 0" class="alert alert-warning shadow-sm">
@@ -709,13 +773,7 @@ const resetProcess = () => {
               <div class="stat-desc">New students reserved</div>
             </div>
 
-            <div class="stat">
-              <div class="stat-title">Processed</div>
-              <div class="stat-value text-2xl text-success">
-                {{ processingResult.summary.updated_students }}
-              </div>
-              <div class="stat-desc">Existing students updated</div>
-            </div>
+
 
             <div class="stat">
               <div class="stat-title">Failed</div>
@@ -747,6 +805,28 @@ const resetProcess = () => {
               processingResult.processed_students.length
             }})
           </h3>
+
+          <!-- Table Filters -->
+          <div class="flex flex-col sm:flex-row gap-4 mb-4">
+            <div class="relative flex-1 max-w-xs">
+              <input
+                v-model="processedSearchQuery"
+                type="text"
+                placeholder="Search Student ID..."
+                class="input input-sm input-bordered w-full pl-9"
+              />
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 absolute left-3 top-2.5 text-base-content/50">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+            </div>
+            
+            <select v-model="processedStatusFilter" class="select select-sm select-bordered w-full sm:max-w-xs">
+              <option value="">All Statuses</option>
+              <option value="processed">Processed</option>
+              <option value="new">Pre-registered</option>
+            </select>
+          </div>
+
           <div class="overflow-x-auto max-h-96">
             <table class="table table-sm table-zebra w-full">
               <thead class="sticky top-0 bg-base-100">
@@ -762,14 +842,14 @@ const resetProcess = () => {
               </thead>
               <tbody>
                 <tr
-                  v-for="student in processingResult.processed_students"
+                  v-for="student in filteredProcessedStudents"
                   :key="student.student_id"
                 >
                   <td class="font-mono">{{ student.matric_no }}</td>
                   <td>{{ student.intake_year }}</td>
                   <td>{{ student.total_credit_transferred }}</td>
                   <td>
-                    <span class="badge badge-ghost badge-sm">
+                    <span class="badge badge-ghost badge-sm whitespace-nowrap">
                       Semester {{ student.entry_semester }}
                     </span>
                   </td>
@@ -778,11 +858,11 @@ const resetProcess = () => {
                   <td>
                     <span 
                       v-if="student.is_new_student" 
-                      class="badge badge-warning badge-sm"
+                      class="badge badge-warning badge-sm whitespace-nowrap"
                     >
                       Pre-registered
                     </span>
-                    <span v-else class="badge badge-success badge-sm">
+                    <span v-else class="badge badge-success badge-sm whitespace-nowrap">
                       Processed
                     </span>
                   </td>

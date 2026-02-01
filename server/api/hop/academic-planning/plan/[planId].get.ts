@@ -123,6 +123,7 @@ export default defineEventHandler(async (event) => {
   return {
     plan: {
       id: plan.id,
+      intake_id: plan.intake_id,
       status: plan.status,
       start_semester: plan.start_semester,
       created_at: plan.created_at,

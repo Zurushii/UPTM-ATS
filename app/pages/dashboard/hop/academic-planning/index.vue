@@ -341,7 +341,7 @@ const previewFile = async () => {
       body: formData,
     });
 
-    previewResult.value = response as typeof previewResult.value;
+    previewResult.value = response as NonNullable<typeof previewResult.value>;
     currentStep.value = 3;
   } catch (error: any) {
     alert(error.data?.message || error.message || "Preview failed");
@@ -367,7 +367,7 @@ const generatePlans = async () => {
       body: formData,
     });
 
-    generateResult.value = response as typeof generateResult.value;
+    generateResult.value = response as NonNullable<typeof generateResult.value>;
     currentStep.value = 4;
     await refreshIntakes();
   } catch (error: any) {

@@ -44,16 +44,22 @@ const {
 
 // Client-side search filtering
 const filteredStudents = computed(() => {
-  if (!students.value) return [];
-  if (!searchQuery.value.trim()) return students.value;
+  const currentStudents = students.value || [];
+  if (!searchQuery.value?.trim()) return currentStudents;
 
-  const query = searchQuery.value.toLowerCase();
-  return (students.value as any[]).filter(
-    (s) =>
-      s.matric_no.toLowerCase().includes(query) ||
-      s.student_name.toLowerCase().includes(query) ||
-      s.email.toLowerCase().includes(query),
-  );
+  const query = searchQuery.value.toLowerCase().trim();
+  
+  return (currentStudents as any[]).filter((s) => {
+    const matric = String(s.matric_no || "").toLowerCase();
+    const name = String(s.student_name || "").toLowerCase();
+    const email = String(s.email || "").toLowerCase();
+    
+    return (
+      matric.includes(query) ||
+      name.includes(query) ||
+      email.includes(query)
+    );
+  });
 });
 
 // Status badge styling for plan status
@@ -243,40 +249,30 @@ const clearFilters = () => {
           <table class="table table-zebra table-pin-rows">
             <thead>
               <tr class="bg-base-200/50 backdrop-blur">
-                <th class="font-bold">Student ID</th>
-                <th class="font-bold">Matric No</th>
-                <th class="font-bold">Name</th>
-                <th class="font-bold">Intake</th>
-                <th class="font-bold">Entry Semester</th>
-                <th class="font-bold">Plan Status</th>
-                <th class="font-bold">Account Status</th>
-                <th class="font-bold text-right">Actions</th>
+                <th class="font-bold text-center">Matric No</th>
+                <th class="font-bold text-center">Name</th>
+                <th class="font-bold text-center">Intake</th>
+                <th class="font-bold text-center">Entry Semester</th>
+                <th class="font-bold text-center">Plan Status</th>
+                <th class="font-bold text-center">Account Status</th>
               </tr>
             </thead>
 
             <tbody>
               <tr v-for="student in filteredStudents" :key="student.student_id" class="hover group">
-                <td class="font-mono opacity-50">{{ student.student_id }}</td>
-                <td>
+                <td class="text-center">
                     <span class="badge badge-ghost font-mono text-xs">{{ student.matric_no }}</span>
                 </td>
-                <td>
-                  <div class="flex items-center gap-3">
-                    <div class="avatar placeholder">
-                       <div class="bg-primary/10 text-primary w-8 rounded-full">
-                           <span class="text-xs font-bold">{{ student.student_name.charAt(0) }}</span>
-                       </div>
-                    </div>
-                    <div>
-                        <div class="font-bold text-sm">{{ student.student_name }}</div>
-                        <div class="text-xs opacity-70">{{ student.email }}</div>
-                    </div>
-                  </div>
+                <td class="text-center">
+                  <NuxtLink :to="`/dashboard/hop/academic-planning/student/${student.student_id}`" class="block hover:text-primary transition-colors">
+                      <div class="font-bold text-sm">{{ student.student_name }}</div>
+                      <div class="text-xs opacity-70">{{ student.email }}</div>
+                  </NuxtLink>
                 </td>
-                <td>
+                <td class="text-center">
                   <div class="text-sm font-medium">{{ formatIntake(student.intake) }}</div>
                 </td>
-                <td>
+                <td class="text-center">
                   <span v-if="student.entry_semester !== null" class="badge badge-sm badge-outline">
                     Sem {{ student.entry_semester }}
                   </span>
@@ -284,7 +280,7 @@ const clearFilters = () => {
                     Pending
                   </span>
                 </td>
-                <td>
+                <td class="text-center">
                   <span
                     class="badge badge-sm"
                     :class="getStatusBadge(student.academic_plan_status)"
@@ -296,18 +292,13 @@ const clearFilters = () => {
                     }}
                   </span>
                 </td>
-                <td>
+                <td class="text-center">
                   <span
                     class="badge badge-sm"
                     :class="getAccountStatusBadge(student.account_status)"
                   >
                     {{ student.account_status === "reserved" ? "Pre-registered" : "Active" }}
                   </span>
-                </td>
-                <td class="text-right">
-                    <NuxtLink :to="`/dashboard/hop/academic-planning/student/${student.student_id}`" class="btn btn-xs btn-ghost opacity-0 group-hover:opacity-100 transition-opacity">
-                        View Plan
-                    </NuxtLink>
                 </td>
               </tr>
             </tbody>

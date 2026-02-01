@@ -133,6 +133,8 @@ const showCreateCourseModal = ref(false);
 const showCreateSessionModal = ref(false);
 const showCloneSessionModal = ref(false);
 const showImportModal = ref(false);
+const showDeleteSessionModal = ref(false);
+const deletingSession = ref<ProgramSessionRow | null>(null);
 const reopenAddAfterCreate = ref(false);
 
 // Form state for adding course
@@ -195,6 +197,22 @@ const toggleSemester = (sem: number) => {
   } else {
     collapsedSemesters.value.add(sem);
   }
+};
+
+// Expand/Collapse all semesters
+const expandedAll = ref(false);
+
+const toggleAllSemesters = () => {
+  if (!structureData.value?.semesters) return;
+  
+  if (expandedAll.value) {
+    // Collapse all
+    structureData.value.semesters.forEach(s => collapsedSemesters.value.add(s.semester));
+  } else {
+    // Expand all
+    collapsedSemesters.value.clear();
+  }
+  expandedAll.value = !expandedAll.value;
 };
 
 // Get courses not yet in the program structure
@@ -313,24 +331,31 @@ async function handleCloneSession() {
   }
 }
 
-// Delete session handler
-async function handleDeleteSession(sessionId: number) {
+// Delete session modal handlers
+function openDeleteSessionModal(sessionId: number) {
   const sessionToDelete = sessions.value?.find((s: any) => s.id === sessionId);
-  if (
-    !confirm(
-      `Are you sure you want to delete "${sessionToDelete?.session_name}"? This will also delete all courses in this session's structure.`,
-    )
-  ) {
-    return;
+  if (sessionToDelete) {
+    deletingSession.value = sessionToDelete;
+    showDeleteSessionModal.value = true;
   }
+}
+
+function closeDeleteSessionModal() {
+  showDeleteSessionModal.value = false;
+  deletingSession.value = null;
+}
+
+async function confirmDeleteSession() {
+  if (!deletingSession.value) return;
 
   deleteSessionLoading.value = true;
   try {
-    await $fetch(`/api/hop/sessions/${sessionId}`, { method: "DELETE" });
+    await $fetch(`/api/hop/sessions/${deletingSession.value.id}`, { method: "DELETE" });
     await refreshSessions();
-    if (selectedSessionId.value === sessionId) {
+    if (selectedSessionId.value === deletingSession.value.id) {
       selectedSessionId.value = sessions.value?.[0]?.id || null;
     }
+    closeDeleteSessionModal();
   } catch (error: any) {
     alert(error?.data?.statusMessage || "Failed to delete session");
   } finally {
@@ -553,10 +578,6 @@ async function handleImport() {
            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
            New Session
         </button>
-        <button v-if="selectedSessionId" class="btn btn-outline btn-sm gap-2" @click="openImportModal">
-           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>
-           Import
-        </button>
         <button v-if="selectedSessionId" class="btn btn-primary btn-sm shadow-lg shadow-primary/20 gap-2" @click="showAddModal = true">
            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
            Add Course
@@ -591,7 +612,7 @@ async function handleImport() {
               </label>
               <ul tabindex="0" class="dropdown-content z-[20] menu p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-200">
                 <li><a @click="openCloneModal(selectedSession)">📋 Clone Session</a></li>
-                <li><a class="text-error" @click="handleDeleteSession(selectedSession.id)">🗑️ Delete Session</a></li>
+                <li><a class="text-error" @click="openDeleteSessionModal(selectedSession.id)">🗑️ Delete Session</a></li>
               </ul>
             </div>
        </div>
@@ -600,9 +621,9 @@ async function handleImport() {
        <div v-if="structureData?.program" class="card bg-base-100/60 backdrop-blur shadow-xl border border-white/20 relative overflow-hidden">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none"></div>
           <div class="card-body p-6 relative z-10">
-             <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+             <div class="flex flex-col md:flex-row justify-between gap-6">
                 <!-- Program Info -->
-                <div class="col-span-2 md:col-span-1">
+                <div>
                    <div class="text-xs uppercase font-bold text-base-content/50 mb-1">Program</div>
                    <div class="font-bold text-lg leading-tight">{{ structureData.program.program_code }}</div>
                    <div class="text-sm opacity-70">{{ structureData.program.program_name }}</div>
@@ -635,6 +656,18 @@ async function handleImport() {
                       {{ structureData.totalCredits === structureData.program.total_credit_required ? 'Requirement Met' : 'Check Requirements' }}
                    </div>
                 </div>
+                 <!-- Actions -->
+                <div class="flex items-center justify-end gap-2">
+                   <button v-if="selectedSessionId" class="btn btn-ghost btn-sm gap-2 text-base-content/70 hover:text-primary" @click="openImportModal" title="Import Structure">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>
+                      <span class="hidden xl:inline">Import</span>
+                   </button>
+                   <button class="btn btn-ghost btn-sm gap-2" @click="toggleAllSemesters">
+                      <svg v-if="!expandedAll" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
+                      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-9.051 5.25 5.25" /></svg>
+                      {{ expandedAll ? 'Collapse All' : 'Expand All' }}
+                   </button>
+                </div>
              </div>
           </div>
        </div>
@@ -647,34 +680,37 @@ async function handleImport() {
        <div v-else-if="structureData?.semesters?.length" class="space-y-4">
            <div v-for="sem in structureData.semesters" :key="sem.semester" class="collapse collapse-arrow bg-base-100 border border-base-200 shadow-sm" :class="collapsedSemesters.has(sem.semester) ? '' : 'collapse-open'">
                <input type="checkbox" :checked="!collapsedSemesters.has(sem.semester)" @change="toggleSemester(sem.semester)" /> 
-               <div class="collapse-title text-lg font-medium flex items-center gap-4 pr-12">
+               <div class="collapse-title text-lg font-medium flex items-center gap-4 pr-12 py-3 min-h-0">
                    <span class="font-bold">{{ formatSemester(sem.semester) }}</span>
                    <div class="flex items-center gap-2 text-sm font-normal text-base-content/60">
                       <span class="badge badge-sm badge-ghost">{{ sem.totalCredits }} Credits</span>
                       <span>{{ sem.courseCount }} Courses</span>
                    </div>
                </div>
-               <div class="collapse-content">
-                  <div class="overflow-x-auto">
-                     <table class="table table-sm w-full">
-                        <thead>
-                           <tr class="text-xs text-base-content/40 uppercase">
-                              <th class="w-12">No.</th>
-                              <th>Course</th>
-                              <th class="text-center">Credits</th>
-                              <th>Type</th>
-                              <th>Prerequisite</th>
-                              <th class="text-right">Actions</th>
+               <div class="collapse-content !pt-0">
+                  <div class="overflow-x-auto rounded-lg border border-base-200">
+                     <table class="table table-sm w-full table-zebra table-fixed">
+                        <thead class="bg-base-200/50 text-base-content">
+                           <tr class="text-xs uppercase">
+                              <th class="w-[5%]">No.</th>
+                              <th class="w-[15%]">Course Code</th>
+                              <th class="w-[30%]">Course Name</th>
+                              <th class="text-center w-[10%]">Credit</th>
+                              <th class="w-[20%]">Status</th>
+                              <th class="w-[10%]">Pre-Req</th>
+                              <th class="text-right w-[10%]">Actions</th>
                            </tr>
                         </thead>
                          <tbody>
                           <tr v-for="(course, index) in sem.courses" :key="course.id" class="hover:bg-base-100/50 transition-colors" :class="{ 'opacity-60': course.course_group && sem.courses.findIndex(c => c.course_group === course.course_group) !== index }">
                             <td class="font-medium opacity-50">{{ index + 1 }}</td>
                             <td>
-                              <span class="font-mono text-sm font-bold">{{ course.course_code }}</span>
-                              <span v-if="course.course_group" class="ml-1 badge badge-xs badge-outline" :title="'Group: ' + course.course_group">
-                                {{ course.course_group }}
-                              </span>
+                              <div class="flex flex-col items-start gap-1">
+                                <span class="font-mono text-sm font-bold">{{ course.course_code }}</span>
+                                <span v-if="course.course_group" class="badge badge-xs badge-ghost border-base-content/20 whitespace-nowrap" :title="'Group: ' + course.course_group">
+                                  {{ course.course_group }}
+                                </span>
+                              </div>
                             </td>
                             <td>{{ course.course_name }}</td>
                             <td class="text-center">
@@ -686,14 +722,14 @@ async function handleImport() {
                               </template>
                             </td>
                             <td>
-                              <span class="badge badge-sm" :class="{
-                                'badge-primary': course.course_type === 'Core Computing',
-                                'badge-secondary': course.course_type === 'Specialization',
-                                'badge-accent': course.course_type === 'Discipline Core',
-                                'badge-info': course.course_type === 'Compulsory',
-                                'badge-success': course.course_type === 'Free Elective',
-                                'badge-warning': course.course_type === 'Final Year Project',
-                                'badge-error': course.course_type === 'Industrial Training',
+                              <span class="badge badge-sm border-none whitespace-nowrap px-3 h-auto py-1" :class="{
+                                'text-primary bg-primary/10': course.course_type === 'Core Computing',
+                                'text-secondary bg-secondary/10': course.course_type === 'Specialization',
+                                'text-accent bg-accent/10': course.course_type === 'Discipline Core',
+                                'text-info bg-info/10': course.course_type === 'Compulsory',
+                                'text-success bg-success/10': course.course_type === 'Free Elective',
+                                'text-warning bg-warning/10': course.course_type === 'Final Year Project',
+                                'text-error bg-error/10': course.course_type === 'Industrial Training',
                               }">
                                 {{ course.course_type }}
                               </span>
@@ -1069,6 +1105,55 @@ async function handleImport() {
        </div>
        <form method="dialog" class="modal-backdrop">
         <button @click="showImportModal = false">close</button>
+      </form>
+    </dialog>
+
+    <!-- Delete Session Confirmation Modal -->
+    <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': showDeleteSessionModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg text-error flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+          </svg>
+          Delete Session
+        </h3>
+        
+        <div class="py-4 space-y-3">
+          <p>
+            Are you sure you want to delete <strong class="text-primary">"{{ deletingSession?.session_name }}"</strong>?
+          </p>
+          
+          <div class="alert alert-warning text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p class="font-bold">This will permanently delete:</p>
+              <ul class="list-disc list-inside mt-1 text-xs">
+                <li>All courses in this session's structure</li>
+                <li>All academic planning intakes using this session</li>
+                <li>All student academic plans generated from those intakes</li>
+              </ul>
+            </div>
+          </div>
+          
+          <p class="text-sm text-error font-medium">This action cannot be undone.</p>
+        </div>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="closeDeleteSessionModal">Cancel</button>
+          <button 
+            class="btn btn-error" 
+            :disabled="deleteSessionLoading"
+            @click="confirmDeleteSession"
+          >
+            <span v-if="deleteSessionLoading" class="loading loading-spinner loading-sm"></span>
+            {{ deleteSessionLoading ? 'Deleting...' : 'Yes, Delete Session' }}
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="closeDeleteSessionModal">
+        <button>close</button>
       </form>
     </dialog>
   </div>

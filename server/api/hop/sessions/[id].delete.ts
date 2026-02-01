@@ -42,8 +42,40 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Delete session (cascade will remove program_courses)
-  await pool.query(`DELETE FROM program_sessions WHERE id = ?`, [id]);
+  // Use transaction to ensure all-or-nothing deletion
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // Delete academic plans for all intakes linked to this session
+    // This ensures students will show "No Plan" status after session deletion
+    await connection.query(
+      `DELETE FROM academic_plans WHERE intake_id IN (
+        SELECT id FROM academic_planning_intakes WHERE session_id = ?
+      )`,
+      [id]
+    );
+
+    // Delete academic_planning_intakes linked to this session
+    await connection.query(
+      `DELETE FROM academic_planning_intakes WHERE session_id = ?`,
+      [id]
+    );
+
+    // Delete session (cascade will remove program_courses)
+    await connection.query(`DELETE FROM program_sessions WHERE id = ?`, [id]);
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Failed to delete session. Please try again.",
+    });
+  } finally {
+    connection.release();
+  }
 
   return { success: true, message: "Session deleted" };
 });
