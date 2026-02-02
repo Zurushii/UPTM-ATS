@@ -243,5 +243,23 @@ CREATE TABLE academic_plan_details (
     FOREIGN KEY (course_id) REFERENCES courses(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
+-- Activity logs for audit trail and notifications
+CREATE TABLE plan_activity_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  plan_id INT NOT NULL,
+  actor_type ENUM('student', 'hop') NOT NULL,
+  action VARCHAR(50) NOT NULL,           -- e.g., 'reverted_to_draft', 'approved', 'scheduled'
+  notes TEXT NULL,
+  is_read BOOLEAN DEFAULT FALSE,         -- For notification badge
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_pal_plan
+    FOREIGN KEY (plan_id) REFERENCES academic_plans(id) ON DELETE CASCADE,
+  
+  INDEX idx_plan_unread (plan_id, is_read)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 1;
+
 

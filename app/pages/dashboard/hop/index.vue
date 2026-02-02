@@ -11,6 +11,68 @@ const { data: session } = await authClient.useSession(useFetch);
 if (!session.value) {
   await navigateTo("/sign-in");
 }
+
+// Notification types
+interface Notification {
+  id: number;
+  plan_id: number;
+  action: string;
+  notes: string;
+  is_read: boolean;
+  created_at: string;
+  matric_no: string;
+  student_name: string;
+  plan_status: string;
+}
+
+interface NotificationResponse {
+  notifications: Notification[];
+  unread_count: number;
+}
+
+// Fetch notifications
+const { data: notificationData, refresh: refreshNotifications } = await useFetch<NotificationResponse>(
+  "/api/hop/notifications"
+);
+
+// Mark all as read
+const markAllRead = async () => {
+  try {
+    await $fetch("/api/hop/notifications", {
+      method: "PATCH",
+      body: { mark_all: true },
+    });
+    await refreshNotifications();
+  } catch (error) {
+    console.error("Failed to mark as read", error);
+  }
+};
+
+// Navigate to student plan
+const goToStudentPlan = async (planId: number, notificationId: number) => {
+  // Mark this notification as read
+  try {
+    await $fetch("/api/hop/notifications", {
+      method: "PATCH",
+      body: { notification_ids: [notificationId] },
+    });
+  } catch (error) {
+    console.error("Failed to mark as read", error);
+  }
+  navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
+};
+
+// Format time ago
+const timeAgo = (dateStr: string) => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+  
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+};
 </script>
 
 <template>
@@ -24,6 +86,59 @@ if (!session.value) {
         <p class="text-base-content/60 font-medium">
           Overview of student intakes and academic tracking status.
         </p>
+      </div>
+    </div>
+
+    <!-- Notifications Section -->
+    <div v-if="notificationData && notificationData.unread_count > 0" class="card bg-warning/10 border border-warning/30 shadow-sm">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="indicator">
+              <span class="indicator-item badge badge-warning badge-sm">{{ notificationData.unread_count }}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-warning">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+              </svg>
+            </div>
+            <h3 class="font-semibold text-warning">Plans Needing Re-Approval</h3>
+          </div>
+          <button class="btn btn-ghost btn-xs" @click="markAllRead">
+            Mark all read
+          </button>
+        </div>
+        
+        <div class="space-y-2">
+          <div 
+            v-for="notification in notificationData.notifications.slice(0, 5)" 
+            :key="notification.id"
+            class="flex items-center justify-between p-3 bg-base-100 rounded-lg border border-base-200 hover:border-warning/50 cursor-pointer transition-colors"
+            @click="goToStudentPlan(notification.plan_id, notification.id)"
+          >
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-warning">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+              </div>
+              <div>
+                <div class="font-medium text-sm">{{ notification.student_name }}</div>
+                <div class="text-xs text-base-content/60">
+                  {{ notification.matric_no }} requested to re-schedule
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="badge badge-warning badge-sm">Needs Review</span>
+              <span class="text-xs text-base-content/50">{{ timeAgo(notification.created_at) }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="notificationData.unread_count > 5" class="text-center mt-2">
+          <NuxtLink to="/dashboard/hop/academic-planning" class="text-sm text-warning hover:underline">
+            View all {{ notificationData.unread_count }} pending requests →
+          </NuxtLink>
+        </div>
       </div>
     </div>
 

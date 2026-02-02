@@ -46,6 +46,7 @@ export default defineEventHandler(async (event) => {
   const [courseRows] = await pool.query(
     `SELECT 
       apd.semester,
+      apd.status,
       c.id as course_id,
       c.course_code,
       c.course_name,
