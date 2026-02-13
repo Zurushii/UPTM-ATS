@@ -193,6 +193,22 @@ CREATE TABLE semester_credit_plans (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE student_transferred_courses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  course_id INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_stc_student
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+
+  CONSTRAINT fk_stc_course
+    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+
+  UNIQUE KEY unique_student_course (student_id, course_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 CREATE TABLE academic_planning_intakes (
   id INT AUTO_INCREMENT PRIMARY KEY,
   program_id INT NOT NULL,
@@ -234,6 +250,7 @@ CREATE TABLE academic_plan_details (
   academic_plan_id INT NOT NULL,
   course_id INT NOT NULL,
   semester INT NOT NULL,
+  status VARCHAR(20) DEFAULT 'Planned',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_apd_plan

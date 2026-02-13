@@ -501,11 +501,13 @@ export default defineEventHandler(async (event) => {
     }
 
     await connection.commit();
-  } catch (error) {
+  } catch (error: any) {
     await connection.rollback();
+    console.error("Failed to update student records:", error?.message || error);
     throw createError({
       statusCode: 500,
       statusMessage: "Failed to update student records",
+      message: error?.message || "Unknown database error",
     });
   } finally {
     connection.release();
