@@ -989,7 +989,7 @@ const closeImportModal = () => {
           @dragover.prevent="isDragging = true"
           @dragleave.prevent="isDragging = false"
           @drop.prevent="handleDrop"
-          @click="$refs.importFileInput.click()"
+          @click="importFileInput?.click()"
         >
            <input
             ref="importFileInput"
