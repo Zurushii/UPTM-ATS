@@ -3,7 +3,7 @@ import { auth } from "~~/utils/auth";
 
 interface CreditPlanInput {
   semester_number: number;
-  semester_type: "L" | "S";
+  semester_type: "L" | "S" | "LI";
   target_credits: number;
 }
 
@@ -75,10 +75,10 @@ export default defineEventHandler(async (event) => {
         statusMessage: "Invalid semester number",
       });
     }
-    if (!["L", "S"].includes(plan.semester_type)) {
+    if (!["L", "S", "LI"].includes(plan.semester_type)) {
       throw createError({
         statusCode: 400,
-        statusMessage: "Semester type must be L (Long) or S (Short)",
+        statusMessage: "Semester type must be L (Long), S (Short), or LI (Industrial Training)",
       });
     }
     if (plan.target_credits === undefined || plan.target_credits < 0) {

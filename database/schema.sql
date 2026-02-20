@@ -183,7 +183,7 @@ CREATE TABLE semester_credit_plans (
   id INT AUTO_INCREMENT PRIMARY KEY,
   rule_id INT NOT NULL,
   semester_number INT NOT NULL,
-  semester_type ENUM('L', 'S') NOT NULL,          -- L = Long semester, S = Short semester
+  semester_type ENUM('L', 'S', 'LI') NOT NULL,     -- L = Long semester, S = Short semester, LI = Industrial Training
   target_credits INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

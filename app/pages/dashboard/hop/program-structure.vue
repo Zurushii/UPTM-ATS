@@ -265,6 +265,40 @@ const selectedSession = computed(() =>
   sessions.value?.find((s: any) => s.id === selectedSessionId.value),
 );
 
+// Credit validation
+const creditsExceeded = computed(() => {
+  if (!structureData.value?.program) return false;
+  return structureData.value.totalCredits > structureData.value.program.total_credit_required;
+});
+
+const creditsDifference = computed(() => {
+  if (!structureData.value?.program) return 0;
+  return structureData.value.totalCredits - structureData.value.program.total_credit_required;
+});
+
+const creditStatus = computed<'matched' | 'exceeded' | 'under'>(() => {
+  if (!structureData.value?.program) return 'under';
+  if (structureData.value.totalCredits === structureData.value.program.total_credit_required) return 'matched';
+  if (structureData.value.totalCredits > structureData.value.program.total_credit_required) return 'exceeded';
+  return 'under';
+});
+
+// Projected credits when adding a new course
+const selectedCourseCredits = computed(() => {
+  if (!newCourse.value.course_id || !allCourses.value) return 0;
+  const course = (allCourses.value as any[]).find(c => c.id === Number(newCourse.value.course_id));
+  return course?.credit_hour ?? 0;
+});
+
+const projectedCredits = computed(() => {
+  return (structureData.value?.totalCredits ?? 0) + selectedCourseCredits.value;
+});
+
+const willExceedCredits = computed(() => {
+  if (!structureData.value?.program) return false;
+  return projectedCredits.value > structureData.value.program.total_credit_required;
+});
+
 // Course type options
 const courseTypeOptions = [
   "Core Computing",
@@ -647,13 +681,21 @@ async function handleImport() {
                 <div>
                    <div class="text-xs uppercase font-bold text-base-content/50 mb-1">Total Credits</div>
                    <div class="flex items-baseline gap-1">
-                      <span class="font-bold text-2xl font-mono" :class="structureData.totalCredits === structureData.program.total_credit_required ? 'text-success' : 'text-warning'">
+                      <span class="font-bold text-2xl font-mono" :class="{
+                         'text-success': creditStatus === 'matched',
+                         'text-error': creditStatus === 'exceeded',
+                         'text-warning': creditStatus === 'under',
+                      }">
                          {{ structureData.totalCredits }}
                       </span>
                       <span class="text-sm text-base-content/50">/ {{ structureData.program.total_credit_required }}</span>
                    </div>
-                   <div class="text-xs" :class="structureData.totalCredits === structureData.program.total_credit_required ? 'text-success' : 'text-warning'">
-                      {{ structureData.totalCredits === structureData.program.total_credit_required ? 'Requirement Met' : 'Check Requirements' }}
+                   <div class="text-xs" :class="{
+                      'text-success': creditStatus === 'matched',
+                      'text-error': creditStatus === 'exceeded',
+                      'text-warning': creditStatus === 'under',
+                   }">
+                      {{ creditStatus === 'matched' ? 'Requirement Met' : creditStatus === 'exceeded' ? `Exceeded by ${creditsDifference} credits` : 'Check Requirements' }}
                    </div>
                 </div>
                  <!-- Actions -->
@@ -671,6 +713,17 @@ async function handleImport() {
              </div>
           </div>
        </div>
+
+          <!-- Credits Exceeded Alert -->
+          <div v-if="creditsExceeded" class="alert alert-error mt-4 shadow-sm">
+             <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+             </svg>
+             <div class="text-sm">
+               <span class="font-bold">Credits exceeded!</span>
+               The total credits ({{ structureData?.totalCredits }}) exceed the program requirement ({{ structureData?.program.total_credit_required }}) by <strong>{{ creditsDifference }}</strong> credit(s). Please remove some courses to meet the requirement.
+             </div>
+          </div>
         
        <!-- Structure List -->
        <div v-if="structurePending" class="flex justify-center py-20">
@@ -950,9 +1003,21 @@ async function handleImport() {
                </select>
              </div>
 
+
+             <!-- Credit projection warning -->
+             <div v-if="newCourse.course_id && willExceedCredits" class="alert alert-error text-sm py-3">
+               <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+               </svg>
+               <div>
+                 <span class="font-bold">Cannot add — credits would exceed the program limit.</span><br/>
+                 Projected total: <strong>{{ projectedCredits }}</strong> / {{ structureData?.program.total_credit_required }} credits.
+               </div>
+             </div>
+
              <div class="modal-action">
                <button type="button" class="btn btn-ghost" @click="showAddModal = false">Cancel</button>
-               <button type="submit" class="btn btn-primary" :disabled="addLoading || !newCourse.course_id">
+               <button type="submit" class="btn btn-primary" :disabled="addLoading || !newCourse.course_id || willExceedCredits">
                  <span v-if="addLoading" class="loading loading-spinner loading-sm"></span>
                  Add Course
                </button>

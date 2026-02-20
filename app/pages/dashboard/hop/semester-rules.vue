@@ -23,7 +23,7 @@ interface Rule {
 interface CreditPlan {
   id?: number;
   semester_number: number;
-  semester_type: "L" | "S";
+  semester_type: "L" | "S" | "LI";
   target_credits: number;
 }
 
@@ -122,9 +122,36 @@ const rulesByIntakeType = computed(() => {
   return grouped;
 });
 
+// Credit hour rules per semester type
+const CREDIT_RULES = {
+  L: { min: 12, max: 20, label: 'Long Semester' },
+  S: { min: 6, max: 10, label: 'Short Semester' },
+  LI: { min: 8, max: 8, label: 'Industrial Training (LI)' },
+} as const;
+
 // Computed: total credits in credit plan
 const totalPlanCredits = computed(() => {
   return creditPlans.value.reduce((sum, plan) => sum + plan.target_credits, 0);
+});
+
+// Computed: validation errors for each credit plan entry
+const creditPlanErrors = computed(() => {
+  return creditPlans.value.map((plan) => {
+    if (plan.target_credits === 0) return null; // Skip validation for empty/zero entries
+    const rule = CREDIT_RULES[plan.semester_type];
+    if (plan.target_credits < rule.min) {
+      return `${rule.label} requires at least ${rule.min} credit hours (currently ${plan.target_credits})`;
+    }
+    if (plan.target_credits > rule.max) {
+      return `${rule.label} cannot exceed ${rule.max} credit hours (currently ${plan.target_credits})`;
+    }
+    return null;
+  });
+});
+
+// Computed: whether there are any credit plan validation errors
+const hasCreditPlanErrors = computed(() => {
+  return creditPlanErrors.value.some((err) => err !== null);
 });
 
 // Open add modal
@@ -333,6 +360,12 @@ const deleteIntakeRules = async () => {
 // Save credit plans
 const saveCreditPlans = async () => {
   if (isSubmitting.value || !creditPlanRule.value) return;
+
+  // Validate credit hour rules before saving
+  if (hasCreditPlanErrors.value) {
+    alert("Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min 12, max 20 credit hours\n- Short Semester: min 6, max 10 credit hours");
+    return;
+  }
 
   isSubmitting.value = true;
 
@@ -879,14 +912,28 @@ const closeImportModal = () => {
                              <select v-model="plan.semester_type" class="select select-sm select-bordered w-full">
                                <option value="L">Long Semester</option>
                                <option value="S">Short Semester</option>
+                                <option value="LI">Industrial Training (LI)</option>
                              </select>
                            </div>
                            
                            <div class="form-control hover:bg-transparent">
                              <label class="label pl-0 pt-0 pb-1">
                                 <span class="label-text text-xs uppercase font-bold text-base-content/40">Target Credits</span>
+                                <span class="label-text-alt text-xs text-base-content/40">
+                                  {{ plan.semester_type === 'L' ? '12–20' : plan.semester_type === 'S' ? '6–10' : '8' }}
+                                </span>
                              </label>
-                             <input type="number" v-model.number="plan.target_credits" min="0" class="input input-sm input-bordered font-mono" />
+                             <input 
+                               type="number" 
+                               v-model.number="plan.target_credits" 
+                               :min="plan.semester_type === 'L' ? 12 : plan.semester_type === 'S' ? 6 : 8" 
+                               :max="plan.semester_type === 'L' ? 20 : plan.semester_type === 'S' ? 10 : 8" 
+                               class="input input-sm input-bordered font-mono" 
+                               :class="{ 'input-error': creditPlanErrors[index] }" 
+                             />
+                             <label v-if="creditPlanErrors[index]" class="label pt-1 pb-0">
+                               <span class="label-text-alt text-error text-xs">{{ creditPlanErrors[index] }}</span>
+                             </label>
                            </div>
                        </div>
                        
@@ -904,10 +951,18 @@ const closeImportModal = () => {
              </div>
          </div>
          
+         <!-- Validation Summary -->
+         <div v-if="hasCreditPlanErrors" class="px-6 pb-2">
+           <div class="alert alert-warning shadow-sm py-2 text-sm">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+             <span>Some semesters have invalid credit hours. <strong>Long: 12–20</strong> · <strong>Short: 6–10</strong></span>
+           </div>
+         </div>
+
          <!-- Footer -->
          <div class="p-4 bg-base-100 border-t border-base-200 flex justify-end gap-3 z-20">
              <button class="btn btn-ghost" @click="closeModals">Discard Changes</button>
-             <button class="btn btn-primary" :disabled="isSubmitting" @click="saveCreditPlans">
+             <button class="btn btn-primary" :disabled="isSubmitting || hasCreditPlanErrors" @click="saveCreditPlans">
                {{ isSubmitting ? "Saving..." : "Save Configuration" }}
              </button>
          </div>

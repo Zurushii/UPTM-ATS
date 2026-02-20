@@ -8,7 +8,7 @@ interface ParsedRule {
   entry_semester: number;
   credit_plans: Array<{
     semester_number: number;
-    semester_type: "L" | "S";
+    semester_type: "L" | "S" | "LI";
     target_credits: number;
   }>;
 }
@@ -134,25 +134,23 @@ export default defineEventHandler(async (event) => {
         const credits = parseInt(rowValues[colIdx]);
 
         if (!isNaN(credits) && credits > 0) {
-          // Determine semester type from header - look for explicit S or L markers
-          // Check if header ends with S or contains (S) or has " S " or "_S"
+          // Determine semester type from header
           const headerUpper = header.toUpperCase();
+
+          // Check for Industrial Training (LI)
+          const isLI = headerUpper.includes("(LI)") || headerUpper.includes(" LI");
+
+          // Check if header ends with S or contains (S) or has " S " or "_S"
           const isShort =
-            headerUpper.endsWith(" S") ||
-            headerUpper.endsWith("_S") ||
-            headerUpper.includes("(S)") ||
-            /\bS\s*$/.test(headerUpper);
+            !isLI && (
+              headerUpper.endsWith(" S") ||
+              headerUpper.endsWith("_S") ||
+              headerUpper.includes("(S)") ||
+              /\bS\s*$/.test(headerUpper)
+            );
 
-          // If not explicitly short, check if explicitly long or default to long
-          // FYP and LI don't automatically mean short - check the header suffix
-          const isLong =
-            headerUpper.endsWith(" L") ||
-            headerUpper.endsWith("_L") ||
-            headerUpper.includes("(L)") ||
-            /\bL\s*$/.test(headerUpper);
-
-          // Default: if neither explicitly marked, default to Long
-          const semesterType: "L" | "S" = isShort ? "S" : "L";
+          // Default: if neither LI nor Short, default to Long
+          const semesterType: "L" | "S" | "LI" = isLI ? "LI" : isShort ? "S" : "L";
 
           creditPlans.push({
             semester_number: semNumber,
