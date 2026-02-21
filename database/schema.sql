@@ -83,6 +83,10 @@ CREATE TABLE programs (
   program_name VARCHAR(150) NOT NULL,
   total_credit_required INT NOT NULL,
   duration_semesters INT NOT NULL,
+  long_sem_min_credit INT NOT NULL DEFAULT 12,
+  long_sem_max_credit INT NOT NULL DEFAULT 20,
+  short_sem_min_credit INT NOT NULL DEFAULT 6,
+  short_sem_max_credit INT NOT NULL DEFAULT 10,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

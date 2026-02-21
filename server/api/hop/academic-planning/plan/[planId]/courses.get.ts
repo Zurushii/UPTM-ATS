@@ -34,9 +34,9 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  // Verify the plan exists and get intake info
+  // Verify the plan exists and get intake info + student's starting semester
   const [planRows] = await pool.query(
-    `SELECT ap.intake_id
+    `SELECT ap.intake_id, ap.start_semester
      FROM academic_plans ap
      JOIN students s ON ap.student_id = s.id
      WHERE ap.id = ? AND s.program_id = ?`,
@@ -51,10 +51,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const intakeId = (planRows as any[])[0].intake_id;
+  const startSemester = (planRows as any[])[0].start_semester;
 
-  // Get session_id from intake
+  // Get session_id and intake_type from intake
   const [intakeRows] = await pool.query(
-    `SELECT session_id FROM academic_planning_intakes WHERE id = ?`,
+    `SELECT session_id, intake_type FROM academic_planning_intakes WHERE id = ?`,
     [intakeId],
   );
 
@@ -66,6 +67,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const sessionId = (intakeRows as any[])[0].session_id;
+  const intakeType = (intakeRows as any[])[0].intake_type;
 
   // Get all available courses from program structure
   const [courseRows] = await pool.query(
@@ -84,7 +86,49 @@ export default defineEventHandler(async (event) => {
     [sessionId],
   );
 
+  // Get semester credit plans for this student's rule
+  // Find the rule that matches this intake_type and the student's starting_semester
+  const [ruleRows] = await pool.query(
+    `SELECT ser.id AS rule_id
+     FROM semester_entry_rules ser
+     WHERE ser.program_id = ? AND ser.intake_type = ? AND ser.entry_semester = ?
+     LIMIT 1`,
+    [programId, intakeType, startSemester],
+  );
+
+  let semesterRules: any[] = [];
+
+  if ((ruleRows as any[]).length > 0) {
+    const ruleId = (ruleRows as any[])[0].rule_id;
+
+    const [creditPlans] = await pool.query(
+      `SELECT semester_number, semester_type, is_li, target_credits
+       FROM semester_credit_plans
+       WHERE rule_id = ?
+       ORDER BY semester_number ASC`,
+      [ruleId],
+    );
+
+    semesterRules = creditPlans as any[];
+  }
+
+  // Get program credit limits
+  const [programRows] = await pool.query(
+    `SELECT long_sem_min_credit, long_sem_max_credit, short_sem_min_credit, short_sem_max_credit
+     FROM programs WHERE id = ?`,
+    [programId],
+  );
+
+  const program = (programRows as any[])[0];
+
   return {
     courses: courseRows,
+    semester_rules: semesterRules,
+    credit_limits: {
+      long_min: program?.long_sem_min_credit ?? 12,
+      long_max: program?.long_sem_max_credit ?? 20,
+      short_min: program?.short_sem_min_credit ?? 6,
+      short_max: program?.short_sem_max_credit ?? 10,
+    },
   };
 });

@@ -66,6 +66,20 @@ interface AvailableCourse {
   course_group: string | null;
 }
 
+interface SemesterRule {
+  semester_number: number;
+  semester_type: 'L' | 'S';
+  is_li: boolean;
+  target_credits: number;
+}
+
+interface CreditLimits {
+  long_min: number;
+  long_max: number;
+  short_min: number;
+  short_max: number;
+}
+
 // Fetch plan data
 const {
   data: planData,
@@ -73,8 +87,12 @@ const {
   refresh: refreshPlan,
 } = await useFetch<PlanData>(`/api/hop/academic-planning/plan/${planId}`);
 
-// Fetch available courses
-const { data: coursesData, pending: coursesLoading } = await useFetch<{ courses: AvailableCourse[] }>(
+// Fetch available courses + semester rules + credit limits
+const { data: coursesData, pending: coursesLoading } = await useFetch<{
+  courses: AvailableCourse[];
+  semester_rules: SemesterRule[];
+  credit_limits: CreditLimits;
+}>(
   `/api/hop/academic-planning/plan/${planId}/courses`
 );
 
@@ -246,9 +264,53 @@ const getAssignedFromGroup = (courseId: number): string | null => {
   return null;
 };
 
-// Check if course should be disabled (another from same group is assigned)
+// Check if course should be disabled (group conflict, LI, or Long-only restriction)
 const isCourseDisabled = (courseId: number): boolean => {
-  return isGroupAlreadyAssigned(courseId);
+  if (isGroupAlreadyAssigned(courseId)) return true;
+  
+  if (selectedSemester.value !== null) {
+    const rule = getSemesterRule(selectedSemester.value);
+    const course = coursesData.value?.courses.find(c => c.course_id === courseId);
+    if (rule && course) {
+      // LI semester: only Industrial Training allowed
+      if (rule.is_li && course.course_type !== 'Industrial Training') return true;
+      // Non-LI semester: Industrial Training not allowed
+      if (!rule.is_li && course.course_type === 'Industrial Training') return true;
+      // Short semester: block FYP2 and Industrial Training (Long semester only)
+      if (rule.semester_type === 'S' && isLongSemesterOnly(course)) return true;
+    }
+  }
+  return false;
+};
+
+// Check if a course is Industrial Training type
+const isIndustrialTraining = (courseId: number): boolean => {
+  const course = coursesData.value?.courses.find(c => c.course_id === courseId);
+  return course?.course_type === 'Industrial Training';
+};
+
+// Check if a course can only be taken in Long semesters (FYP2. Industrial Training)
+const isLongSemesterOnly = (course: AvailableCourse): boolean => {
+  if (course.course_type === 'Industrial Training') return true;
+  if (course.course_type === 'Final Year Project' && /2|II/i.test(course.course_name)) return true;
+  return false;
+};
+
+// Get reason why a course is disabled (for UI display)
+const getCourseDisabledReason = (courseId: number): string | null => {
+  if (isGroupAlreadyAssigned(courseId)) {
+    return `${getAssignedFromGroup(courseId)} selected`;
+  }
+  if (selectedSemester.value !== null) {
+    const rule = getSemesterRule(selectedSemester.value);
+    const course = coursesData.value?.courses.find(c => c.course_id === courseId);
+    if (rule && course) {
+      if (rule.is_li && course.course_type !== 'Industrial Training') return 'LI semester only';
+      if (!rule.is_li && course.course_type === 'Industrial Training') return 'LI semester only';
+      if (rule.semester_type === 'S' && isLongSemesterOnly(course)) return 'Long sem. only';
+    }
+  }
+  return null;
 };
 
 // Get assignment semester for a course
@@ -278,13 +340,54 @@ const totalAssignedCredits = computed(() => {
   return total;
 });
 
+// Get semester rule for a given semester number
+const getSemesterRule = (sem: number): SemesterRule | null => {
+  if (!coursesData.value?.semester_rules) return null;
+  return coursesData.value.semester_rules.find(r => r.semester_number === sem) || null;
+};
+
+// Get credit limits for a semester based on its type
+const getSemesterLimits = (sem: number): { min: number; max: number } | null => {
+  const rule = getSemesterRule(sem);
+  if (!rule || rule.is_li) return null; // LI semesters bypass validation
+  const limits = coursesData.value?.credit_limits;
+  if (!limits) return null;
+  if (rule.semester_type === 'L') return { min: limits.long_min, max: limits.long_max };
+  return { min: limits.short_min, max: limits.short_max };
+};
+
+// Get credit status for a semester: 'ok' | 'over' | 'under' | 'li' | 'empty'
+const getSemesterCreditStatus = (sem: number): string => {
+  const rule = getSemesterRule(sem);
+  if (!rule) return 'ok'; // No rule found, can't validate
+  if (rule.is_li) return 'li';
+
+  const credits = getSemesterCredits(sem);
+  if (credits === 0) return 'empty';
+
+  const limits = getSemesterLimits(sem);
+  if (!limits) return 'ok';
+
+  if (credits > limits.max) return 'over';
+  if (credits < limits.min) return 'under';
+  return 'ok';
+};
+
+// Get semester type label
+const getSemesterTypeLabel = (sem: number): string => {
+  const rule = getSemesterRule(sem);
+  if (!rule) return '';
+  if (rule.is_li) return 'LI';
+  return rule.semester_type === 'L' ? 'Long' : 'Short';
+};
+
 // Format semester label
 const formatSemester = (semesterNum: number) => {
   const year = Math.ceil(semesterNum / 3);
   return `Semester ${semesterNum} / Year ${year}`;
 };
 
-// Assign course to semester (with group validation)
+// Assign course to semester (with group, LI, and Long-only validation)
 const assignCourse = (courseId: number, semester: number) => {
   // Check if this course belongs to a group and if another from the group is already assigned
   if (isGroupAlreadyAssigned(courseId)) {
@@ -292,6 +395,27 @@ const assignCourse = (courseId: number, semester: number) => {
     alert(`Cannot add this course. Another course from the same group (${existingCourse}) is already assigned or transferred.`);
     return;
   }
+  
+  const rule = getSemesterRule(semester);
+  const course = coursesData.value?.courses.find(c => c.course_id === courseId);
+  if (rule && course) {
+    // LI semester: only Industrial Training allowed
+    if (rule.is_li && course.course_type !== 'Industrial Training') {
+      alert('This is an Industrial Training (LI) semester. Only Industrial Training courses can be assigned here.');
+      return;
+    }
+    // Non-LI semester: Industrial Training not allowed
+    if (!rule.is_li && course.course_type === 'Industrial Training') {
+      alert('Industrial Training courses can only be assigned to LI semesters.');
+      return;
+    }
+    // Short semester: block FYP2 and Industrial Training
+    if (rule.semester_type === 'S' && isLongSemesterOnly(course)) {
+      alert(`${course.course_name} can only be taken in a Long semester.`);
+      return;
+    }
+  }
+  
   courseAssignments.value.set(courseId, semester);
 };
 
@@ -450,8 +574,18 @@ watchEffect(() => {
             @click="selectedSemester = sem"
           >
             <span>Sem {{ sem }}</span>
-            <span class="badge badge-sm" :class="selectedSemester === sem ? 'badge-primary' : 'badge-ghost'">
-              {{ getSemesterCredits(sem) }}
+            <span v-if="getSemesterTypeLabel(sem)" class="text-xs opacity-60">({{ getSemesterTypeLabel(sem) }})</span>
+            <span
+              class="badge badge-sm"
+              :class="{
+                'badge-success': getSemesterCreditStatus(sem) === 'ok',
+                'badge-error': getSemesterCreditStatus(sem) === 'over',
+                'badge-warning': getSemesterCreditStatus(sem) === 'under',
+                'badge-ghost': getSemesterCreditStatus(sem) === 'empty' || getSemesterCreditStatus(sem) === 'li',
+                'badge-primary': !getSemesterRule(sem) && selectedSemester === sem,
+              }"
+            >
+              {{ getSemesterCredits(sem) }}<template v-if="getSemesterLimits(sem)">/{{ getSemesterLimits(sem)!.min }}–{{ getSemesterLimits(sem)!.max }}</template>
             </span>
           </button>
         </div>
@@ -471,8 +605,37 @@ watchEffect(() => {
           <!-- Fixed Header -->
           <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100">
             <div class="flex items-center justify-between">
-              <h2 class="font-semibold">{{ selectedSemester ? formatSemester(selectedSemester) : 'Select a Semester' }}</h2>
-              <span v-if="selectedSemester" class="badge badge-primary">{{ getSemesterCredits(selectedSemester) }} credits</span>
+              <div class="flex items-center gap-2">
+                <h2 class="font-semibold">{{ selectedSemester ? formatSemester(selectedSemester) : 'Select a Semester' }}</h2>
+                <span v-if="selectedSemester && getSemesterTypeLabel(selectedSemester)" class="badge badge-outline badge-sm">{{ getSemesterTypeLabel(selectedSemester) }}</span>
+              </div>
+              <div v-if="selectedSemester" class="flex items-center gap-2">
+                <span
+                  class="badge"
+                  :class="{
+                    'badge-success': getSemesterCreditStatus(selectedSemester) === 'ok',
+                    'badge-error': getSemesterCreditStatus(selectedSemester) === 'over',
+                    'badge-warning': getSemesterCreditStatus(selectedSemester) === 'under',
+                    'badge-primary': !getSemesterRule(selectedSemester),
+                    'badge-ghost': getSemesterCreditStatus(selectedSemester) === 'empty' || getSemesterCreditStatus(selectedSemester) === 'li',
+                  }"
+                >
+                  {{ getSemesterCredits(selectedSemester) }}<template v-if="getSemesterLimits(selectedSemester)"> / {{ getSemesterLimits(selectedSemester)!.min }}–{{ getSemesterLimits(selectedSemester)!.max }}</template> credits
+                </span>
+              </div>
+            </div>
+            <!-- Credit warning -->
+            <div
+              v-if="selectedSemester && getSemesterCreditStatus(selectedSemester) === 'over'"
+              class="alert alert-error py-2 px-3 mt-2 text-sm"
+            >
+              ⚠️ Credits exceed the maximum ({{ getSemesterLimits(selectedSemester)!.max }}) for a {{ getSemesterTypeLabel(selectedSemester) }} semester.
+            </div>
+            <div
+              v-else-if="selectedSemester && getSemesterCreditStatus(selectedSemester) === 'under'"
+              class="alert alert-warning py-2 px-3 mt-2 text-sm"
+            >
+              ⚠️ Credits are below the minimum ({{ getSemesterLimits(selectedSemester)!.min }}) for a {{ getSemesterTypeLabel(selectedSemester) }} semester.
             </div>
           </div>
 
@@ -519,7 +682,7 @@ watchEffect(() => {
                     <span class="badge badge-xs badge-ghost shrink-0">{{ course.credit_hour }}cr</span>
                     <span class="badge badge-xs badge-outline shrink-0">S{{ course.default_semester }}</span>
                     <span v-if="isCourseDisabled(course.course_id)" class="badge badge-xs badge-warning shrink-0">
-                      {{ getAssignedFromGroup(course.course_id) }} selected
+                      {{ getCourseDisabledReason(course.course_id) }}
                     </span>
                   </div>
                   <span v-if="!isCourseDisabled(course.course_id)" class="text-success text-sm shrink-0">+</span>
