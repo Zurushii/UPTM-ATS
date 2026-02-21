@@ -23,7 +23,8 @@ interface Rule {
 interface CreditPlan {
   id?: number;
   semester_number: number;
-  semester_type: "L" | "S" | "LI";
+  semester_type: "L" | "S";
+  is_li: boolean;
   target_credits: number;
 }
 
@@ -126,7 +127,6 @@ const rulesByIntakeType = computed(() => {
 const CREDIT_RULES = {
   L: { min: 12, max: 20, label: 'Long Semester' },
   S: { min: 6, max: 10, label: 'Short Semester' },
-  LI: { min: 8, max: 8, label: 'Industrial Training (LI)' },
 } as const;
 
 // Computed: total credits in credit plan
@@ -138,6 +138,7 @@ const totalPlanCredits = computed(() => {
 const creditPlanErrors = computed(() => {
   return creditPlans.value.map((plan) => {
     if (plan.target_credits === 0) return null; // Skip validation for empty/zero entries
+    if (plan.is_li) return null; // Industrial Training (LI) bypasses credit hour rules
     const rule = CREDIT_RULES[plan.semester_type];
     if (plan.target_credits < rule.min) {
       return `${rule.label} requires at least ${rule.min} credit hours (currently ${plan.target_credits})`;
@@ -193,7 +194,7 @@ const openCreditPlanModal = async (rule: Rule) => {
     );
     
     if (plans.length > 0) {
-      creditPlans.value = plans;
+      creditPlans.value = plans.map((p: any) => ({ ...p, is_li: !!p.is_li }));
     } else {
       // Initialize with default semesters starting from entry semester
       creditPlans.value = [];
@@ -201,6 +202,7 @@ const openCreditPlanModal = async (rule: Rule) => {
         creditPlans.value.push({
           semester_number: sem,
           semester_type: sem === 6 || sem === 8 || sem === 9 ? "S" : "L",
+            is_li: false,
           target_credits: 0,
         });
       }
@@ -233,6 +235,7 @@ const addSemesterToPlan = () => {
   creditPlans.value.push({
     semester_number: maxSem + 1,
     semester_type: "L",
+    is_li: false,
     target_credits: 0,
   });
 };
@@ -904,7 +907,7 @@ const closeImportModal = () => {
                           {{ plan.semester_number }}
                        </div>
                        
-                       <div class="flex-1 grid grid-cols-2 gap-4">
+                       <div class="flex-1 grid grid-cols-[1fr_auto_1fr] gap-4">
                            <div class="form-control hover:bg-transparent">
                              <label class="label pl-0 pt-0 pb-1">
                                 <span class="label-text text-xs uppercase font-bold text-base-content/40">Semester Type</span>
@@ -912,24 +915,30 @@ const closeImportModal = () => {
                              <select v-model="plan.semester_type" class="select select-sm select-bordered w-full">
                                <option value="L">Long Semester</option>
                                <option value="S">Short Semester</option>
-                                <option value="LI">Industrial Training (LI)</option>
                              </select>
                            </div>
-                           
+                            
+                            <div class="flex items-end pb-2">
+                              <label class="label cursor-pointer gap-2">
+                                <input type="checkbox" v-model="plan.is_li" class="checkbox checkbox-sm checkbox-primary" @change="if (plan.is_li) { plan.target_credits = 8; plan.semester_type = 'L'; }" />
+                                <span class="label-text text-xs font-semibold">LI</span>
+                              </label>
+                            </div>
                            <div class="form-control hover:bg-transparent">
                              <label class="label pl-0 pt-0 pb-1">
                                 <span class="label-text text-xs uppercase font-bold text-base-content/40">Target Credits</span>
                                 <span class="label-text-alt text-xs text-base-content/40">
-                                  {{ plan.semester_type === 'L' ? '12–20' : plan.semester_type === 'S' ? '6–10' : '8' }}
+                                  {{ plan.is_li ? 'LI' : plan.semester_type === 'L' ? '12–20' : '6–10' }}
                                 </span>
                              </label>
                              <input 
                                type="number" 
                                v-model.number="plan.target_credits" 
-                               :min="plan.semester_type === 'L' ? 12 : plan.semester_type === 'S' ? 6 : 8" 
-                               :max="plan.semester_type === 'L' ? 20 : plan.semester_type === 'S' ? 10 : 8" 
+                               :min="plan.semester_type === 'L' ? 12 : 6" 
+                               :max="plan.semester_type === 'L' ? 20 : 10" 
                                class="input input-sm input-bordered font-mono" 
-                               :class="{ 'input-error': creditPlanErrors[index] }" 
+                               :class="{ 'input-error': creditPlanErrors[index] }"
+                                :disabled="plan.is_li" 
                              />
                              <label v-if="creditPlanErrors[index]" class="label pt-1 pb-0">
                                <span class="label-text-alt text-error text-xs">{{ creditPlanErrors[index] }}</span>

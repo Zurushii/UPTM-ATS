@@ -53,7 +53,7 @@ export default defineEventHandler(async (event) => {
 
   // Get credit plans for this rule
   const [plans] = await pool.query(
-    `SELECT id, semester_number, semester_type, target_credits
+    `SELECT id, semester_number, semester_type, is_li, target_credits
      FROM semester_credit_plans
      WHERE rule_id = ?
      ORDER BY semester_number ASC`,

@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event);
-  const { semester, course_type, course_group, prerequisite_course_id } = body;
+  const { semester, course_type, course_group, prerequisite_course_id, course_code } = body;
 
   if (!semester) {
     throw createError({
@@ -119,6 +119,15 @@ export default defineEventHandler(async (event) => {
     `UPDATE program_courses SET semester = ?, course_type = COALESCE(?, course_type), course_group = ?, prerequisite_course_id = ? WHERE id = ?`,
     [semester, course_type, course_group !== undefined ? course_group : null, prerequisite_course_id || null, id],
   );
+
+  // Update course code in courses table if provided
+  if (course_code) {
+    const courseId = (existingRows as any[])[0].course_id;
+    await pool.query(
+      `UPDATE courses SET course_code = ? WHERE id = ?`,
+      [course_code, courseId],
+    );
+  }
 
   return {
     success: true,

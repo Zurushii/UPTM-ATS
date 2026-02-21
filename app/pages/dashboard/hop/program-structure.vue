@@ -149,6 +149,7 @@ const newCourse = ref({
 // Form state for editing course
 const editingCourse = ref<any>(null);
 const editForm = ref({
+  course_code: "",
   semester: 1,
   course_type: "Core Computing",
   course_group: "",
@@ -480,6 +481,7 @@ async function handleCreateCourse() {
 function openEditModal(course: any) {
   editingCourse.value = course;
   editForm.value = {
+    course_code: course.course_code || "",
     semester: course.semester,
     course_type: course.course_type || "Core Computing",
     course_group: course.course_group || "",
@@ -497,6 +499,7 @@ async function handleUpdateCourse() {
     await $fetch(`/api/hop/program-structure/${editingCourse.value.id}`, {
       method: "PUT",
       body: {
+        course_code: editForm.value.course_code,
         semester: editForm.value.semester,
         course_type: editForm.value.course_type,
         course_group: editForm.value.course_group || null,
@@ -509,6 +512,7 @@ async function handleUpdateCourse() {
     showEditModal.value = false;
     editingCourse.value = null;
     await refreshStructure();
+    await refreshCourses();
   } catch (error: any) {
     alert(error?.data?.statusMessage || "Failed to update course");
   } finally {
@@ -1080,6 +1084,12 @@ async function handleImport() {
         
         <div class="p-6">
           <form @submit.prevent="handleUpdateCourse" class="space-y-4">
+             <!-- Course Code -->
+             <div class="form-control hover:bg-transparent">
+               <label class="label"><span class="label-text">Course Code</span></label>
+               <input v-model="editForm.course_code" type="text" class="input input-bordered w-full font-mono" placeholder="e.g., CT204" required />
+             </div>
+
              <div class="grid grid-cols-2 gap-4">
                 <div class="form-control hover:bg-transparent">
                    <label class="label"><span class="label-text">Semester</span></label>

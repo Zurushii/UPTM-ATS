@@ -3,7 +3,8 @@ import { auth } from "~~/utils/auth";
 
 interface CreditPlanInput {
   semester_number: number;
-  semester_type: "L" | "S" | "LI";
+  semester_type: "L" | "S";
+  is_li: boolean;
   target_credits: number;
 }
 
@@ -75,10 +76,10 @@ export default defineEventHandler(async (event) => {
         statusMessage: "Invalid semester number",
       });
     }
-    if (!["L", "S", "LI"].includes(plan.semester_type)) {
+    if (!["L", "S"].includes(plan.semester_type)) {
       throw createError({
         statusCode: 400,
-        statusMessage: "Semester type must be L (Long), S (Short), or LI (Industrial Training)",
+        statusMessage: "Semester type must be L (Long) or S (Short)",
       });
     }
     if (plan.target_credits === undefined || plan.target_credits < 0) {
@@ -100,11 +101,12 @@ export default defineEventHandler(async (event) => {
       ruleId,
       plan.semester_number,
       plan.semester_type,
+      plan.is_li ? 1 : 0,
       plan.target_credits,
     ]);
 
     await pool.query(
-      `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, target_credits)
+      `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
        VALUES ?`,
       [values],
     );

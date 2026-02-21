@@ -183,7 +183,8 @@ CREATE TABLE semester_credit_plans (
   id INT AUTO_INCREMENT PRIMARY KEY,
   rule_id INT NOT NULL,
   semester_number INT NOT NULL,
-  semester_type ENUM('L', 'S', 'LI') NOT NULL,     -- L = Long semester, S = Short semester, LI = Industrial Training
+  semester_type ENUM('L', 'S') NOT NULL,            -- L = Long semester, S = Short semester
+  is_li BOOLEAN NOT NULL DEFAULT FALSE,              -- Industrial Training (LI) bypasses credit hour validation
   target_credits INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

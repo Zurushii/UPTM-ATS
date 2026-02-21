@@ -8,7 +8,8 @@ interface ParsedRule {
   entry_semester: number;
   credit_plans: Array<{
     semester_number: number;
-    semester_type: "L" | "S" | "LI";
+    semester_type: "L" | "S";
+    is_li: boolean;
     target_credits: number;
   }>;
 }
@@ -149,12 +150,13 @@ export default defineEventHandler(async (event) => {
               /\bS\s*$/.test(headerUpper)
             );
 
-          // Default: if neither LI nor Short, default to Long
-          const semesterType: "L" | "S" | "LI" = isLI ? "LI" : isShort ? "S" : "L";
+          // LI is always Long semester; otherwise check Short/Long
+          const semesterType: "L" | "S" = isLI ? "L" : isShort ? "S" : "L";
 
           creditPlans.push({
             semester_number: semNumber,
             semester_type: semesterType,
+            is_li: isLI,
             target_credits: credits,
           });
         }
@@ -226,11 +228,12 @@ export default defineEventHandler(async (event) => {
           ruleId,
           plan.semester_number,
           plan.semester_type,
+          plan.is_li,
           plan.target_credits,
         ]);
 
         await pool.query(
-          `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, target_credits)
+          `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
            VALUES ?`,
           [planValues],
         );
