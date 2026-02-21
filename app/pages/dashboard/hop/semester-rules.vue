@@ -123,11 +123,79 @@ const rulesByIntakeType = computed(() => {
   return grouped;
 });
 
-// Credit hour rules per semester type
-const CREDIT_RULES = {
-  L: { min: 12, max: 20, label: 'Long Semester' },
-  S: { min: 6, max: 10, label: 'Short Semester' },
-} as const;
+// Fetch program credit limits from DB
+const { data: creditLimitsData, refresh: refreshCreditLimits } = await useFetch<{
+  long_min: number;
+  long_max: number;
+  short_min: number;
+  short_max: number;
+}>('/api/hop/program/credit-limits');
+
+// Editable credit limits state
+const isEditingCreditLimits = ref(false);
+const isSavingCreditLimits = ref(false);
+const creditLimitsForm = ref({
+  long_min: 12,
+  long_max: 20,
+  short_min: 6,
+  short_max: 10,
+});
+
+// Dynamic credit rules (replaces hardcoded CREDIT_RULES)
+const CREDIT_RULES = computed(() => ({
+  L: {
+    min: creditLimitsData.value?.long_min ?? 12,
+    max: creditLimitsData.value?.long_max ?? 20,
+    label: 'Long Semester',
+  },
+  S: {
+    min: creditLimitsData.value?.short_min ?? 6,
+    max: creditLimitsData.value?.short_max ?? 10,
+    label: 'Short Semester',
+  },
+}));
+
+const startEditCreditLimits = () => {
+  creditLimitsForm.value = {
+    long_min: creditLimitsData.value?.long_min ?? 12,
+    long_max: creditLimitsData.value?.long_max ?? 20,
+    short_min: creditLimitsData.value?.short_min ?? 6,
+    short_max: creditLimitsData.value?.short_max ?? 10,
+  };
+  isEditingCreditLimits.value = true;
+};
+
+const cancelEditCreditLimits = () => {
+  isEditingCreditLimits.value = false;
+};
+
+const saveCreditLimits = async () => {
+  if (isSavingCreditLimits.value) return;
+
+  const { long_min, long_max, short_min, short_max } = creditLimitsForm.value;
+  if (long_min > long_max) {
+    alert('Long semester minimum cannot exceed maximum.');
+    return;
+  }
+  if (short_min > short_max) {
+    alert('Short semester minimum cannot exceed maximum.');
+    return;
+  }
+
+  isSavingCreditLimits.value = true;
+  try {
+    await $fetch('/api/hop/program/credit-limits', {
+      method: 'PUT',
+      body: creditLimitsForm.value,
+    });
+    await refreshCreditLimits();
+    isEditingCreditLimits.value = false;
+  } catch (error: any) {
+    alert(error.data?.message || error.message || 'Failed to save credit limits');
+  } finally {
+    isSavingCreditLimits.value = false;
+  }
+};
 
 // Computed: total credits in credit plan
 const totalPlanCredits = computed(() => {
@@ -139,7 +207,7 @@ const creditPlanErrors = computed(() => {
   return creditPlans.value.map((plan) => {
     if (plan.target_credits === 0) return null; // Skip validation for empty/zero entries
     if (plan.is_li) return null; // Industrial Training (LI) bypasses credit hour rules
-    const rule = CREDIT_RULES[plan.semester_type];
+    const rule = CREDIT_RULES.value[plan.semester_type];
     if (plan.target_credits < rule.min) {
       return `${rule.label} requires at least ${rule.min} credit hours (currently ${plan.target_credits})`;
     }
@@ -366,7 +434,9 @@ const saveCreditPlans = async () => {
 
   // Validate credit hour rules before saving
   if (hasCreditPlanErrors.value) {
-    alert("Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min 12, max 20 credit hours\n- Short Semester: min 6, max 10 credit hours");
+    const lr = CREDIT_RULES.value.L;
+    const sr = CREDIT_RULES.value.S;
+    alert(`Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min ${lr.min}, max ${lr.max} credit hours\n- Short Semester: min ${sr.min}, max ${sr.max} credit hours`);
     return;
   }
 
@@ -468,6 +538,122 @@ const closeImportModal = () => {
           </svg>
           Add New Rule
         </button>
+      </div>
+    </div>
+
+    <!-- Credit Hour Settings Card -->
+    <div class="card bg-base-100 shadow-xl border border-base-200 overflow-hidden">
+      <div class="p-4 flex items-center justify-between border-b border-base-200">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full bg-info/10 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-info">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+            </svg>
+          </div>
+          <div>
+            <h2 class="font-bold text-sm">Credit Hour Limits</h2>
+            <p class="text-xs text-base-content/50">Min/max credit hours per semester type</p>
+          </div>
+        </div>
+        <button
+          v-if="!isEditingCreditLimits"
+          class="btn btn-sm btn-ghost gap-1"
+          @click="startEditCreditLimits"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+          </svg>
+          Edit
+        </button>
+      </div>
+
+      <!-- View Mode -->
+      <div v-if="!isEditingCreditLimits" class="p-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg">
+            <div class="badge badge-primary badge-outline">Long</div>
+            <div class="text-sm">
+              <span class="font-mono font-bold">{{ creditLimitsData?.long_min ?? 12 }}</span>
+              <span class="text-base-content/50"> – </span>
+              <span class="font-mono font-bold">{{ creditLimitsData?.long_max ?? 20 }}</span>
+              <span class="text-xs text-base-content/50 ml-1">credits</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg">
+            <div class="badge badge-secondary badge-outline">Short</div>
+            <div class="text-sm">
+              <span class="font-mono font-bold">{{ creditLimitsData?.short_min ?? 6 }}</span>
+              <span class="text-base-content/50"> – </span>
+              <span class="font-mono font-bold">{{ creditLimitsData?.short_max ?? 10 }}</span>
+              <span class="text-xs text-base-content/50 ml-1">credits</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Mode -->
+      <div v-else class="p-4 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <!-- Long Semester -->
+          <div class="p-3 bg-primary/5 rounded-lg border border-primary/20 space-y-3">
+            <div class="badge badge-primary badge-sm">Long Semester</div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="form-control">
+                <label class="label py-0 pl-0"><span class="label-text text-xs">Min</span></label>
+                <input
+                  v-model.number="creditLimitsForm.long_min"
+                  type="number"
+                  min="0"
+                  class="input input-bordered input-sm w-full font-mono"
+                />
+              </div>
+              <div class="form-control">
+                <label class="label py-0 pl-0"><span class="label-text text-xs">Max</span></label>
+                <input
+                  v-model.number="creditLimitsForm.long_max"
+                  type="number"
+                  min="0"
+                  class="input input-bordered input-sm w-full font-mono"
+                />
+              </div>
+            </div>
+          </div>
+          <!-- Short Semester -->
+          <div class="p-3 bg-secondary/5 rounded-lg border border-secondary/20 space-y-3">
+            <div class="badge badge-secondary badge-sm">Short Semester</div>
+                <div class="grid grid-cols-2 gap-3">
+              <div class="form-control">
+                <label class="label py-0 pl-0"><span class="label-text text-xs">Min</span></label>
+                <input
+                  v-model.number="creditLimitsForm.short_min"
+                  type="number"
+                  min="0"
+                  class="input input-bordered input-sm w-full font-mono"
+                />
+              </div>
+              <div class="form-control">
+                <label class="label py-0 pl-0"><span class="label-text text-xs">Max</span></label>
+                <input
+                  v-model.number="creditLimitsForm.short_max"
+                  type="number"
+                  min="0"
+                  class="input input-bordered input-sm w-full font-mono"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-ghost btn-sm" @click="cancelEditCreditLimits">Cancel</button>
+          <button
+            class="btn btn-primary btn-sm min-w-[80px]"
+            :disabled="isSavingCreditLimits"
+            @click="saveCreditLimits"
+          >
+            <span v-if="isSavingCreditLimits" class="loading loading-spinner loading-xs"></span>
+            {{ isSavingCreditLimits ? 'Saving...' : 'Save' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -927,19 +1113,19 @@ const closeImportModal = () => {
                            <div class="form-control hover:bg-transparent">
                              <label class="label pl-0 pt-0 pb-1">
                                 <span class="label-text text-xs uppercase font-bold text-base-content/40">Target Credits</span>
-                                <span class="label-text-alt text-xs text-base-content/40">
-                                  {{ plan.is_li ? 'LI' : plan.semester_type === 'L' ? '12–20' : '6–10' }}
-                                </span>
-                             </label>
-                             <input 
-                               type="number" 
-                               v-model.number="plan.target_credits" 
-                               :min="plan.semester_type === 'L' ? 12 : 6" 
-                               :max="plan.semester_type === 'L' ? 20 : 10" 
-                               class="input input-sm input-bordered font-mono" 
-                               :class="{ 'input-error': creditPlanErrors[index] }"
-                                :disabled="plan.is_li" 
-                             />
+                                 <span class="label-text-alt text-xs text-base-content/40">
+                                   {{ plan.is_li ? 'LI' : plan.semester_type === 'L' ? `${CREDIT_RULES.L.min}–${CREDIT_RULES.L.max}` : `${CREDIT_RULES.S.min}–${CREDIT_RULES.S.max}` }}
+                                 </span>
+                              </label>
+                              <input 
+                                type="number" 
+                                v-model.number="plan.target_credits" 
+                                :min="plan.semester_type === 'L' ? CREDIT_RULES.L.min : CREDIT_RULES.S.min" 
+                                :max="plan.semester_type === 'L' ? CREDIT_RULES.L.max : CREDIT_RULES.S.max" 
+                                class="input input-sm input-bordered font-mono" 
+                                :class="{ 'input-error': creditPlanErrors[index] }"
+                                 :disabled="plan.is_li" 
+                              />
                              <label v-if="creditPlanErrors[index]" class="label pt-1 pb-0">
                                <span class="label-text-alt text-error text-xs">{{ creditPlanErrors[index] }}</span>
                              </label>

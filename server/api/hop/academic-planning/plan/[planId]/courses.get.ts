@@ -78,9 +78,12 @@ export default defineEventHandler(async (event) => {
       c.credit_hour,
       pc.semester AS default_semester,
       pc.course_type,
-      pc.course_group
+      pc.course_group,
+      pc.prerequisite_course_id,
+      prereq.course_code AS prerequisite_code
     FROM program_courses pc
     JOIN courses c ON pc.course_id = c.id
+    LEFT JOIN courses prereq ON pc.prerequisite_course_id = prereq.id
     WHERE pc.session_id = ?
     ORDER BY pc.semester, c.course_code`,
     [sessionId],
@@ -112,14 +115,71 @@ export default defineEventHandler(async (event) => {
     semesterRules = creditPlans as any[];
   }
 
-  // Get program credit limits
+  // Get program info (credit limits + duration)
   const [programRows] = await pool.query(
-    `SELECT long_sem_min_credit, long_sem_max_credit, short_sem_min_credit, short_sem_max_credit
+    `SELECT long_sem_min_credit, long_sem_max_credit, short_sem_min_credit, short_sem_max_credit, duration_semesters
      FROM programs WHERE id = ?`,
     [programId],
   );
 
   const program = (programRows as any[])[0];
+
+  // If no matching rule found AND student starts at semester 1,
+  // infer semester types from program structure credits.
+  // Students with entry_semester > 1 must rely on HOP-configured rules.
+  if (semesterRules.length === 0 && program && startSemester === 1) {
+    const shortMin = program.short_sem_min_credit ?? 6;
+    const shortMax = program.short_sem_max_credit ?? 10;
+
+    // Detect which semesters contain Industrial Training courses
+    const [liSemRows] = await pool.query(
+      `SELECT DISTINCT pc.semester
+       FROM program_courses pc
+       WHERE pc.session_id = ? AND pc.course_type = 'Industrial Training'`,
+      [sessionId],
+    );
+    const liSemesters = new Set(
+      (liSemRows as any[]).map((r: any) => r.semester),
+    );
+
+    // Get total credits per semester from program structure
+    // For grouped courses (e.g. MPU electives), only count one per group
+    const [semCredits] = await pool.query(
+      `SELECT semester, SUM(credit_hour) AS total_credits FROM (
+        SELECT pc.semester, c.credit_hour
+        FROM program_courses pc
+        JOIN courses c ON pc.course_id = c.id
+        WHERE pc.session_id = ? AND pc.course_group IS NULL
+        UNION ALL
+        SELECT pc.semester, MAX(c.credit_hour) AS credit_hour
+        FROM program_courses pc
+        JOIN courses c ON pc.course_id = c.id
+        WHERE pc.session_id = ? AND pc.course_group IS NOT NULL
+        GROUP BY pc.semester, pc.course_group
+      ) combined
+      GROUP BY semester
+      ORDER BY semester ASC`,
+      [sessionId, sessionId],
+    );
+
+    for (const row of semCredits as any[]) {
+      const credits = Number(row.total_credits);
+      const isLi = liSemesters.has(row.semester);
+      // LI semesters are always Long type; otherwise infer from credits
+      const semType = isLi
+        ? "L"
+        : credits >= shortMin && credits <= shortMax
+          ? "S"
+          : "L";
+
+      semesterRules.push({
+        semester_number: row.semester,
+        semester_type: semType,
+        is_li: isLi,
+        target_credits: credits,
+      });
+    }
+  }
 
   return {
     courses: courseRows,

@@ -11,6 +11,7 @@ interface ProgramCourse {
   semester: number;
   course_type: string;
   course_group: string | null;
+  prerequisite_course_id: number | null;
 }
 
 interface FailedStudent {
@@ -120,7 +121,7 @@ export default defineEventHandler(async (event) => {
   // Check if intake assessment has been completed
   // At least some students must have starting_semester set
   const studentsWithAssessment = (studentRows as any[]).filter(
-    (s) => s.starting_semester !== null && s.starting_semester > 0
+    (s) => s.starting_semester !== null && s.starting_semester > 0,
   );
 
   if (studentsWithAssessment.length === 0) {
@@ -157,7 +158,8 @@ export default defineEventHandler(async (event) => {
       c.credit_hour,
       pc.semester,
       pc.course_type,
-      pc.course_group
+      pc.course_group,
+      pc.prerequisite_course_id
     FROM program_courses pc
     JOIN courses c ON pc.course_id = c.id
     WHERE pc.session_id = ?
@@ -167,8 +169,24 @@ export default defineEventHandler(async (event) => {
 
   const allProgramCourses: ProgramCourse[] = courseRows as ProgramCourse[];
 
+  // Get program credit limits (min/max per semester type)
+  const [programLimitRows] = await pool.query(
+    `SELECT long_sem_min_credit, long_sem_max_credit, short_sem_min_credit, short_sem_max_credit
+     FROM programs WHERE id = ?`,
+    [programId],
+  );
+  const programLimits = (programLimitRows as any[])[0] || {};
+  const creditLimits = {
+    long_min: programLimits.long_sem_min_credit ?? 12,
+    long_max: programLimits.long_sem_max_credit ?? 20,
+    short_min: programLimits.short_sem_min_credit ?? 6,
+    short_max: programLimits.short_sem_max_credit ?? 10,
+  };
+
   // Get all courses for code-to-ID lookup and credit hours
-  const [allCoursesRows] = await pool.query(`SELECT id, course_code, credit_hour FROM courses`);
+  const [allCoursesRows] = await pool.query(
+    `SELECT id, course_code, credit_hour FROM courses`,
+  );
   const courseCodeToId = new Map<string, number>();
   const courseIdToCreditHour = new Map<number, number>();
   for (const course of allCoursesRows as any[]) {
@@ -261,7 +279,7 @@ export default defineEventHandler(async (event) => {
     const transferredCourseIds = new Set<number>();
     let transferredCoursesCredits = 0;
     let validationFailed = false;
-    
+
     if (transferredCoursesCol !== -1) {
       const transferredCoursesValue = row.getCell(transferredCoursesCol).value;
       if (transferredCoursesValue) {
@@ -327,7 +345,7 @@ export default defineEventHandler(async (event) => {
 
         const planId = (planResult as any).insertId;
 
-        // Prepare course assignments for the ENTIRE program structure
+        // Prepare course assignments
         const courseAssignments: Array<{
           course_id: number;
           semester: number;
@@ -338,27 +356,659 @@ export default defineEventHandler(async (event) => {
         // Key: "semester:group_name", e.g., "1:MPU Elective"
         const assignedCourseGroupsPerSem = new Set<string>();
 
-        // Process ALL courses from program structure
-        for (const course of allProgramCourses) {
-          // Handle grouped courses - only take one from each group PER SEMESTER
-          if (course.course_group) {
-            const groupKey = `${course.semester}:${course.course_group}`;
-            if (assignedCourseGroupsPerSem.has(groupKey)) {
-              continue; // Skip, already assigned a course from this group for this semester
+        if (student.starting_semester === 1) {
+          // ── Semester 1 students: follow program structure directly ──
+          for (const course of allProgramCourses) {
+            if (course.course_group) {
+              const groupKey = `${course.semester}:${course.course_group}`;
+              if (assignedCourseGroupsPerSem.has(groupKey)) continue;
+              assignedCourseGroupsPerSem.add(groupKey);
             }
-            assignedCourseGroupsPerSem.add(groupKey);
+
+            const status = student.transferred_course_ids.has(course.course_id)
+              ? "Transferred"
+              : "Planned";
+
+            courseAssignments.push({
+              course_id: course.course_id,
+              semester: course.semester,
+              status: status,
+            });
+          }
+        } else {
+          // ── Credit transfer students (starting_semester > 1): smart auto-schedule ──
+
+          // 1. Add transferred courses first (keep their original semester)
+          for (const course of allProgramCourses) {
+            if (student.transferred_course_ids.has(course.course_id)) {
+              if (course.course_group) {
+                const groupKey = `${course.semester}:${course.course_group}`;
+                if (assignedCourseGroupsPerSem.has(groupKey)) continue;
+                assignedCourseGroupsPerSem.add(groupKey);
+              }
+              courseAssignments.push({
+                course_id: course.course_id,
+                semester: course.semester,
+                status: "Transferred",
+              });
+            }
           }
 
-          // Determine status: Transferred if in transferred list, otherwise Planned
-          const status = student.transferred_course_ids.has(course.course_id)
-            ? "Transferred"
-            : "Planned";
+          // 2. Fetch semester credit plans for this student's rule
+          const [ruleRows] = await connection.query(
+            `SELECT ser.id AS rule_id
+             FROM semester_entry_rules ser
+             WHERE ser.program_id = ? AND ser.intake_type = ? AND ser.entry_semester = ?
+             LIMIT 1`,
+            [programId, intake.intake_type, student.starting_semester],
+          );
 
-          courseAssignments.push({
-            course_id: course.course_id,
-            semester: course.semester, // Use original program structure semester
-            status: status,
-          });
+          let creditPlans: Array<{
+            semester_number: number;
+            semester_type: "L" | "S";
+            is_li: boolean;
+            target_credits: number;
+          }> = [];
+
+          if ((ruleRows as any[]).length > 0) {
+            const ruleId = (ruleRows as any[])[0].rule_id;
+            const [cpRows] = await connection.query(
+              `SELECT semester_number, semester_type, is_li, target_credits
+               FROM semester_credit_plans
+               WHERE rule_id = ?
+               ORDER BY semester_number ASC`,
+              [ruleId],
+            );
+            creditPlans = (cpRows as any[]).map((r: any) => ({
+              semester_number: r.semester_number,
+              semester_type: r.semester_type as "L" | "S",
+              is_li: !!r.is_li,
+              target_credits: Number(r.target_credits),
+            }));
+          }
+
+          // 3. Collect planned courses (not transferred, respecting groups)
+          const plannedCourses: ProgramCourse[] = [];
+          const plannedGroupsPerSem = new Set<string>();
+          for (const course of allProgramCourses) {
+            if (student.transferred_course_ids.has(course.course_id)) continue;
+            if (course.course_group) {
+              const groupKey = `${course.semester}:${course.course_group}`;
+              if (assignedCourseGroupsPerSem.has(groupKey)) continue;
+              if (plannedGroupsPerSem.has(groupKey)) continue;
+              plannedGroupsPerSem.add(groupKey);
+            }
+            plannedCourses.push(course);
+          }
+
+          // 4. Smart scheduling using credit plans
+          if (creditPlans.length > 0) {
+            // Separate Industrial Training courses from regular courses
+            const itCourses = plannedCourses.filter(
+              (c) => c.course_type === "Industrial Training",
+            );
+            const regularCourses = plannedCourses.filter(
+              (c) => c.course_type !== "Industrial Training",
+            );
+
+            const assignedCourseIds = new Set<number>(
+              student.transferred_course_ids,
+            );
+            const semesterCreditsUsed = new Map<number, number>();
+
+            // Sort regular courses by their default semester (respect natural ordering)
+            regularCourses.sort((a, b) => a.semester - b.semester);
+
+            // Build quick-lookup map: semester_number → plan
+            const planSemMap = new Map<number, (typeof creditPlans)[0]>();
+            for (const plan of creditPlans) {
+              planSemMap.set(plan.semester_number, plan);
+            }
+
+            // Helper: get the hard max credit for a semester based on its type
+            function getMaxCredit(plan: (typeof creditPlans)[0]): number {
+              return plan.semester_type === "L"
+                ? creditLimits.long_max
+                : creditLimits.short_max;
+            }
+
+            // Effective capacity = min(target_credits, program max credit for semester type)
+            function getEffectiveCapacity(
+              plan: (typeof creditPlans)[0],
+            ): number {
+              return Math.min(plan.target_credits, getMaxCredit(plan));
+            }
+
+            // Helper: check if a course can only go on Long semesters
+            function isLongSemesterOnly(course: ProgramCourse): boolean {
+              if (course.course_type === "Industrial Training") return true;
+              if (
+                course.course_type === "Final Year Project" &&
+                /2|II/i.test(course.course_name)
+              )
+                return true;
+              return false;
+            }
+
+            // Helper: get the min credit for a semester based on its type
+            function getMinCredit(plan: (typeof creditPlans)[0]): number {
+              return plan.semester_type === "L"
+                ? creditLimits.long_min
+                : creditLimits.short_min;
+            }
+
+            // Helper: find nearest non-LI semester with available capacity
+            // Prefers under-minimum semesters first, then nearest by proximity
+            const nonLiPlans = creditPlans.filter((p) => !p.is_li);
+            function findNearestSemester(
+              defaultSem: number,
+              creditHour: number,
+              minSemester: number, // must be > this (for prereq ordering)
+              respectCapacity: boolean,
+              longOnly: boolean = false, // if true, only consider Long (L) semesters
+            ): (typeof creditPlans)[0] | null {
+              const eligible = nonLiPlans.filter(
+                (p) =>
+                  p.semester_number > minSemester &&
+                  (!longOnly || p.semester_type === "L"),
+              );
+
+              // Partition: under-minimum semesters vs others
+              const underMin = eligible.filter((p) => {
+                const used = semesterCreditsUsed.get(p.semester_number) || 0;
+                return used < getMinCredit(p);
+              });
+              const rest = eligible.filter((p) => {
+                const used = semesterCreditsUsed.get(p.semester_number) || 0;
+                return used >= getMinCredit(p);
+              });
+
+              // Sort each group by proximity to default semester
+              const byProximity = (
+                a: (typeof creditPlans)[0],
+                b: (typeof creditPlans)[0],
+              ) =>
+                Math.abs(a.semester_number - defaultSem) -
+                Math.abs(b.semester_number - defaultSem);
+              underMin.sort(byProximity);
+              rest.sort(byProximity);
+
+              // Try under-minimum semesters first, then the rest
+              const candidates = [...underMin, ...rest];
+
+              for (const plan of candidates) {
+                const used = semesterCreditsUsed.get(plan.semester_number) || 0;
+                if (!respectCapacity) {
+                  // Even when ignoring target capacity, never exceed program hard max
+                  if (used + creditHour <= getMaxCredit(plan)) {
+                    return plan;
+                  }
+                } else {
+                  if (used + creditHour <= getEffectiveCapacity(plan)) {
+                    return plan;
+                  }
+                }
+              }
+              // If ignoring capacity and everything exceeds hard max, return the least-full
+              if (!respectCapacity && candidates.length > 0) {
+                return candidates.reduce((best, plan) => {
+                  const bestUsed =
+                    semesterCreditsUsed.get(best.semester_number) || 0;
+                  const planUsed =
+                    semesterCreditsUsed.get(plan.semester_number) || 0;
+                  return planUsed < bestUsed ? plan : best;
+                });
+              }
+              return null;
+            }
+
+            // Assign IT courses to LI semesters first
+            for (const plan of creditPlans) {
+              if (plan.is_li) {
+                for (const itCourse of itCourses) {
+                  courseAssignments.push({
+                    course_id: itCourse.course_id,
+                    semester: plan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(itCourse.course_id);
+                  semesterCreditsUsed.set(
+                    plan.semester_number,
+                    (semesterCreditsUsed.get(plan.semester_number) || 0) +
+                      itCourse.credit_hour,
+                  );
+                }
+              }
+            }
+
+            // ── Pre-schedule: Reserve long-only prerequisite chains (e.g., FYP1→FYP2) ──
+            // FYP2 must go on a Long semester. If we schedule normally, FYP1 may land
+            // on the last Long semester, leaving no Long semester for FYP2.
+            // Solve by scheduling these chains in reverse: FYP2 first (latest Long),
+            // then FYP1 on a semester before that.
+            for (const course of regularCourses) {
+              if (!isLongSemesterOnly(course)) continue;
+              if (assignedCourseIds.has(course.course_id)) continue;
+
+              // Build prerequisite chain: [FYP1, FYP2] (prereqs first)
+              const chain: ProgramCourse[] = [course];
+              let current = course;
+              while (current.prerequisite_course_id) {
+                const prereq = regularCourses.find(
+                  (c) => c.course_id === current.prerequisite_course_id,
+                );
+                if (!prereq || assignedCourseIds.has(prereq.course_id)) break;
+                chain.unshift(prereq);
+                current = prereq;
+              }
+
+              // Schedule in reverse: dependent (FYP2) first → then prereqs before it
+              let nextMustBeBefore = Infinity;
+
+              for (let i = chain.length - 1; i >= 0; i--) {
+                const c = chain[i];
+                if (assignedCourseIds.has(c.course_id)) {
+                  const existingSem =
+                    courseAssignments.find((a) => a.course_id === c.course_id)
+                      ?.semester ?? Infinity;
+                  nextMustBeBefore = existingSem;
+                  continue;
+                }
+
+                const cLongOnly = isLongSemesterOnly(c);
+
+                // Prereq of this chain member that's already assigned (e.g., transferred)
+                const prereqSem = c.prerequisite_course_id
+                  ? (courseAssignments.find(
+                      (a) => a.course_id === c.prerequisite_course_id,
+                    )?.semester ?? 0)
+                  : 0;
+
+                // Eligible semesters: non-LI, before the dependent, after any prereq
+                const eligible = nonLiPlans.filter(
+                  (p) =>
+                    p.semester_number < nextMustBeBefore &&
+                    p.semester_number > prereqSem &&
+                    (!cLongOnly || p.semester_type === "L"),
+                );
+
+                // Pick the latest semester with capacity
+                let bestPlan: (typeof creditPlans)[0] | null = null;
+                for (let j = eligible.length - 1; j >= 0; j--) {
+                  const used =
+                    semesterCreditsUsed.get(eligible[j].semester_number) || 0;
+                  if (
+                    used + c.credit_hour <=
+                    getEffectiveCapacity(eligible[j])
+                  ) {
+                    bestPlan = eligible[j];
+                    break;
+                  }
+                }
+                // Fallback: latest that fits hard max
+                if (!bestPlan) {
+                  for (let j = eligible.length - 1; j >= 0; j--) {
+                    const used =
+                      semesterCreditsUsed.get(eligible[j].semester_number) || 0;
+                    if (used + c.credit_hour <= getMaxCredit(eligible[j])) {
+                      bestPlan = eligible[j];
+                      break;
+                    }
+                  }
+                }
+                // Last fallback: just pick the latest eligible
+                if (!bestPlan && eligible.length > 0) {
+                  bestPlan = eligible[eligible.length - 1];
+                }
+
+                if (bestPlan) {
+                  courseAssignments.push({
+                    course_id: c.course_id,
+                    semester: bestPlan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(c.course_id);
+                  semesterCreditsUsed.set(
+                    bestPlan.semester_number,
+                    (semesterCreditsUsed.get(bestPlan.semester_number) || 0) +
+                      c.credit_hour,
+                  );
+                  nextMustBeBefore = bestPlan.semester_number;
+                }
+              }
+            }
+
+            // First pass: assign courses whose prerequisites are already satisfied
+            const unassigned: ProgramCourse[] = [];
+            for (const course of regularCourses) {
+              // Skip courses already assigned (e.g., long-only chains pre-scheduled above)
+              if (assignedCourseIds.has(course.course_id)) continue;
+
+              if (
+                course.prerequisite_course_id &&
+                !assignedCourseIds.has(course.prerequisite_course_id)
+              ) {
+                unassigned.push(course);
+                continue;
+              }
+
+              // Get the prereq's assigned semester (if any) to enforce ordering
+              const prereqSem = course.prerequisite_course_id
+                ? (courseAssignments.find(
+                    (a) => a.course_id === course.prerequisite_course_id,
+                  )?.semester ?? 0)
+                : 0;
+
+              // Try the course's default semester first
+              const defaultPlan = planSemMap.get(course.semester);
+              let assigned = false;
+              const longOnly = isLongSemesterOnly(course);
+
+              if (
+                defaultPlan &&
+                !defaultPlan.is_li &&
+                (!longOnly || defaultPlan.semester_type === "L") &&
+                defaultPlan.semester_number > prereqSem
+              ) {
+                const used =
+                  semesterCreditsUsed.get(defaultPlan.semester_number) || 0;
+                if (
+                  used + course.credit_hour <=
+                  getEffectiveCapacity(defaultPlan)
+                ) {
+                  courseAssignments.push({
+                    course_id: course.course_id,
+                    semester: defaultPlan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(course.course_id);
+                  semesterCreditsUsed.set(
+                    defaultPlan.semester_number,
+                    used + course.credit_hour,
+                  );
+                  assigned = true;
+                }
+              }
+
+              // Overflow: find nearest semester with capacity
+              if (!assigned) {
+                const nearest = findNearestSemester(
+                  course.semester,
+                  course.credit_hour,
+                  prereqSem,
+                  true,
+                  longOnly,
+                );
+                if (nearest) {
+                  const used =
+                    semesterCreditsUsed.get(nearest.semester_number) || 0;
+                  courseAssignments.push({
+                    course_id: course.course_id,
+                    semester: nearest.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(course.course_id);
+                  semesterCreditsUsed.set(
+                    nearest.semester_number,
+                    used + course.credit_hour,
+                  );
+                  assigned = true;
+                }
+              }
+
+              if (!assigned) unassigned.push(course);
+            }
+
+            // Second pass: assign deferred courses (prerequisites now satisfied)
+            const stillUnassigned: ProgramCourse[] = [];
+            for (const course of unassigned) {
+              const prereqSem = course.prerequisite_course_id
+                ? (courseAssignments.find(
+                    (a) => a.course_id === course.prerequisite_course_id,
+                  )?.semester ?? 0)
+                : 0;
+
+              // Try default semester first (if after prereq)
+              const defaultPlan = planSemMap.get(course.semester);
+              let assigned = false;
+              const longOnly = isLongSemesterOnly(course);
+
+              if (
+                defaultPlan &&
+                !defaultPlan.is_li &&
+                defaultPlan.semester_number > prereqSem &&
+                (!longOnly || defaultPlan.semester_type === "L")
+              ) {
+                const used =
+                  semesterCreditsUsed.get(defaultPlan.semester_number) || 0;
+                if (
+                  used + course.credit_hour <=
+                  getEffectiveCapacity(defaultPlan)
+                ) {
+                  courseAssignments.push({
+                    course_id: course.course_id,
+                    semester: defaultPlan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(course.course_id);
+                  semesterCreditsUsed.set(
+                    defaultPlan.semester_number,
+                    used + course.credit_hour,
+                  );
+                  assigned = true;
+                }
+              }
+
+              // Overflow: find nearest semester with capacity after prereq
+              if (!assigned) {
+                const nearest = findNearestSemester(
+                  course.semester,
+                  course.credit_hour,
+                  prereqSem,
+                  true,
+                  longOnly,
+                );
+                if (nearest) {
+                  const used =
+                    semesterCreditsUsed.get(nearest.semester_number) || 0;
+                  courseAssignments.push({
+                    course_id: course.course_id,
+                    semester: nearest.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(course.course_id);
+                  semesterCreditsUsed.set(
+                    nearest.semester_number,
+                    used + course.credit_hour,
+                  );
+                  assigned = true;
+                }
+              }
+
+              if (!assigned) stillUnassigned.push(course);
+            }
+
+            // Final pass: force-assign remaining courses (exceed target if needed)
+            for (const course of stillUnassigned) {
+              const prereqSem = course.prerequisite_course_id
+                ? (courseAssignments.find(
+                    (a) => a.course_id === course.prerequisite_course_id,
+                  )?.semester ?? 0)
+                : 0;
+
+              // Try nearest semester ignoring capacity
+              const longOnly = isLongSemesterOnly(course);
+              const nearest = findNearestSemester(
+                course.semester,
+                course.credit_hour,
+                prereqSem,
+                false, // ignore capacity
+                longOnly,
+              );
+              if (nearest) {
+                courseAssignments.push({
+                  course_id: course.course_id,
+                  semester: nearest.semester_number,
+                  status: "Planned",
+                });
+                assignedCourseIds.add(course.course_id);
+                semesterCreditsUsed.set(
+                  nearest.semester_number,
+                  (semesterCreditsUsed.get(nearest.semester_number) || 0) +
+                    course.credit_hour,
+                );
+              } else if (nonLiPlans.length > 0) {
+                // Last resort: assign to the last eligible non-LI semester
+                // Must still respect prereq ordering and long-only constraint
+                const eligibleLastResort = (
+                  longOnly
+                    ? nonLiPlans.filter((p) => p.semester_type === "L")
+                    : nonLiPlans
+                ).filter((p) => p.semester_number > prereqSem);
+                if (eligibleLastResort.length > 0) {
+                  const lastPlan =
+                    eligibleLastResort[eligibleLastResort.length - 1];
+                  courseAssignments.push({
+                    course_id: course.course_id,
+                    semester: lastPlan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(course.course_id);
+                  semesterCreditsUsed.set(
+                    lastPlan.semester_number,
+                    (semesterCreditsUsed.get(lastPlan.semester_number) || 0) +
+                      course.credit_hour,
+                  );
+                }
+              }
+            }
+
+            // ── 5. Post-assignment rebalancing ──
+            // Move courses from over-target semesters to under-minimum semesters
+            // to eliminate credit limit warnings in the UI.
+            const MAX_REBALANCE_ITERATIONS = 50;
+            for (let iter = 0; iter < MAX_REBALANCE_ITERATIONS; iter++) {
+              // Find under-minimum non-LI semesters (that have at least some courses)
+              const underMinPlans = nonLiPlans.filter((p) => {
+                const used = semesterCreditsUsed.get(p.semester_number) || 0;
+                return used > 0 && used < getMinCredit(p);
+              });
+              if (underMinPlans.length === 0) break;
+
+              // Find donor semesters: over-target first, then at-target but above min
+              const overTargetPlans = nonLiPlans.filter((p) => {
+                const used = semesterCreditsUsed.get(p.semester_number) || 0;
+                return used > getEffectiveCapacity(p);
+              });
+              const atTargetPlans = nonLiPlans.filter((p) => {
+                const used = semesterCreditsUsed.get(p.semester_number) || 0;
+                return (
+                  used <= getEffectiveCapacity(p) && used > getMinCredit(p)
+                );
+              });
+              const donorPlans = [...overTargetPlans, ...atTargetPlans];
+              if (donorPlans.length === 0) break;
+
+              let moved = false;
+              for (const receiver of underMinPlans) {
+                const receiverUsed =
+                  semesterCreditsUsed.get(receiver.semester_number) || 0;
+                if (receiverUsed >= getMinCredit(receiver)) continue;
+
+                for (const donor of donorPlans) {
+                  const donorUsed =
+                    semesterCreditsUsed.get(donor.semester_number) || 0;
+                  const donorMin = getMinCredit(donor);
+
+                  // Find movable courses in the donor semester
+                  const donorCourses = courseAssignments.filter(
+                    (a) =>
+                      a.semester === donor.semester_number &&
+                      a.status === "Planned",
+                  );
+
+                  for (const assignment of donorCourses) {
+                    const creditHour =
+                      courseIdToCreditHour.get(assignment.course_id) || 0;
+                    if (creditHour === 0) continue;
+
+                    // Donor must stay >= min after losing course
+                    if (donorUsed - creditHour < donorMin) continue;
+
+                    // Receiver must not exceed hard max
+                    const newReceiverUsed = receiverUsed + creditHour;
+                    if (newReceiverUsed > getMaxCredit(receiver)) continue;
+
+                    // Check prerequisite ordering:
+                    // This course's prereq must be in earlier semester than receiver
+                    const courseDetail = regularCourses.find(
+                      (c) => c.course_id === assignment.course_id,
+                    );
+                    if (courseDetail?.prerequisite_course_id) {
+                      const prereqAssignment = courseAssignments.find(
+                        (a) =>
+                          a.course_id === courseDetail.prerequisite_course_id,
+                      );
+                      if (
+                        prereqAssignment &&
+                        prereqAssignment.semester >= receiver.semester_number
+                      )
+                        continue;
+                    }
+
+                    // Long-semester-only courses cannot be moved to Short semesters
+                    if (
+                      courseDetail &&
+                      isLongSemesterOnly(courseDetail) &&
+                      receiver.semester_type !== "L"
+                    )
+                      continue;
+
+                    // No dependent course should be in semester <= receiver
+                    const dependents = courseAssignments.filter((a) => {
+                      const dep = regularCourses.find(
+                        (c) => c.course_id === a.course_id,
+                      );
+                      return (
+                        dep?.prerequisite_course_id === assignment.course_id
+                      );
+                    });
+                    if (
+                      dependents.some(
+                        (d) => d.semester <= receiver.semester_number,
+                      )
+                    )
+                      continue;
+
+                    // Move the course
+                    assignment.semester = receiver.semester_number;
+                    semesterCreditsUsed.set(
+                      donor.semester_number,
+                      donorUsed - creditHour,
+                    );
+                    semesterCreditsUsed.set(
+                      receiver.semester_number,
+                      newReceiverUsed,
+                    );
+                    moved = true;
+                    break; // Re-evaluate after each move
+                  }
+                  if (moved) break;
+                }
+                if (moved) break;
+              }
+              if (!moved) break; // No more moves possible
+            }
+          } else {
+            // No credit plans configured: fallback to original program structure semesters
+            for (const course of plannedCourses) {
+              courseAssignments.push({
+                course_id: course.course_id,
+                semester: course.semester,
+                status: "Planned",
+              });
+            }
+          }
         }
 
         // Insert all course assignments

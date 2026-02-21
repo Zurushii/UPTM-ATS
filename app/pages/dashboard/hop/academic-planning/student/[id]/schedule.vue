@@ -64,6 +64,22 @@ interface AvailableCourse {
   default_semester: number;
   course_type: string;
   course_group: string | null;
+  prerequisite_course_id: number | null;
+  prerequisite_code: string | null;
+}
+
+interface SemesterRule {
+  semester_number: number;
+  semester_type: "L" | "S";
+  is_li: boolean;
+  target_credits: number;
+}
+
+interface CreditLimits {
+  long_min: number;
+  long_max: number;
+  short_min: number;
+  short_max: number;
 }
 
 // Fetch plan data
@@ -73,13 +89,18 @@ const {
   refresh: refreshPlan,
 } = await useFetch<PlanData>(`/api/hop/academic-planning/plan/${planId}`);
 
-// Fetch available courses
-const { data: coursesData, pending: coursesLoading } = await useFetch<{ courses: AvailableCourse[] }>(
-  `/api/hop/academic-planning/plan/${planId}/courses`
-);
+// Fetch available courses + semester rules + credit limits
+const { data: coursesData, pending: coursesLoading } = await useFetch<{
+  courses: AvailableCourse[];
+  semester_rules: SemesterRule[];
+  credit_limits: CreditLimits;
+}>(`/api/hop/academic-planning/plan/${planId}/courses`);
 
 // Check if plan exists or not draft
-if (!loading.value && (!planData.value || planData.value.plan.status !== "draft")) {
+if (
+  !loading.value &&
+  (!planData.value || planData.value.plan.status !== "draft")
+) {
   await navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
 }
 
@@ -87,6 +108,7 @@ if (!loading.value && (!planData.value || planData.value.plan.status !== "draft"
 const selectedSemester = ref<number | null>(null);
 const saveLoading = ref(false);
 const courseAssignments = ref<Map<number, number>>(new Map()); // course_id -> semester
+const showProgramStructure = ref(true);
 
 // Initialize course assignments from plan data
 watchEffect(() => {
@@ -103,10 +125,25 @@ watchEffect(() => {
   }
 });
 
+// Get transferred courses
+const transferredCourses = computed(() => {
+  if (!planData.value) return [];
+
+  const transferred: Course[] = [];
+  for (const semester of planData.value.semesters) {
+    for (const course of semester.courses) {
+      if (course.status === "Transferred") {
+        transferred.push(course);
+      }
+    }
+  }
+  return transferred;
+});
+
 // Get only planned courses (not transferred)
 const plannedCourses = computed(() => {
   if (!coursesData.value) return [];
-  
+
   // Get transferred course IDs
   const transferredIds = new Set<number>();
   if (planData.value) {
@@ -118,9 +155,11 @@ const plannedCourses = computed(() => {
       }
     }
   }
-  
+
   // Filter out transferred courses
-  return coursesData.value.courses.filter(c => !transferredIds.has(c.course_id));
+  return coursesData.value.courses.filter(
+    (c) => !transferredIds.has(c.course_id),
+  );
 });
 
 // Get unique semesters from available courses
@@ -134,29 +173,236 @@ const availableSemesters = computed(() => {
   return Array.from(semesters).sort((a, b) => a - b);
 });
 
-// Get courses for selected semester
-const coursesForSemester = computed(() => {
-  if (selectedSemester.value === null) return [];
-  return plannedCourses.value.filter(c => {
-    const assigned = courseAssignments.value.get(c.course_id);
-    return assigned === selectedSemester.value || (!assigned && c.default_semester === selectedSemester.value);
-  });
+// Get program structure grouped by semester
+const programStructure = computed(() => {
+  if (!coursesData.value) return new Map<number, AvailableCourse[]>();
+
+  const structure = new Map<number, AvailableCourse[]>();
+  for (const course of coursesData.value.courses) {
+    if (!structure.has(course.default_semester)) {
+      structure.set(course.default_semester, []);
+    }
+    structure.get(course.default_semester)!.push(course);
+  }
+  return structure;
 });
 
-// Get unassigned courses
-const unassignedCourses = computed(() => {
-  return plannedCourses.value.filter(c => {
-    const assigned = courseAssignments.value.get(c.course_id);
-    return !assigned;
-  });
-});
+// Check if a course is transferred
+const isTransferred = (courseId: number): boolean => {
+  return transferredCourses.value.some((c) => c.course_id === courseId);
+};
+
+// Check if a course is assigned
+const isAssigned = (courseId: number): boolean => {
+  return courseAssignments.value.has(courseId);
+};
+
+// Get course group for a course
+const getCourseGroup = (courseId: number): string | null => {
+  const course = coursesData.value?.courses.find(
+    (c) => c.course_id === courseId,
+  );
+  return course?.course_group || null;
+};
+
+// Get default semester for a course
+const getDefaultSemester = (courseId: number): number | null => {
+  const course = coursesData.value?.courses.find(
+    (c) => c.course_id === courseId,
+  );
+  return course?.default_semester ?? null;
+};
+
+// Check if another course from the same group AND same default semester is already assigned
+const isGroupAlreadyAssigned = (courseId: number): boolean => {
+  const courseGroup = getCourseGroup(courseId);
+  const defaultSem = getDefaultSemester(courseId);
+  if (!courseGroup || defaultSem === null) return false;
+
+  for (const [assignedId] of courseAssignments.value) {
+    if (
+      assignedId !== courseId &&
+      getCourseGroup(assignedId) === courseGroup &&
+      getDefaultSemester(assignedId) === defaultSem
+    ) {
+      return true;
+    }
+  }
+  for (const tc of transferredCourses.value) {
+    if (tc.course_id !== courseId) {
+      const tcGroup = getCourseGroup(tc.course_id);
+      const tcSem = getDefaultSemester(tc.course_id);
+      if (tcGroup === courseGroup && tcSem === defaultSem) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// Get the assigned course from a group (same default semester)
+const getAssignedFromGroup = (courseId: number): string | null => {
+  const courseGroup = getCourseGroup(courseId);
+  const defaultSem = getDefaultSemester(courseId);
+  if (!courseGroup || defaultSem === null) return null;
+
+  for (const [assignedId] of courseAssignments.value) {
+    if (
+      assignedId !== courseId &&
+      getCourseGroup(assignedId) === courseGroup &&
+      getDefaultSemester(assignedId) === defaultSem
+    ) {
+      const course = coursesData.value?.courses.find(
+        (c) => c.course_id === assignedId,
+      );
+      return course?.course_code || null;
+    }
+  }
+  for (const tc of transferredCourses.value) {
+    if (tc.course_id !== courseId) {
+      const tcGroup = getCourseGroup(tc.course_id);
+      const tcSem = getDefaultSemester(tc.course_id);
+      if (tcGroup === courseGroup && tcSem === defaultSem) {
+        return tc.course_code;
+      }
+    }
+  }
+  return null;
+};
+
+// Check if a course can only be taken in Long semesters (FYP2, Industrial Training)
+const isLongSemesterOnly = (course: AvailableCourse): boolean => {
+  if (course.course_type === "Industrial Training") return true;
+  if (
+    course.course_type === "Final Year Project" &&
+    /2|II/i.test(course.course_name)
+  )
+    return true;
+  return false;
+};
+
+// Check if a prerequisite is satisfied (assigned to an earlier semester or transferred)
+const isPrereqSatisfied = (
+  prereqCourseId: number,
+  targetSemester: number,
+): boolean => {
+  if (transferredCourses.value.some((tc) => tc.course_id === prereqCourseId))
+    return true;
+  const assignedSem = courseAssignments.value.get(prereqCourseId);
+  if (assignedSem !== undefined && assignedSem < targetSemester) return true;
+  return false;
+};
+
+// Check if course should be disabled (group conflict, LI, Long-only, or prereq restriction)
+const isCourseDisabled = (courseId: number): boolean => {
+  if (isGroupAlreadyAssigned(courseId)) return true;
+
+  if (selectedSemester.value !== null) {
+    const rule = getSemesterRule(selectedSemester.value);
+    const course = coursesData.value?.courses.find(
+      (c) => c.course_id === courseId,
+    );
+    if (rule && course) {
+      if (rule.is_li && course.course_type !== "Industrial Training")
+        return true;
+      if (!rule.is_li && course.course_type === "Industrial Training")
+        return true;
+      if (rule.semester_type === "S" && isLongSemesterOnly(course)) return true;
+    }
+    if (course && course.prerequisite_course_id) {
+      if (
+        !isPrereqSatisfied(
+          course.prerequisite_course_id,
+          selectedSemester.value,
+        )
+      )
+        return true;
+    }
+  }
+  return false;
+};
+
+// Get reason why a course is disabled (for UI display)
+const getCourseDisabledReason = (courseId: number): string | null => {
+  if (isGroupAlreadyAssigned(courseId)) {
+    return `${getAssignedFromGroup(courseId)} selected`;
+  }
+  if (selectedSemester.value !== null) {
+    const rule = getSemesterRule(selectedSemester.value);
+    const course = coursesData.value?.courses.find(
+      (c) => c.course_id === courseId,
+    );
+    if (rule && course) {
+      if (rule.is_li && course.course_type !== "Industrial Training")
+        return "LI semester only";
+      if (!rule.is_li && course.course_type === "Industrial Training")
+        return "LI semester only";
+      if (rule.semester_type === "S" && isLongSemesterOnly(course))
+        return "Long sem. only";
+    }
+    if (
+      course &&
+      course.prerequisite_course_id &&
+      !isPrereqSatisfied(course.prerequisite_course_id, selectedSemester.value)
+    ) {
+      return `Prereq: ${course.prerequisite_code}`;
+    }
+  }
+  return null;
+};
+
+// Get assignment semester for a course
+const getAssignedSemester = (courseId: number): number | null => {
+  return courseAssignments.value.get(courseId) ?? null;
+};
+
+// Get semester rule for a given semester number
+const getSemesterRule = (sem: number): SemesterRule | undefined => {
+  return coursesData.value?.semester_rules?.find(
+    (r) => r.semester_number === sem,
+  );
+};
+
+// Get semester type label
+const getSemesterTypeLabel = (sem: number): string => {
+  const rule = getSemesterRule(sem);
+  if (!rule) return "";
+  if (rule.is_li) return "LI";
+  return rule.semester_type === "L" ? "Long" : "Short";
+};
+
+// Get credit limits for a semester based on its type
+const getSemesterCreditLimits = (
+  sem: number,
+): { min: number; max: number } | null => {
+  const rule = getSemesterRule(sem);
+  const limits = coursesData.value?.credit_limits;
+  if (!rule || !limits || rule.is_li) return null; // LI semesters bypass credit validation
+  if (rule.semester_type === "L")
+    return { min: limits.long_min, max: limits.long_max };
+  return { min: limits.short_min, max: limits.short_max };
+};
+
+// Get credit status for badge color
+const getCreditStatus = (
+  sem: number,
+): "ok" | "under" | "over" | "li" | "empty" => {
+  const rule = getSemesterRule(sem);
+  if (rule?.is_li) return "li";
+  const credits = getSemesterCredits(sem);
+  const limits = getSemesterCreditLimits(sem);
+  if (!limits || credits === 0) return "empty";
+  if (credits > limits.max) return "over";
+  if (credits < limits.min) return "under";
+  return "ok";
+};
 
 // Calculate credits for a semester
 const getSemesterCredits = (sem: number) => {
   let credits = 0;
   for (const [courseId, semester] of courseAssignments.value) {
     if (semester === sem) {
-      const course = plannedCourses.value.find(c => c.course_id === courseId);
+      const course = plannedCourses.value.find((c) => c.course_id === courseId);
       if (course) credits += course.credit_hour;
     }
   }
@@ -167,10 +413,15 @@ const getSemesterCredits = (sem: number) => {
 const totalAssignedCredits = computed(() => {
   let total = 0;
   for (const [courseId] of courseAssignments.value) {
-    const course = plannedCourses.value.find(c => c.course_id === courseId);
+    const course = plannedCourses.value.find((c) => c.course_id === courseId);
     if (course) total += course.credit_hour;
   }
   return total;
+});
+
+// Calculate total planned credits from program structure (not from plan details)
+const totalPlannedCredits = computed(() => {
+  return plannedCourses.value.reduce((sum, c) => sum + c.credit_hour, 0);
 });
 
 // Format semester label
@@ -179,8 +430,48 @@ const formatSemester = (semesterNum: number) => {
   return `Semester ${semesterNum} / Year ${year}`;
 };
 
-// Assign course to semester
+// Assign course to semester (with group, LI, Long-only, and prereq validation)
 const assignCourse = (courseId: number, semester: number) => {
+  if (isGroupAlreadyAssigned(courseId)) {
+    const existingCourse = getAssignedFromGroup(courseId);
+    alert(
+      `Cannot add this course. Another course from the same group (${existingCourse}) is already assigned or transferred.`,
+    );
+    return;
+  }
+
+  const rule = getSemesterRule(semester);
+  const course = coursesData.value?.courses.find(
+    (c) => c.course_id === courseId,
+  );
+  if (rule && course) {
+    if (rule.is_li && course.course_type !== "Industrial Training") {
+      alert(
+        "This is an Industrial Training (LI) semester. Only Industrial Training courses can be assigned here.",
+      );
+      return;
+    }
+    if (!rule.is_li && course.course_type === "Industrial Training") {
+      alert(
+        "Industrial Training courses can only be assigned to LI semesters.",
+      );
+      return;
+    }
+    if (rule.semester_type === "S" && isLongSemesterOnly(course)) {
+      alert(`${course.course_name} can only be taken in a Long semester.`);
+      return;
+    }
+  }
+
+  if (course && course.prerequisite_course_id) {
+    if (!isPrereqSatisfied(course.prerequisite_course_id, semester)) {
+      alert(
+        `Cannot assign ${course.course_code}. Pre-requisite ${course.prerequisite_code} must be assigned to an earlier semester first.`,
+      );
+      return;
+    }
+  }
+
   courseAssignments.value.set(courseId, semester);
 };
 
@@ -189,21 +480,41 @@ const removeCourse = (courseId: number) => {
   courseAssignments.value.delete(courseId);
 };
 
-// Check if course is assigned to current semester
-const isAssignedToSemester = (courseId: number, semester: number) => {
-  return courseAssignments.value.get(courseId) === semester;
+// Quick assign from program structure
+const quickAssign = (course: AvailableCourse) => {
+  if (
+    selectedSemester.value !== null &&
+    !isTransferred(course.course_id) &&
+    !isAssigned(course.course_id)
+  ) {
+    assignCourse(course.course_id, selectedSemester.value);
+  }
+};
+
+// Clear all course assignments
+const clearAllCourses = () => {
+  if (
+    confirm(
+      "Are you sure you want to unassign all courses? This will clear all assignments.",
+    )
+  ) {
+    courseAssignments.value.clear();
+  }
 };
 
 // Save all changes
 const saveChanges = async () => {
   if (!planData.value) return;
-  
+
   saveLoading.value = true;
-  
+
   try {
     // Group courses by semester
-    const semesterCourses: Map<number, { course_id: number; status: string }[]> = new Map();
-    
+    const semesterCourses: Map<
+      number,
+      { course_id: number; status: string }[]
+    > = new Map();
+
     for (const [courseId, semester] of courseAssignments.value) {
       if (!semesterCourses.has(semester)) {
         semesterCourses.set(semester, []);
@@ -213,19 +524,19 @@ const saveChanges = async () => {
         status: "Planned",
       });
     }
-    
-    // Save each semester
-    for (const [semester, courses] of semesterCourses) {
+
+    // Save each semester (including empty ones to clear old assignments)
+    for (const sem of availableSemesters.value) {
       await $fetch("/api/hop/academic-planning/plan/schedule", {
         method: "POST",
         body: {
           plan_id: planData.value.plan.id,
-          semester,
-          courses,
+          semester: sem,
+          courses: semesterCourses.get(sem) || [],
         },
       });
     }
-    
+
     await refreshPlan();
     navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
   } catch (error: any) {
@@ -239,15 +550,20 @@ const saveChanges = async () => {
 const goBack = () => {
   navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
 };
+
+// Select first semester by default
+watchEffect(() => {
+  if (availableSemesters.value.length > 0 && selectedSemester.value === null) {
+    selectedSemester.value = availableSemesters.value[0] ?? null;
+  }
+});
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-6">
+  <div class="p-4 w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden">
     <!-- Header -->
-    <div class="flex items-start gap-4">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">
-        ← Back
-      </button>
+    <div class="flex items-start gap-4 mb-4 flex-shrink-0">
+      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
       <div class="flex-1">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -256,135 +572,402 @@ const goBack = () => {
               {{ planData.student.name }} ({{ planData.student.matric_no }})
             </p>
           </div>
-          <button
-            class="btn btn-primary"
-            :disabled="saveLoading"
-            @click="saveChanges"
-          >
-            <span v-if="saveLoading" class="loading loading-spinner loading-xs"></span>
-            💾 Save Changes
-          </button>
+          <div class="flex items-center gap-2">
+            <label class="label cursor-pointer gap-2">
+              <span class="label-text text-sm">Program Structure</span>
+              <input
+                type="checkbox"
+                v-model="showProgramStructure"
+                class="toggle toggle-sm toggle-primary"
+              />
+            </label>
+            <button
+              class="btn btn-primary"
+              :disabled="saveLoading"
+              @click="saveChanges"
+            >
+              <span
+                v-if="saveLoading"
+                class="loading loading-spinner loading-xs"
+              ></span>
+              💾 Save
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Loading -->
-    <div v-if="loading || coursesLoading" class="flex justify-center py-12">
+    <div
+      v-if="loading || coursesLoading"
+      class="flex justify-center py-12 flex-1"
+    >
       <span class="loading loading-spinner loading-lg"></span>
     </div>
 
     <template v-else-if="planData && coursesData">
-      <!-- Summary -->
-      <div class="alert alert-info">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <div>
-          <p><strong>{{ plannedCourses.length }}</strong> courses to schedule (excluding transferred courses)</p>
-          <p class="text-sm">Assigned: <strong>{{ totalAssignedCredits }}</strong> / {{ planData.summary.planned_credits }} credits</p>
+      <!-- Summary Bar -->
+      <div
+        class="flex flex-wrap items-center gap-4 mb-4 p-3 bg-base-200 rounded-lg flex-shrink-0"
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-base-content/60">To Schedule:</span>
+          <span class="font-semibold text-primary"
+            >{{ totalAssignedCredits }} / {{ totalPlannedCredits }} cr</span
+          >
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-base-content/60">Transferred:</span>
+          <span class="font-semibold text-success"
+            >{{ transferredCourses.length }} courses ({{
+              planData.summary.transferred_credits
+            }}
+            cr)</span
+          >
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-base-content/60">Unassigned:</span>
+          <span
+            class="font-semibold"
+            :class="
+              plannedCourses.filter((c) => !isAssigned(c.course_id)).length > 0
+                ? 'text-warning'
+                : 'text-success'
+            "
+          >
+            {{ plannedCourses.filter((c) => !isAssigned(c.course_id)).length }}
+            courses
+          </span>
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-3 gap-6">
-        <!-- Semester Selection -->
-        <div class="lg:col-span-1">
-          <div class="card bg-base-100 border border-base-300 shadow-sm">
-            <div class="card-body">
-              <h2 class="card-title text-base">Semesters</h2>
-              <p class="text-sm text-base-content/60 mb-4">Select a semester to view and manage courses</p>
-              
-              <div class="space-y-2">
-                <button
-                  v-for="sem in availableSemesters"
-                  :key="sem"
-                  class="btn btn-block justify-between"
-                  :class="selectedSemester === sem ? 'btn-primary' : 'btn-ghost'"
-                  @click="selectedSemester = sem"
-                >
-                  <span>{{ formatSemester(sem) }}</span>
-                  <span class="badge" :class="selectedSemester === sem ? 'badge-primary-content' : 'badge-outline'">
-                    {{ getSemesterCredits(sem) }} cr
-                  </span>
-                </button>
-              </div>
-            </div>
-          </div>
+      <!-- Semester Tabs (Horizontal) -->
+      <div class="flex items-center gap-2 mb-4 flex-shrink-0">
+        <div class="tabs tabs-boxed bg-base-200 gap-1 overflow-x-auto flex-1">
+          <button
+            v-for="sem in availableSemesters"
+            :key="sem"
+            class="tab gap-2"
+            :class="selectedSemester === sem ? 'tab-active' : ''"
+            @click="selectedSemester = sem"
+          >
+            <span>Sem {{ sem }}</span>
+            <span v-if="getSemesterTypeLabel(sem)" class="text-xs opacity-70"
+              >({{ getSemesterTypeLabel(sem) }})</span
+            >
+            <span
+              class="badge badge-sm"
+              :class="{
+                'badge-success': getCreditStatus(sem) === 'ok',
+                'badge-error': getCreditStatus(sem) === 'over',
+                'badge-warning': getCreditStatus(sem) === 'under',
+                'badge-ghost':
+                  getCreditStatus(sem) === 'empty' ||
+                  getCreditStatus(sem) === 'li',
+                'badge-primary':
+                  selectedSemester === sem &&
+                  (getCreditStatus(sem) === 'empty' ||
+                    getCreditStatus(sem) === 'li'),
+              }"
+            >
+              {{ getSemesterCredits(sem)
+              }}<template v-if="getSemesterCreditLimits(sem)"
+                >/{{ getSemesterCreditLimits(sem)!.min }}–{{
+                  getSemesterCreditLimits(sem)!.max
+                }}</template
+              >
+            </span>
+          </button>
         </div>
+        <button
+          v-if="courseAssignments.size > 0"
+          class="btn btn-ghost btn-sm text-error shrink-0"
+          @click="clearAllCourses"
+        >
+          🗑️ Clear All
+        </button>
+      </div>
 
-        <!-- Course Assignment -->
-        <div class="lg:col-span-2">
-          <div v-if="selectedSemester === null" class="card bg-base-100 border border-base-300 shadow-sm">
-            <div class="card-body text-center py-12">
-              <p class="text-base-content/60">Select a semester from the left to manage courses</p>
+      <!-- Main Content - Split View with Independent Scroll -->
+      <div
+        class="grid gap-4 flex-1 min-h-0"
+        :class="showProgramStructure ? 'lg:grid-cols-2' : ''"
+      >
+        <!-- Left: Current Semester Schedule -->
+        <div
+          class="flex flex-col min-h-0 bg-base-100 rounded-lg border border-base-300 overflow-hidden"
+        >
+          <!-- Fixed Header -->
+          <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100">
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold">
+                {{
+                  selectedSemester
+                    ? formatSemester(selectedSemester)
+                    : "Select a Semester"
+                }}
+              </h2>
+              <span v-if="selectedSemester" class="badge badge-primary"
+                >{{ getSemesterCredits(selectedSemester) }} credits</span
+              >
             </div>
           </div>
 
-          <div v-else class="card bg-base-100 border border-base-300 shadow-sm">
-            <div class="card-body">
-              <div class="flex items-center justify-between mb-4">
-                <h2 class="card-title text-base">{{ formatSemester(selectedSemester) }}</h2>
-                <span class="badge badge-primary">{{ getSemesterCredits(selectedSemester) }} credits</span>
-              </div>
-
-              <!-- Courses in this semester -->
-              <div class="space-y-2">
+          <!-- Scrollable Content -->
+          <div class="flex-1 overflow-y-auto p-3 space-y-3">
+            <!-- Assigned Courses -->
+            <div>
+              <h3
+                class="text-xs font-medium text-base-content/60 mb-2 uppercase tracking-wide"
+              >
+                Assigned to this Semester
+              </h3>
+              <div class="space-y-1">
                 <div
-                  v-for="course in plannedCourses.filter(c => courseAssignments.get(c.course_id) === selectedSemester)"
+                  v-for="course in plannedCourses.filter(
+                    (c) =>
+                      courseAssignments.get(c.course_id) === selectedSemester,
+                  )"
                   :key="course.course_id"
-                  class="flex items-center justify-between p-3 bg-base-200/50 rounded-lg"
+                  class="flex items-center justify-between p-2 bg-primary/10 rounded border border-primary/20"
                 >
-                  <div>
-                    <span class="font-mono text-sm">{{ course.course_code }}</span>
-                    <span class="mx-2">-</span>
-                    <span>{{ course.course_name }}</span>
-                    <span class="badge badge-sm badge-ghost ml-2">{{ course.credit_hour }} cr</span>
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
                   </div>
                   <button
-                    class="btn btn-ghost btn-xs text-error"
+                    class="btn btn-ghost btn-xs text-error shrink-0"
                     @click="removeCourse(course.course_id)"
                   >
-                    ✕ Remove
+                    ✕
                   </button>
                 </div>
-
                 <div
-                  v-if="plannedCourses.filter(c => courseAssignments.get(c.course_id) === selectedSemester).length === 0"
-                  class="text-center py-4 text-base-content/60"
+                  v-if="
+                    plannedCourses.filter(
+                      (c) =>
+                        courseAssignments.get(c.course_id) === selectedSemester,
+                    ).length === 0
+                  "
+                  class="text-center py-4 text-base-content/40 text-sm"
                 >
                   No courses assigned to this semester
                 </div>
               </div>
+            </div>
 
-              <!-- Add courses -->
-              <div class="divider">Add Courses</div>
-
-              <div class="space-y-2 max-h-64 overflow-y-auto">
+            <!-- Unassigned Courses -->
+            <div>
+              <h3
+                class="text-xs font-medium text-base-content/60 mb-2 uppercase tracking-wide"
+              >
+                Unassigned Courses (Click to Add)
+              </h3>
+              <div class="space-y-1">
                 <div
-                  v-for="course in plannedCourses.filter(c => !courseAssignments.has(c.course_id))"
+                  v-for="course in plannedCourses.filter(
+                    (c) => !courseAssignments.has(c.course_id),
+                  )"
                   :key="course.course_id"
-                  class="flex items-center justify-between p-3 border border-base-300 rounded-lg hover:bg-base-200/30 cursor-pointer"
-                  @click="assignCourse(course.course_id, selectedSemester)"
+                  class="flex items-center justify-between p-2 border rounded transition-colors"
+                  :class="
+                    isCourseDisabled(course.course_id)
+                      ? 'border-base-300 bg-base-200/30 opacity-50 cursor-not-allowed'
+                      : 'border-base-300 hover:bg-base-200 cursor-pointer'
+                  "
+                  @click="
+                    !isCourseDisabled(course.course_id) &&
+                    assignCourse(course.course_id, selectedSemester!)
+                  "
                 >
-                  <div>
-                    <span class="font-mono text-sm">{{ course.course_code }}</span>
-                    <span class="mx-2">-</span>
-                    <span>{{ course.course_name }}</span>
-                    <span class="badge badge-sm badge-ghost ml-2">{{ course.credit_hour }} cr</span>
-                    <span class="badge badge-sm badge-outline ml-1">Default: Sem {{ course.default_semester }}</span>
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs badge-ghost shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                    <span class="badge badge-xs badge-outline shrink-0"
+                      >S{{ course.default_semester }}</span
+                    >
+                    <span
+                      v-if="isCourseDisabled(course.course_id)"
+                      class="badge badge-xs badge-warning shrink-0"
+                    >
+                      {{ getCourseDisabledReason(course.course_id) }}
+                    </span>
                   </div>
-                  <button class="btn btn-ghost btn-xs text-success">
-                    + Add
-                  </button>
+                  <span
+                    v-if="!isCourseDisabled(course.course_id)"
+                    class="text-success text-sm shrink-0"
+                    >+</span
+                  >
+                  <span v-else class="text-base-content/30 text-sm shrink-0"
+                    >—</span
+                  >
                 </div>
-
                 <div
-                  v-if="plannedCourses.filter(c => !courseAssignments.has(c.course_id)).length === 0"
-                  class="text-center py-4 text-base-content/60"
+                  v-if="
+                    plannedCourses.filter(
+                      (c) => !courseAssignments.has(c.course_id),
+                    ).length === 0
+                  "
+                  class="text-center py-4 text-success text-sm"
                 >
-                  All courses have been assigned
+                  ✓ All courses have been assigned
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Right: Program Structure Reference -->
+        <div
+          v-if="showProgramStructure"
+          class="flex flex-col min-h-0 bg-base-100 rounded-lg border border-base-300 overflow-hidden"
+        >
+          <!-- Fixed Header -->
+          <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100">
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold">📚 Program Structure</h2>
+              <div class="flex items-center gap-2 text-xs">
+                <span class="flex items-center gap-1"
+                  ><span class="w-2 h-2 rounded bg-success"></span>
+                  Transferred</span
+                >
+                <span class="flex items-center gap-1"
+                  ><span class="w-2 h-2 rounded bg-primary"></span>
+                  Assigned</span
+                >
+              </div>
+            </div>
+            <p
+              v-if="selectedSemester"
+              class="text-xs text-base-content/60 mt-1"
+            >
+              💡 Click on unassigned courses to add to
+              {{ formatSemester(selectedSemester) }}
+            </p>
+          </div>
+
+          <!-- Scrollable Content -->
+          <div class="flex-1 overflow-y-auto p-3">
+            <div
+              v-for="[sem, courses] in Array.from(programStructure).sort(
+                (a, b) => a[0] - b[0],
+              )"
+              :key="sem"
+              class="mb-4 last:mb-0"
+            >
+              <div
+                class="flex items-center justify-between mb-2 sticky top-0 bg-base-100 py-1 -mt-1"
+              >
+                <h4 class="font-medium text-sm flex items-center gap-2">
+                  <span
+                    :class="sem === selectedSemester ? 'text-primary' : ''"
+                    >{{ formatSemester(sem) }}</span
+                  >
+                  <span
+                    v-if="sem === selectedSemester"
+                    class="badge badge-primary badge-xs"
+                    >Current</span
+                  >
+                </h4>
+                <span class="badge badge-outline badge-sm">
+                  {{ courses.reduce((sum, c) => sum + c.credit_hour, 0) }} cr
+                </span>
+              </div>
+              <div class="space-y-1">
+                <div
+                  v-for="course in courses"
+                  :key="course.course_id"
+                  class="flex items-center justify-between p-2 rounded text-sm transition-colors"
+                  :class="{
+                    'bg-success/20 border border-success/30': isTransferred(
+                      course.course_id,
+                    ),
+                    'bg-primary/10 border border-primary/20':
+                      isAssigned(course.course_id) &&
+                      !isTransferred(course.course_id),
+                    'bg-base-200/30 opacity-50 cursor-not-allowed':
+                      !isAssigned(course.course_id) &&
+                      !isTransferred(course.course_id) &&
+                      isCourseDisabled(course.course_id),
+                    'bg-base-200/50 hover:bg-base-200 cursor-pointer':
+                      !isAssigned(course.course_id) &&
+                      !isTransferred(course.course_id) &&
+                      !isCourseDisabled(course.course_id),
+                  }"
+                  @click="
+                    !isCourseDisabled(course.course_id) && quickAssign(course)
+                  "
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="truncate">{{ course.course_name }}</span>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <span class="badge badge-xs"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                    <span
+                      v-if="isTransferred(course.course_id)"
+                      class="badge badge-xs badge-success"
+                      >T</span
+                    >
+                    <span
+                      v-else-if="isAssigned(course.course_id)"
+                      class="badge badge-xs badge-primary"
+                    >
+                      S{{ getAssignedSemester(course.course_id) }}
+                    </span>
+                    <span
+                      v-else-if="isCourseDisabled(course.course_id)"
+                      class="badge badge-xs badge-warning"
+                      >{{ getCourseDisabledReason(course.course_id) }}</span
+                    >
+                    <span v-else class="text-success">+</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transferred Courses Collapse -->
+      <div
+        v-if="transferredCourses.length > 0"
+        class="collapse collapse-arrow bg-success/5 border border-success/20 rounded-lg mt-4 flex-shrink-0"
+      >
+        <input type="checkbox" />
+        <div class="collapse-title py-2 min-h-0 text-sm font-medium">
+          View {{ transferredCourses.length }} Transferred Courses ({{
+            planData.summary.transferred_credits
+          }}
+          credits)
+        </div>
+        <div class="collapse-content">
+          <div class="flex flex-wrap gap-2 pt-2">
+            <span
+              v-for="course in transferredCourses"
+              :key="course.course_id"
+              class="badge badge-success gap-1"
+            >
+              {{ course.course_code }} ({{ course.credit_hour }}cr)
+            </span>
           </div>
         </div>
       </div>
