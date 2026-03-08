@@ -135,7 +135,7 @@ const filteredIntakes = computed(() => {
     (intake) =>
       intake.intake_name.toLowerCase().includes(query) ||
       intake.intake_year.includes(query) ||
-      intake.session_name.toLowerCase().includes(query)
+      intake.session_name.toLowerCase().includes(query),
   );
 });
 
@@ -145,7 +145,7 @@ const canProceedToStep2 = computed(
     createForm.value.intake_name &&
     createForm.value.intake_year &&
     createForm.value.session_id &&
-    createForm.value.intake_type
+    createForm.value.intake_type,
 );
 
 const canProceedToStep3 = computed(() => selectedFile.value !== null);
@@ -260,7 +260,7 @@ const validateAndSetFile = (file: File) => {
 
   const hasValidType = validTypes.includes(file.type);
   const hasValidExtension = validExtensions.some((ext) =>
-    file.name.toLowerCase().endsWith(ext)
+    file.name.toLowerCase().endsWith(ext),
   );
 
   if (!hasValidType && !hasValidExtension) {
@@ -312,7 +312,7 @@ const createIntake = async () => {
       {
         method: "POST",
         body: createForm.value,
-      }
+      },
     );
 
     newIntakeId.value = response.id;
@@ -393,9 +393,12 @@ const deleteIntake = async () => {
 
   deleteLoading.value = true;
   try {
-    await $fetch(`/api/hop/academic-planning/${selectedIntakeToDelete.value.id}`, {
-      method: "DELETE",
-    });
+    await $fetch(
+      `/api/hop/academic-planning/${selectedIntakeToDelete.value.id}`,
+      {
+        method: "DELETE",
+      },
+    );
 
     await refreshIntakes();
     closeDeleteModal();
@@ -503,7 +506,9 @@ const viewIntake = (intake: IntakeData) => {
               </td>
               <td>
                 <div class="flex items-center gap-2">
-                  <span class="text-success">{{ intake.successful_plans }}</span>
+                  <span class="text-success">{{
+                    intake.successful_plans
+                  }}</span>
                   <span class="text-base-content/30">/</span>
                   <span class="text-base-content/60">{{
                     intake.total_students
@@ -623,7 +628,9 @@ const viewIntake = (intake: IntakeData) => {
 
           <div class="form-control w-full">
             <label class="label">
-              <span class="label-text font-medium">Semester Rules (Intake Type)</span>
+              <span class="label-text font-medium"
+                >Semester Rules (Intake Type)</span
+              >
             </label>
             <select
               v-model="createForm.intake_type"
@@ -671,7 +678,7 @@ const viewIntake = (intake: IntakeData) => {
                 <span class="ml-2">
                   {{
                     configData?.sessions.find(
-                      (s) => s.id === createForm.session_id
+                      (s) => s.id === createForm.session_id,
                     )?.session_name
                   }}
                 </span>
@@ -720,7 +727,10 @@ const viewIntake = (intake: IntakeData) => {
                   {{ (selectedFile.size / 1024).toFixed(2) }} KB
                 </p>
               </div>
-              <button class="btn btn-ghost btn-sm text-error" @click="removeFile">
+              <button
+                class="btn btn-ghost btn-sm text-error"
+                @click="removeFile"
+              >
                 Remove File
               </button>
             </div>
@@ -734,8 +744,8 @@ const viewIntake = (intake: IntakeData) => {
             </p>
             <ul class="text-sm text-base-content/70 list-disc list-inside">
               <li>
-                <code class="bg-base-300 px-1 rounded">matric_no</code> - Student
-                matric number
+                <code class="bg-base-300 px-1 rounded">matric_no</code> -
+                Student matric number
               </li>
             </ul>
             <p class="text-xs text-base-content/50 mt-2">
@@ -844,9 +854,7 @@ const viewIntake = (intake: IntakeData) => {
         <!-- Step 4: Results -->
         <div v-else-if="currentStep === 4 && generateResult" class="space-y-4">
           <div class="alert alert-success">
-            <span>
-              ✅ Academic plans generated successfully!
-            </span>
+            <span> ✅ Academic plans generated successfully! </span>
           </div>
 
           <div class="stats shadow w-full">
@@ -916,7 +924,10 @@ const viewIntake = (intake: IntakeData) => {
             :disabled="!canProceedToStep2 || createLoading"
             @click="nextStep"
           >
-            <span v-if="createLoading" class="loading loading-spinner loading-sm"></span>
+            <span
+              v-if="createLoading"
+              class="loading loading-spinner loading-sm"
+            ></span>
             {{ createLoading ? "Creating..." : "Continue" }}
           </button>
           <button
@@ -925,7 +936,10 @@ const viewIntake = (intake: IntakeData) => {
             :disabled="!canProceedToStep3 || isPreviewLoading"
             @click="nextStep"
           >
-            <span v-if="isPreviewLoading" class="loading loading-spinner loading-sm"></span>
+            <span
+              v-if="isPreviewLoading"
+              class="loading loading-spinner loading-sm"
+            ></span>
             {{ isPreviewLoading ? "Loading..." : "Preview" }}
           </button>
           <button
@@ -937,7 +951,10 @@ const viewIntake = (intake: IntakeData) => {
             "
             @click="generatePlans"
           >
-            <span v-if="isGenerating" class="loading loading-spinner loading-sm"></span>
+            <span
+              v-if="isGenerating"
+              class="loading loading-spinner loading-sm"
+            ></span>
             {{ isGenerating ? "Generating..." : "Generate Academic Plans" }}
           </button>
           <button
@@ -960,17 +977,22 @@ const viewIntake = (intake: IntakeData) => {
         <h3 class="font-bold text-lg">Delete Academic Planning</h3>
         <p class="py-4">
           Are you sure you want to delete
-          <strong>{{ selectedIntakeToDelete?.intake_name }}</strong>? This will
-          also delete all generated academic plans for this intake.
+          <strong>{{ selectedIntakeToDelete?.intake_name }}</strong
+          >? This will also delete all generated academic plans for this intake.
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="closeDeleteModal">Cancel</button>
+          <button class="btn btn-ghost" @click="closeDeleteModal">
+            Cancel
+          </button>
           <button
             class="btn btn-error"
             :disabled="deleteLoading"
             @click="deleteIntake"
           >
-            <span v-if="deleteLoading" class="loading loading-spinner loading-sm"></span>
+            <span
+              v-if="deleteLoading"
+              class="loading loading-spinner loading-sm"
+            ></span>
             {{ deleteLoading ? "Deleting..." : "Delete" }}
           </button>
         </div>

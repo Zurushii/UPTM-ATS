@@ -31,9 +31,8 @@ interface NotificationResponse {
 }
 
 // Fetch notifications
-const { data: notificationData, refresh: refreshNotifications } = await useFetch<NotificationResponse>(
-  "/api/hop/notifications"
-);
+const { data: notificationData, refresh: refreshNotifications } =
+  await useFetch<NotificationResponse>("/api/hop/notifications");
 
 // Mark all as read
 const markAllRead = async () => {
@@ -67,20 +66,79 @@ const timeAgo = (dateStr: string) => {
   const date = new Date(dateStr);
   const now = new Date();
   const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
+
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+};
+
+// Current Session
+interface CurrentSessionData {
+  intake_period: string;
+  semester_type: "L" | "S";
+  updated_at: string;
+}
+
+const { data: currentSessionData, refresh: refreshCurrentSession } =
+  await useFetch<{ current_session: CurrentSessionData | null }>(
+    "/api/hop/current-session",
+  );
+
+const sessionForm = reactive({
+  intake_period: "",
+  semester_type: "L" as "L" | "S",
+});
+
+const sessionSaving = ref(false);
+const sessionSaved = ref(false);
+
+// Populate form when data loads
+watchEffect(() => {
+  if (currentSessionData.value?.current_session) {
+    sessionForm.intake_period =
+      currentSessionData.value.current_session.intake_period;
+    sessionForm.semester_type =
+      currentSessionData.value.current_session.semester_type;
+  }
+});
+
+const saveCurrentSession = async () => {
+  sessionSaving.value = true;
+  sessionSaved.value = false;
+  try {
+    await $fetch("/api/hop/current-session", {
+      method: "PUT",
+      body: {
+        intake_period: sessionForm.intake_period,
+        semester_type: sessionForm.semester_type,
+      },
+    });
+    await refreshCurrentSession();
+    sessionSaved.value = true;
+    // Force refresh the header badge by triggering a global state update
+    useState("currentSessionUpdated", () => 0).value = Date.now();
+    setTimeout(() => {
+      sessionSaved.value = false;
+    }, 3000);
+  } catch (error: any) {
+    alert(error?.data?.statusMessage || "Failed to update session");
+  } finally {
+    sessionSaving.value = false;
+  }
 };
 </script>
 
 <template>
   <div class="p-6 w-full space-y-8">
     <!-- Hero Section -->
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div
+      class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
+    >
       <div class="space-y-1">
-        <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+        <h1
+          class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary"
+        >
           HoP Dashboard
         </h1>
         <p class="text-base-content/60 font-medium">
@@ -90,38 +148,71 @@ const timeAgo = (dateStr: string) => {
     </div>
 
     <!-- Notifications Section -->
-    <div v-if="notificationData && notificationData.unread_count > 0" class="card bg-warning/10 border border-warning/30 shadow-sm">
+    <div
+      v-if="notificationData && notificationData.unread_count > 0"
+      class="card bg-warning/10 border border-warning/30 shadow-sm"
+    >
       <div class="card-body p-4">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">
             <div class="indicator">
-              <span class="indicator-item badge badge-warning badge-sm">{{ notificationData.unread_count }}</span>
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-warning">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+              <span class="indicator-item badge badge-warning badge-sm">{{
+                notificationData.unread_count
+              }}</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6 text-warning"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+                />
               </svg>
             </div>
-            <h3 class="font-semibold text-warning">Plans Needing Re-Approval</h3>
+            <h3 class="font-semibold text-warning">
+              Plans Needing Re-Approval
+            </h3>
           </div>
           <button class="btn btn-ghost btn-xs" @click="markAllRead">
             Mark all read
           </button>
         </div>
-        
+
         <div class="space-y-2">
-          <div 
-            v-for="notification in notificationData.notifications.slice(0, 5)" 
+          <div
+            v-for="notification in notificationData.notifications.slice(0, 5)"
             :key="notification.id"
             class="flex items-center justify-between p-3 bg-base-100 rounded-lg border border-base-200 hover:border-warning/50 cursor-pointer transition-colors"
             @click="goToStudentPlan(notification.plan_id, notification.id)"
           >
             <div class="flex items-center gap-3">
-              <div class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-warning">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+              <div
+                class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-4 h-4 text-warning"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+                  />
                 </svg>
               </div>
               <div>
-                <div class="font-medium text-sm">{{ notification.student_name }}</div>
+                <div class="font-medium text-sm">
+                  {{ notification.student_name }}
+                </div>
                 <div class="text-xs text-base-content/60">
                   {{ notification.matric_no }} requested to re-schedule
                 </div>
@@ -129,150 +220,377 @@ const timeAgo = (dateStr: string) => {
             </div>
             <div class="flex items-center gap-2">
               <span class="badge badge-warning badge-sm">Needs Review</span>
-              <span class="text-xs text-base-content/50">{{ timeAgo(notification.created_at) }}</span>
+              <span class="text-xs text-base-content/50">{{
+                timeAgo(notification.created_at)
+              }}</span>
             </div>
           </div>
         </div>
-        
+
         <div v-if="notificationData.unread_count > 5" class="text-center mt-2">
-          <NuxtLink to="/dashboard/hop/academic-planning" class="text-sm text-warning hover:underline">
+          <NuxtLink
+            to="/dashboard/hop/academic-planning"
+            class="text-sm text-warning hover:underline"
+          >
             View all {{ notificationData.unread_count }} pending requests →
           </NuxtLink>
         </div>
       </div>
     </div>
 
+    <!-- Current Session Setting -->
+    <div class="card bg-base-100 border border-base-200 shadow-sm">
+      <div class="card-body p-5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-primary/10 text-primary rounded-lg">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              class="w-5 h-5"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+              />
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">Current Academic Session</h2>
+            <p class="text-xs text-base-content/60">
+              Set the active session displayed across the system
+            </p>
+          </div>
+          <div v-if="sessionSaved" class="ml-auto badge badge-success gap-1">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+              class="w-3 h-3"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="m4.5 12.75 6 6 9-13.5"
+              />
+            </svg>
+            Saved
+          </div>
+        </div>
+        <div class="flex flex-col sm:flex-row items-end gap-3">
+          <div class="form-control w-full sm:w-auto">
+            <label class="label">
+              <span class="label-text text-xs font-medium"
+                >Intake Period (MMYY)</span
+              >
+            </label>
+            <input
+              v-model="sessionForm.intake_period"
+              type="text"
+              placeholder="e.g. 0525"
+              maxlength="4"
+              class="input input-bordered input-sm w-full sm:w-36"
+            />
+          </div>
+          <div class="form-control w-full sm:w-auto">
+            <label class="label">
+              <span class="label-text text-xs font-medium">Semester Type</span>
+            </label>
+            <select
+              v-model="sessionForm.semester_type"
+              class="select select-bordered select-sm w-full sm:w-44"
+            >
+              <option value="L">Long Semester</option>
+              <option value="S">Short Semester</option>
+            </select>
+          </div>
+          <button
+            class="btn btn-primary btn-sm"
+            :class="{ loading: sessionSaving }"
+            :disabled="sessionSaving || !sessionForm.intake_period"
+            @click="saveCurrentSession"
+          >
+            {{ sessionSaving ? "Saving..." : "Update Session" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Stats Grid -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      
       <!-- Total Students -->
-      <div class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group">
+      <div
+        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
+      >
         <div class="card-body relative overflow-hidden">
-          <div class="absolute -right-4 -top-4 w-24 h-24 bg-primary/10 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-          
+          <div
+            class="absolute -right-4 -top-4 w-24 h-24 bg-primary/10 rounded-full group-hover:scale-150 transition-transform duration-500"
+          ></div>
+
           <div class="flex items-center gap-4 z-10">
-            <div class="p-3 bg-primary/10 text-primary rounded-xl group-hover:bg-primary group-hover:text-primary-content transition-colors duration-300">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+            <div
+              class="p-3 bg-primary/10 text-primary rounded-xl group-hover:bg-primary group-hover:text-primary-content transition-colors duration-300"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
+                />
               </svg>
             </div>
             <div>
               <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">Total Students</div>
+              <div class="text-sm font-medium text-base-content/60">
+                Total Students
+              </div>
             </div>
           </div>
         </div>
       </div>
-      
+
       <!-- Pending Transfers -->
-      <div class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group">
+      <div
+        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
+      >
         <div class="card-body relative overflow-hidden">
-          <div class="absolute -right-4 -top-4 w-24 h-24 bg-secondary/10 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-          
+          <div
+            class="absolute -right-4 -top-4 w-24 h-24 bg-secondary/10 rounded-full group-hover:scale-150 transition-transform duration-500"
+          ></div>
+
           <div class="flex items-center gap-4 z-10">
-            <div class="p-3 bg-secondary/10 text-secondary rounded-xl group-hover:bg-secondary group-hover:text-secondary-content transition-colors duration-300">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            <div
+              class="p-3 bg-secondary/10 text-secondary rounded-xl group-hover:bg-secondary group-hover:text-secondary-content transition-colors duration-300"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                />
               </svg>
             </div>
             <div>
               <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">Pending Transfers</div>
+              <div class="text-sm font-medium text-base-content/60">
+                Pending Transfers
+              </div>
             </div>
           </div>
         </div>
       </div>
-      
+
       <!-- Plans Generated -->
-      <div class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group">
+      <div
+        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
+      >
         <div class="card-body relative overflow-hidden">
-          <div class="absolute -right-4 -top-4 w-24 h-24 bg-accent/10 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-          
+          <div
+            class="absolute -right-4 -top-4 w-24 h-24 bg-accent/10 rounded-full group-hover:scale-150 transition-transform duration-500"
+          ></div>
+
           <div class="flex items-center gap-4 z-10">
-            <div class="p-3 bg-accent/10 text-accent rounded-xl group-hover:bg-accent group-hover:text-accent-content transition-colors duration-300">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            <div
+              class="p-3 bg-accent/10 text-accent rounded-xl group-hover:bg-accent group-hover:text-accent-content transition-colors duration-300"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                />
               </svg>
             </div>
             <div>
               <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">Plans Generated</div>
+              <div class="text-sm font-medium text-base-content/60">
+                Plans Generated
+              </div>
             </div>
           </div>
         </div>
       </div>
-      
     </div>
 
     <!-- Quick Actions -->
     <div>
       <h2 class="text-lg font-semibold mb-4">Quick Actions</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        <NuxtLink to="/dashboard/hop/intake-assessment" class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group">
+        <NuxtLink
+          to="/dashboard/hop/intake-assessment"
+          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group"
+        >
           <div class="card-body p-4">
             <div class="flex items-center gap-3">
-              <div class="p-2 bg-gradient-to-br from-blue-500/10 to-blue-600/10 text-blue-600 rounded-lg group-hover:from-blue-500 group-hover:to-blue-600 group-hover:text-white transition-all duration-300">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+              <div
+                class="p-2 bg-gradient-to-br from-blue-500/10 to-blue-600/10 text-blue-600 rounded-lg group-hover:from-blue-500 group-hover:to-blue-600 group-hover:text-white transition-all duration-300"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                  />
                 </svg>
               </div>
               <div>
-                <h3 class="font-medium group-hover:text-primary transition-colors">Start Assessment</h3>
-                <p class="text-xs text-base-content/60">Process new intake files</p>
+                <h3
+                  class="font-medium group-hover:text-primary transition-colors"
+                >
+                  Start Assessment
+                </h3>
+                <p class="text-xs text-base-content/60">
+                  Process new intake files
+                </p>
               </div>
             </div>
           </div>
         </NuxtLink>
 
-        <NuxtLink to="/dashboard/hop/academic-planning" class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group">
+        <NuxtLink
+          to="/dashboard/hop/academic-planning"
+          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group"
+        >
           <div class="card-body p-4">
             <div class="flex items-center gap-3">
-              <div class="p-2 bg-gradient-to-br from-purple-500/10 to-purple-600/10 text-purple-600 rounded-lg group-hover:from-purple-500 group-hover:to-purple-600 group-hover:text-white transition-all duration-300">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.57 50.57 0 0 0-5.266-2.475 12 12 0 0 1 5.266 2.475ZM21.74 10.147c.656-.346 1.341-.652 2.05-.965-1.558 3.553-3.766 6.885-6.333 9.497m0 0a17.896 17.896 0 0 1-8.914 0m0 0a17.869 17.869 0 0 1-6.333-9.497m15.247 0c-.655-.346-1.34-.652-2.049-.965m0 0a48.11 48.11 0 0 1 3.434-4.756 48.11 48.11 0 0 1-3.434 4.756" />
+              <div
+                class="p-2 bg-gradient-to-br from-purple-500/10 to-purple-600/10 text-purple-600 rounded-lg group-hover:from-purple-500 group-hover:to-purple-600 group-hover:text-white transition-all duration-300"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.57 50.57 0 0 0-5.266-2.475 12 12 0 0 1 5.266 2.475ZM21.74 10.147c.656-.346 1.341-.652 2.05-.965-1.558 3.553-3.766 6.885-6.333 9.497m0 0a17.896 17.896 0 0 1-8.914 0m0 0a17.869 17.869 0 0 1-6.333-9.497m15.247 0c-.655-.346-1.34-.652-2.049-.965m0 0a48.11 48.11 0 0 1 3.434-4.756 48.11 48.11 0 0 1-3.434 4.756"
+                  />
                 </svg>
               </div>
               <div>
-                <h3 class="font-medium group-hover:text-primary transition-colors">Academic Plans</h3>
-                <p class="text-xs text-base-content/60">Review generated plans</p>
+                <h3
+                  class="font-medium group-hover:text-primary transition-colors"
+                >
+                  Academic Plans
+                </h3>
+                <p class="text-xs text-base-content/60">
+                  Review generated plans
+                </p>
               </div>
             </div>
           </div>
         </NuxtLink>
 
-        <NuxtLink to="/dashboard/hop/semester-rules" class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group">
+        <NuxtLink
+          to="/dashboard/hop/semester-rules"
+          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group"
+        >
           <div class="card-body p-4">
             <div class="flex items-center gap-3">
-              <div class="p-2 bg-gradient-to-br from-amber-500/10 to-amber-600/10 text-amber-600 rounded-lg group-hover:from-amber-500 group-hover:to-amber-600 group-hover:text-white transition-all duration-300">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+              <div
+                class="p-2 bg-gradient-to-br from-amber-500/10 to-amber-600/10 text-amber-600 rounded-lg group-hover:from-amber-500 group-hover:to-amber-600 group-hover:text-white transition-all duration-300"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
+                  />
                 </svg>
               </div>
               <div>
-                <h3 class="font-medium group-hover:text-primary transition-colors">Semester Rules</h3>
-                <p class="text-xs text-base-content/60">Configure entry rules</p>
+                <h3
+                  class="font-medium group-hover:text-primary transition-colors"
+                >
+                  Semester Rules
+                </h3>
+                <p class="text-xs text-base-content/60">
+                  Configure entry rules
+                </p>
               </div>
             </div>
           </div>
         </NuxtLink>
 
-        <NuxtLink to="/dashboard/hop/program-structure" class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group">
+        <NuxtLink
+          to="/dashboard/hop/program-structure"
+          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/50 transition-all duration-300 cursor-pointer group"
+        >
           <div class="card-body p-4">
             <div class="flex items-center gap-3">
-              <div class="p-2 bg-gradient-to-br from-emerald-500/10 to-emerald-600/10 text-emerald-600 rounded-lg group-hover:from-emerald-500 group-hover:to-emerald-600 group-hover:text-white transition-all duration-300">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              <div
+                class="p-2 bg-gradient-to-br from-emerald-500/10 to-emerald-600/10 text-emerald-600 rounded-lg group-hover:from-emerald-500 group-hover:to-emerald-600 group-hover:text-white transition-all duration-300"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                  />
                 </svg>
               </div>
               <div>
-                <h3 class="font-medium group-hover:text-primary transition-colors">Program Structure</h3>
+                <h3
+                  class="font-medium group-hover:text-primary transition-colors"
+                >
+                  Program Structure
+                </h3>
                 <p class="text-xs text-base-content/60">Manage curriculum</p>
               </div>
             </div>
           </div>
         </NuxtLink>
-
       </div>
     </div>
   </div>

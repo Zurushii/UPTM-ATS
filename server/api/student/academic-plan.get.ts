@@ -58,6 +58,14 @@ export default defineEventHandler(async (event) => {
     [plan.id],
   );
 
+  // Get submitted result slips
+  const [resultSlips] = await pool.query(
+    `SELECT semester, result_slip_filename, submitted_at
+     FROM semester_results
+     WHERE academic_plan_id = ?`,
+    [plan.id],
+  );
+
   return {
     plan: {
       id: plan.id,
@@ -66,5 +74,6 @@ export default defineEventHandler(async (event) => {
       created_at: plan.created_at,
     },
     courses: courseRows,
+    resultSlips: resultSlips,
   };
 });

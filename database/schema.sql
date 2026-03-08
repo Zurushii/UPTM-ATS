@@ -282,6 +282,46 @@ CREATE TABLE plan_activity_logs (
   INDEX idx_plan_unread (plan_id, is_read)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
+-- ======================================================
+-- CURRENT SESSION SETTING (per-program)
+-- ======================================================
+
+CREATE TABLE program_current_session (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  program_id INT NOT NULL,
+  intake_period VARCHAR(4) NOT NULL,           -- MMYY format, e.g., "0525"
+  semester_type ENUM('L', 'S') NOT NULL,       -- L = Long Semester, S = Short Semester
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE KEY uq_pcs_program (program_id),
+  CONSTRAINT fk_pcs_program
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ======================================================
+-- SEMESTER RESULTS (student uploads result slip per semester)
+-- ======================================================
+
+CREATE TABLE semester_results (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  academic_plan_id INT NOT NULL,
+  semester INT NOT NULL,
+  result_slip_filename VARCHAR(255) NOT NULL,   -- Original filename
+  result_slip_path VARCHAR(500) NOT NULL,       -- Stored file path
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_sr_student
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sr_plan
+    FOREIGN KEY (academic_plan_id) REFERENCES academic_plans(id) ON DELETE CASCADE,
+
+  UNIQUE KEY uq_sr_plan_semester (academic_plan_id, semester)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 
