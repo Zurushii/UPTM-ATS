@@ -21,7 +21,7 @@ interface Course {
   course_code: string;
   course_name: string;
   credit_hour: number;
-  status: "Planned" | "Transferred";
+  status: "Planned" | "Transferred" | "Passed" | "Failed";
 }
 
 interface Semester {
@@ -94,6 +94,11 @@ const { data: coursesData, pending: coursesLoading } = await useFetch<{
   courses: AvailableCourse[];
   semester_rules: SemesterRule[];
   credit_limits: CreditLimits;
+  base_credit_limits: CreditLimits;
+  cgpa: number | null;
+  on_probation: boolean;
+  retake_courses: AvailableCourse[];
+  max_program_semester: number;
 }>(`/api/hop/academic-planning/plan/${planId}/courses`);
 
 // Check if plan exists or not draft
@@ -112,20 +117,37 @@ const showProgramStructure = ref(true);
 
 // Initialize course assignments from plan data (only from start_semester onwards)
 watchEffect(() => {
-  if (planData.value) {
+  if (planData.value && coursesData.value) {
     const startSem = planData.value.plan.start_semester || 1;
-    courseAssignments.value = new Map();
+    const newMap = new Map<number, number>();
+    const semRules = coursesData.value.semester_rules;
+    const allAvailable = [
+      ...(coursesData.value.courses || []),
+      ...(coursesData.value.retake_courses || []),
+    ];
     for (const semester of planData.value.semesters) {
       // Only track assignments from start_semester onwards
       if (semester.semester >= startSem) {
+        const rule = semRules.find(
+          (r) => r.semester_number === semester.semester,
+        );
         for (const course of semester.courses) {
-          // Only track planned courses, not transferred
-          if (course.status === "Planned") {
-            courseAssignments.value.set(course.course_id, semester.semester);
+          // Track planned, passed, and failed courses (not transferred)
+          if (course.status !== "Transferred") {
+            // In LI semesters, planned non-IT courses are unassigned (appear in pool)
+            if (rule?.is_li && course.status === "Planned") {
+              const detail = allAvailable.find(
+                (c) => c.course_id === course.course_id,
+              );
+              if (detail && detail.course_type !== "Industrial Training")
+                continue;
+            }
+            newMap.set(course.course_id, semester.semester);
           }
         }
       }
     }
+    courseAssignments.value = newMap;
   }
 });
 
@@ -144,27 +166,78 @@ const transferredCourses = computed(() => {
   return transferred;
 });
 
-// Get only planned courses (not transferred - ALL semesters available for assignment)
-const plannedCourses = computed(() => {
-  if (!coursesData.value) return [];
+// Get passed courses (locked, completed successfully)
+const passedCourses = computed(() => {
+  if (!planData.value) return [];
 
-  // Get transferred course IDs
-  const transferredIds = new Set<number>();
-  if (planData.value) {
-    for (const semester of planData.value.semesters) {
-      for (const course of semester.courses) {
-        if (course.status === "Transferred") {
-          transferredIds.add(course.course_id);
-        }
+  const passed: (Course & { semester: number })[] = [];
+  for (const semester of planData.value.semesters) {
+    for (const course of semester.courses) {
+      if (course.status === "Passed") {
+        passed.push({ ...course, semester: semester.semester });
       }
     }
   }
+  return passed;
+});
 
-  // Filter out only transferred courses (keep all others available)
+// Get failed courses (locked in original semester, but need retaking)
+const failedCourses = computed(() => {
+  if (!planData.value) return [];
+
+  const failed: (Course & { semester: number })[] = [];
+  for (const semester of planData.value.semesters) {
+    for (const course of semester.courses) {
+      if (course.status === "Failed") {
+        failed.push({ ...course, semester: semester.semester });
+      }
+    }
+  }
+  return failed;
+});
+
+// IDs of courses that failed (need retaking — not a valid prereq)
+const failedCourseIds = computed(() => {
+  const ids = new Set<number>();
+  for (const c of failedCourses.value) ids.add(c.course_id);
+  for (const c of passedCourses.value) ids.delete(c.course_id);
+  return ids;
+});
+
+// IDs of courses that are locked (transferred or passed/failed)
+const lockedCourseIds = computed(() => {
+  const ids = new Set<number>();
+  for (const c of transferredCourses.value) ids.add(c.course_id);
+  for (const c of passedCourses.value) ids.add(c.course_id);
+  for (const c of failedCourses.value) ids.add(c.course_id);
+  return ids;
+});
+
+// Get only planned courses (not transferred/passed/failed - available for assignment)
+const plannedCourses = computed(() => {
+  if (!coursesData.value) return [];
+
+  // Filter out transferred and passed/failed courses
   return coursesData.value.courses.filter(
-    (c) => !transferredIds.has(c.course_id),
+    (c) => !lockedCourseIds.value.has(c.course_id),
   );
 });
+
+// Get retake courses (failed, need rescheduling)
+const retakeCourses = computed(() => {
+  if (!coursesData.value?.retake_courses) return [];
+  return coursesData.value.retake_courses.filter((c) => {
+    const assignedSem = courseAssignments.value.get(c.course_id);
+    if (assignedSem === undefined) return true;
+    const originalFailed = failedCourses.value.find(
+      (f) => f.course_id === c.course_id,
+    );
+    return originalFailed && assignedSem === originalFailed.semester;
+  });
+});
+
+// Track extra semesters added by user
+const extraSemesters = ref<number[]>([]);
 
 // Get unique semesters from available courses (starting from student's start_semester)
 const availableSemesters = computed(() => {
@@ -178,9 +251,138 @@ const availableSemesters = computed(() => {
         semesters.add(course.default_semester);
       }
     }
+    // Include semesters from extended rules (for retake scheduling)
+    for (const rule of coursesData.value.semester_rules) {
+      if (rule.semester_number >= startSem) {
+        semesters.add(rule.semester_number);
+      }
+    }
   }
+  // Include user-added extra semesters
+  for (const s of extraSemesters.value) semesters.add(s);
   return Array.from(semesters).sort((a, b) => a - b);
 });
+
+// Add an extra semester, determining type from the actual preceding semester pattern
+const addSemester = () => {
+  const allSems = availableSemesters.value;
+  const nextSem = allSems.length > 0 ? Math.max(...allSems) + 1 : 1;
+  extraSemesters.value.push(nextSem);
+  if (coursesData.value) {
+    const existing = coursesData.value.semester_rules.find(
+      (r) => r.semester_number === nextSem,
+    );
+    if (!existing) {
+      // Detect cycle pattern (L/L/S or S/L/L) from non-LI semesters
+      const posLong = [0, 0, 0];
+      const posTotal = [0, 0, 0];
+      for (const r of coursesData.value.semester_rules) {
+        if (!r.is_li) {
+          const pos = (r.semester_number - 1) % 3;
+          posTotal[pos]++;
+          if (r.semester_type === "L") posLong[pos]++;
+        }
+      }
+      const cycle = posTotal.map((total, i) =>
+        total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
+      );
+      coursesData.value.semester_rules.push({
+        semester_number: nextSem,
+        semester_type: cycle[(nextSem - 1) % 3] as "L" | "S",
+        is_li: false,
+        target_credits: 0,
+      });
+    }
+  }
+};
+
+// Configure Plan modal
+const isConfigModalOpen = ref(false);
+const editableRules = ref<SemesterRule[]>([]);
+
+const detectCycle = (rules: SemesterRule[]): ("L" | "S")[] => {
+  const posLong = [0, 0, 0];
+  const posTotal = [0, 0, 0];
+  for (const r of rules) {
+    if (!r.is_li) {
+      const pos = (r.semester_number - 1) % 3;
+      posTotal[pos]++;
+      if (r.semester_type === "L") posLong[pos]++;
+    }
+  }
+  return posTotal.map((total, i) =>
+    total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
+  ) as ("L" | "S")[];
+};
+
+const openConfigModal = () => {
+  editableRules.value = JSON.parse(
+    JSON.stringify(coursesData.value?.semester_rules || []),
+  );
+  isConfigModalOpen.value = true;
+};
+
+const addConfigSemester = () => {
+  const maxSem =
+    editableRules.value.length > 0
+      ? Math.max(...editableRules.value.map((r) => r.semester_number))
+      : 0;
+  const nextSem = maxSem + 1;
+  const cycle = detectCycle(editableRules.value);
+  editableRules.value.push({
+    semester_number: nextSem,
+    semester_type: cycle[(nextSem - 1) % 3],
+    is_li: false,
+    target_credits: 0,
+  });
+};
+
+const removeConfigSemester = (index: number) => {
+  editableRules.value.splice(index, 1);
+};
+
+const getConfigCreditRange = (rule: SemesterRule) => {
+  const limits = coursesData.value?.credit_limits;
+  if (!limits || rule.is_li) return null;
+  return rule.semester_type === "L"
+    ? { min: limits.long_min, max: limits.long_max }
+    : { min: limits.short_min, max: limits.short_max };
+};
+
+const hasLockedCoursesInSemester = (semNum: number): boolean => {
+  for (const [courseId, sem] of courseAssignments.value) {
+    if (sem !== semNum) continue;
+    if (
+      passedCourses.value.some((c) => c.course_id === courseId) ||
+      failedCourses.value.some((c) => c.course_id === courseId)
+    )
+      return true;
+  }
+  return false;
+};
+
+const applyConfig = () => {
+  if (!coursesData.value) return;
+  const oldRules = coursesData.value.semester_rules;
+  for (const rule of editableRules.value) {
+    const old = oldRules.find(
+      (r) => r.semester_number === rule.semester_number,
+    );
+    if (old && old.semester_type !== rule.semester_type) {
+      rule.target_credits = 0;
+    }
+  }
+  coursesData.value.semester_rules = editableRules.value;
+  const allRuleSems = new Set(
+    editableRules.value.map((r) => r.semester_number),
+  );
+  for (const sem of allRuleSems) {
+    if (!extraSemesters.value.includes(sem)) {
+      extraSemesters.value.push(sem);
+    }
+  }
+  isConfigModalOpen.value = false;
+};
 
 // Get program structure grouped by semester (show ALL semesters for reference)
 const programStructure = computed(() => {
@@ -199,6 +401,14 @@ const programStructure = computed(() => {
 // Check if a course is transferred
 const isTransferred = (courseId: number): boolean => {
   return transferredCourses.value.some((c) => c.course_id === courseId);
+};
+
+// Check if a course is locked (passed/failed — cannot be removed or reassigned)
+const isLocked = (courseId: number): boolean => {
+  return (
+    passedCourses.value.some((c) => c.course_id === courseId) ||
+    failedCourses.value.some((c) => c.course_id === courseId)
+  );
 };
 
 // Check if a course is assigned
@@ -333,15 +543,14 @@ const isLongSemesterOnly = (course: AvailableCourse): boolean => {
   return false;
 };
 
-// Check if a prerequisite is satisfied (assigned to an earlier semester or transferred)
+// Check if a prerequisite is satisfied (must be Passed or Transferred, not Failed)
 const isPrereqSatisfied = (
   prereqCourseId: number,
   targetSemester: number,
 ): boolean => {
-  // Check if prereq is transferred (counts as satisfied regardless of semester)
   if (transferredCourses.value.some((tc) => tc.course_id === prereqCourseId))
     return true;
-  // Check if prereq is assigned to an earlier semester
+  if (failedCourseIds.value.has(prereqCourseId)) return false;
   const assignedSem = courseAssignments.value.get(prereqCourseId);
   if (assignedSem !== undefined && assignedSem < targetSemester) return true;
   return false;
@@ -387,7 +596,12 @@ const getSemesterCredits = (sem: number) => {
   let credits = 0;
   for (const [courseId, semester] of courseAssignments.value) {
     if (semester === sem) {
-      const course = plannedCourses.value.find((c) => c.course_id === courseId);
+      const course =
+        plannedCourses.value.find((c) => c.course_id === courseId) ||
+        passedCourses.value.find((c) => c.course_id === courseId) ||
+        coursesData.value?.retake_courses?.find(
+          (c) => c.course_id === courseId,
+        );
       if (course) credits += course.credit_hour;
     }
   }
@@ -398,7 +612,10 @@ const getSemesterCredits = (sem: number) => {
 const totalAssignedCredits = computed(() => {
   let total = 0;
   for (const [courseId] of courseAssignments.value) {
-    const course = plannedCourses.value.find((c) => c.course_id === courseId);
+    const course =
+      plannedCourses.value.find((c) => c.course_id === courseId) ||
+      passedCourses.value.find((c) => c.course_id === courseId) ||
+      coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
     if (course) total += course.credit_hour;
   }
   return total;
@@ -419,12 +636,35 @@ const getSemesterRule = (sem: number): SemesterRule | null => {
 };
 
 // Get credit limits for a semester based on its type
+// Past semesters (all courses passed/failed) use base limits, not probation-restricted limits
+const isSemesterCompleted = (sem: number): boolean => {
+  let hasCourses = false;
+  for (const [courseId, semester] of courseAssignments.value) {
+    if (semester === sem) {
+      hasCourses = true;
+      // A course is only locked AT this semester if it was passed/failed here
+      const isLockedHere =
+        passedCourses.value.some(
+          (c) => c.course_id === courseId && c.semester === sem,
+        ) ||
+        failedCourses.value.some(
+          (c) => c.course_id === courseId && c.semester === sem,
+        );
+      if (!isLockedHere) return false;
+    }
+  }
+  return hasCourses;
+};
+
 const getSemesterLimits = (
   sem: number,
 ): { min: number; max: number } | null => {
   const rule = getSemesterRule(sem);
   if (!rule || rule.is_li) return null; // LI semesters bypass validation
-  const limits = coursesData.value?.credit_limits;
+  const useBase = coursesData.value?.on_probation && isSemesterCompleted(sem);
+  const limits = useBase
+    ? coursesData.value?.base_credit_limits
+    : coursesData.value?.credit_limits;
   if (!limits) return null;
   if (rule.semester_type === "L")
     return { min: limits.long_min, max: limits.long_max };
@@ -474,11 +714,10 @@ const assignCourse = (courseId: number, semester: number) => {
   }
 
   const rule = getSemesterRule(semester);
-  const course = coursesData.value?.courses.find(
-    (c) => c.course_id === courseId,
-  );
+  const course =
+    coursesData.value?.courses.find((c) => c.course_id === courseId) ||
+    coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
   if (rule && course) {
-    // LI semester: only Industrial Training allowed
     if (rule.is_li && course.course_type !== "Industrial Training") {
       alert(
         "This is an Industrial Training (LI) semester. Only Industrial Training courses can be assigned here.",
@@ -509,11 +748,32 @@ const assignCourse = (courseId: number, semester: number) => {
     }
   }
 
+  // Credit limit check (especially important for CGPA < 2.5 probation)
+  if (course) {
+    const limits = getSemesterLimits(semester);
+    if (limits) {
+      const currentCredits = getSemesterCredits(semester);
+      if (currentCredits + course.credit_hour > limits.max) {
+        const reason = coursesData.value?.on_probation
+          ? `Student's CGPA is below 2.5. Maximum ${limits.max} credit hours allowed per semester.`
+          : `Adding this course would exceed the maximum of ${limits.max} credit hours for this semester.`;
+        alert(reason);
+        return;
+      }
+    }
+  }
+
   courseAssignments.value.set(courseId, semester);
 };
 
 // Remove course from semester
 const removeCourse = (courseId: number) => {
+  // Allow removing retake courses (failed courses reassigned to new semesters)
+  if (failedCourseIds.value.has(courseId)) {
+    courseAssignments.value.delete(courseId);
+    return;
+  }
+  if (isLocked(courseId)) return; // Cannot remove passed/failed courses
   courseAssignments.value.delete(courseId);
 };
 
@@ -528,14 +788,18 @@ const quickAssign = (course: AvailableCourse) => {
   }
 };
 
-// Clear all course assignments
+// Clear all course assignments (keep locked courses)
 const clearAllCourses = () => {
   if (
     confirm(
-      "Are you sure you want to unassign all courses? This will clear all assignments.",
+      "Are you sure you want to unassign all courses? This will clear all assignments except passed/failed courses.",
     )
   ) {
-    courseAssignments.value.clear();
+    const locked = new Map<number, number>();
+    for (const [courseId, sem] of courseAssignments.value) {
+      if (isLocked(courseId)) locked.set(courseId, sem);
+    }
+    courseAssignments.value = locked;
   }
 };
 
@@ -547,13 +811,31 @@ const saveChanges = async () => {
   const startSem = planData.value.plan.start_semester || 1;
 
   try {
-    // Group courses by semester
+    // Group courses by semester (only non-locked courses, but include retakes)
     const semesterCourses: Map<
       number,
       { course_id: number; status: string }[]
     > = new Map();
 
+    // Get original failed semester assignments from plan data
+    const originalFailedSemesters = new Map<number, number>();
+    for (const sem of planData.value.semesters) {
+      for (const c of sem.courses) {
+        if (c.status === "Failed") {
+          originalFailedSemesters.set(c.course_id, sem.semester);
+        }
+      }
+    }
+
     for (const [courseId, semester] of courseAssignments.value) {
+      // Skip passed courses — server preserves them
+      if (passedCourses.value.some((c) => c.course_id === courseId)) continue;
+      // Skip failed courses that are still in their original semester (not rescheduled)
+      if (
+        failedCourseIds.value.has(courseId) &&
+        originalFailedSemesters.get(courseId) === semester
+      )
+        continue;
       if (!semesterCourses.has(semester)) {
         semesterCourses.set(semester, []);
       }
@@ -686,11 +968,40 @@ watchEffect(() => {
                 : 'text-success'
             "
           >
-            {{
-              plannedCourses.filter((c) => !isAssigned(c.course_id)).length
-            }}
+            {{ plannedCourses.filter((c) => !isAssigned(c.course_id)).length }}
             courses
           </span>
+        </div>
+      </div>
+
+      <!-- CGPA Probation Warning -->
+      <div
+        v-if="coursesData.on_probation"
+        class="alert alert-warning mb-4 flex-shrink-0"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="stroke-current shrink-0 h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
+        </svg>
+        <div>
+          <h3 class="font-bold">
+            Academic Probation — CGPA {{ coursesData.cgpa }}
+          </h3>
+          <div class="text-sm">
+            This student's CGPA is below 2.5. Credit hours are restricted to
+            minimum only ({{ coursesData.credit_limits.long_max }} cr for long
+            semesters, {{ coursesData.credit_limits.short_max }} cr for short
+            semesters).
+          </div>
         </div>
       </div>
 
@@ -730,6 +1041,12 @@ watchEffect(() => {
             </span>
           </button>
         </div>
+        <button
+          class="btn btn-outline btn-sm shrink-0"
+          @click="openConfigModal"
+        >
+          ⚙️ Configure
+        </button>
         <button
           v-if="courseAssignments.size > 0"
           class="btn btn-ghost btn-sm text-error shrink-0"
@@ -820,6 +1137,87 @@ watchEffect(() => {
 
           <!-- Scrollable Content -->
           <div class="flex-1 overflow-y-auto p-3 space-y-3">
+            <!-- Passed/Failed Courses (Locked) -->
+            <div
+              v-if="
+                passedCourses.filter((c) => c.semester === selectedSemester)
+                  .length > 0
+              "
+            >
+              <h3
+                class="text-xs font-medium text-success/80 mb-2 uppercase tracking-wide"
+              >
+                Completed (Locked)
+              </h3>
+              <div class="space-y-1">
+                <div
+                  v-for="course in passedCourses.filter(
+                    (c) => c.semester === selectedSemester,
+                  )"
+                  :key="course.course_id"
+                  class="flex items-center justify-between p-2 rounded border bg-success/10 border-success/30"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                  </div>
+                  <span class="badge badge-xs badge-success shrink-0">
+                    Passed
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Failed Courses (Locked in original semester) -->
+            <div
+              v-if="
+                failedCourses.filter((c) => c.semester === selectedSemester)
+                  .length > 0
+              "
+            >
+              <h3
+                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
+              >
+                Failed (Locked)
+              </h3>
+              <div class="space-y-1">
+                <div
+                  v-for="course in failedCourses.filter(
+                    (c) => c.semester === selectedSemester,
+                  )"
+                  :key="'failed-' + course.course_id"
+                  class="flex items-center justify-between p-2 rounded border bg-error/10 border-error/30"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <span class="badge badge-xs badge-error">Failed</span>
+                    <span
+                      v-if="failedCourseIds.has(course.course_id)"
+                      class="badge badge-xs badge-warning"
+                      >Needs Retake</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Assigned Courses -->
             <div>
               <h3
@@ -864,6 +1262,63 @@ watchEffect(() => {
                   class="text-center py-4 text-base-content/40 text-sm"
                 >
                   No courses assigned to this semester
+                </div>
+              </div>
+            </div>
+
+            <!-- Assigned Retake Courses -->
+            <div
+              v-if="
+                coursesData?.retake_courses?.filter(
+                  (c) =>
+                    courseAssignments.get(c.course_id) === selectedSemester &&
+                    !failedCourses.some(
+                      (f) =>
+                        f.course_id === c.course_id &&
+                        f.semester === selectedSemester,
+                    ),
+                ).length
+              "
+            >
+              <h3
+                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
+              >
+                🔄 Retake Courses (Assigned)
+              </h3>
+              <div class="space-y-1">
+                <div
+                  v-for="course in coursesData?.retake_courses?.filter(
+                    (c) =>
+                      courseAssignments.get(c.course_id) === selectedSemester &&
+                      !failedCourses.some(
+                        (f) =>
+                          f.course_id === c.course_id &&
+                          f.semester === selectedSemester,
+                      ),
+                  )"
+                  :key="'retake-assigned-' + course.course_id"
+                  class="flex items-center justify-between p-2 bg-error/10 rounded border border-error/20"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                    <span class="badge badge-xs badge-error shrink-0"
+                      >Retake</span
+                    >
+                  </div>
+                  <button
+                    class="btn btn-ghost btn-xs text-error shrink-0"
+                    @click="removeCourse(course.course_id)"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
             </div>
@@ -930,6 +1385,60 @@ watchEffect(() => {
                   class="text-center py-4 text-success text-sm"
                 >
                   ✓ All courses have been assigned
+                </div>
+              </div>
+            </div>
+
+            <!-- Retake Courses (Failed, need rescheduling) -->
+            <div v-if="retakeCourses.length > 0">
+              <h3
+                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
+              >
+                🔄 Retake Courses (Click to Reschedule)
+              </h3>
+              <div class="space-y-1">
+                <div
+                  v-for="course in retakeCourses"
+                  :key="'retake-' + course.course_id"
+                  class="flex items-center justify-between p-2 border border-error/30 rounded transition-colors"
+                  :class="
+                    isCourseDisabled(course.course_id)
+                      ? 'bg-error/5 opacity-50 cursor-not-allowed'
+                      : 'bg-error/5 hover:bg-error/10 cursor-pointer'
+                  "
+                  @click="
+                    !isCourseDisabled(course.course_id) &&
+                    assignCourse(course.course_id, selectedSemester!)
+                  "
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-mono text-xs shrink-0">{{
+                      course.course_code
+                    }}</span>
+                    <span class="text-sm truncate">{{
+                      course.course_name
+                    }}</span>
+                    <span class="badge badge-xs badge-ghost shrink-0"
+                      >{{ course.credit_hour }}cr</span
+                    >
+                    <span class="badge badge-xs badge-error shrink-0"
+                      >Retake</span
+                    >
+                    <span
+                      v-if="isCourseDisabled(course.course_id)"
+                      class="badge badge-xs badge-warning shrink-0"
+                    >
+                      {{ getCourseDisabledReason(course.course_id) }}
+                    </span>
+                  </div>
+                  <span
+                    v-if="!isCourseDisabled(course.course_id)"
+                    class="text-error text-sm shrink-0"
+                    >+</span
+                  >
+                  <span v-else class="text-base-content/30 text-sm shrink-0"
+                    >—</span
+                  >
                 </div>
               </div>
             </div>
@@ -1001,20 +1510,29 @@ watchEffect(() => {
                     'bg-success/20 border border-success/30': isTransferred(
                       course.course_id,
                     ),
+                    'bg-success/15 border border-success/25':
+                      isLocked(course.course_id) &&
+                      !isTransferred(course.course_id),
                     'bg-primary/10 border border-primary/20':
                       isAssigned(course.course_id) &&
-                      !isTransferred(course.course_id),
+                      !isTransferred(course.course_id) &&
+                      !isLocked(course.course_id),
                     'bg-base-200/30 opacity-50 cursor-not-allowed':
                       !isAssigned(course.course_id) &&
                       !isTransferred(course.course_id) &&
+                      !isLocked(course.course_id) &&
                       isCourseDisabled(course.course_id),
                     'bg-base-200/50 hover:bg-base-200 cursor-pointer':
                       !isAssigned(course.course_id) &&
                       !isTransferred(course.course_id) &&
+                      !isLocked(course.course_id) &&
                       !isCourseDisabled(course.course_id),
                   }"
                   @click="
-                    !isCourseDisabled(course.course_id) && quickAssign(course)
+                    !isTransferred(course.course_id) &&
+                    !isLocked(course.course_id) &&
+                    !isCourseDisabled(course.course_id) &&
+                    quickAssign(course)
                   "
                 >
                   <div class="flex items-center gap-2 min-w-0">
@@ -1032,6 +1550,18 @@ watchEffect(() => {
                       class="badge badge-xs badge-success"
                       >T</span
                     >
+                    <span
+                      v-else-if="isLocked(course.course_id)"
+                      class="badge badge-xs badge-success"
+                    >
+                      {{
+                        passedCourses.find(
+                          (c) => c.course_id === course.course_id,
+                        )?.status === "Passed"
+                          ? "✓"
+                          : "✗"
+                      }}
+                    </span>
                     <span
                       v-else-if="isAssigned(course.course_id)"
                       class="badge badge-xs badge-primary"
@@ -1077,5 +1607,103 @@ watchEffect(() => {
         </div>
       </div>
     </template>
+
+    <!-- Configure Plan Modal -->
+    <dialog class="modal" :class="{ 'modal-open': isConfigModalOpen }">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-1">Configure Semester Plan</h3>
+        <p class="text-sm text-base-content/60 mb-4">
+          Add/remove semesters and set LI (Latihan Industri) for scheduling.
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Semester</th>
+                <th>Type</th>
+                <th>LI</th>
+                <th>Credit Range</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(rule, index) in editableRules"
+                :key="rule.semester_number"
+              >
+                <td>
+                  <span class="badge badge-neutral badge-sm">{{
+                    rule.semester_number
+                  }}</span>
+                </td>
+                <td>
+                  <span
+                    class="badge badge-sm"
+                    :class="
+                      rule.semester_type === 'L'
+                        ? 'badge-primary'
+                        : 'badge-secondary'
+                    "
+                  >
+                    {{ rule.semester_type === "L" ? "Long" : "Short" }}
+                  </span>
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    class="checkbox checkbox-sm checkbox-accent"
+                    v-model="rule.is_li"
+                  />
+                </td>
+                <td>
+                  <span
+                    v-if="getConfigCreditRange(rule)"
+                    class="text-xs text-base-content/60"
+                  >
+                    {{ getConfigCreditRange(rule)!.min }}–{{
+                      getConfigCreditRange(rule)!.max
+                    }}
+                    cr
+                  </span>
+                  <span v-else class="text-xs text-base-content/40">—</span>
+                </td>
+                <td>
+                  <button
+                    v-if="!hasLockedCoursesInSemester(rule.semester_number)"
+                    class="btn btn-ghost btn-xs text-error"
+                    @click="removeConfigSemester(index)"
+                    title="Remove semester"
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <button
+          class="btn btn-outline btn-sm mt-3 w-full"
+          @click="addConfigSemester"
+        >
+          + Add Semester
+        </button>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="isConfigModalOpen = false">
+            Discard
+          </button>
+          <button class="btn btn-primary" @click="applyConfig">Apply</button>
+        </div>
+      </div>
+      <form
+        method="dialog"
+        class="modal-backdrop"
+        @click="isConfigModalOpen = false"
+      >
+        <button>close</button>
+      </form>
+    </dialog>
   </div>
 </template>

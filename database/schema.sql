@@ -256,6 +256,7 @@ CREATE TABLE academic_plan_details (
   course_id INT NOT NULL,
   semester INT NOT NULL,
   status VARCHAR(20) DEFAULT 'Planned',
+  grade VARCHAR(5) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_apd_plan

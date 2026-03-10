@@ -73,6 +73,7 @@ export default defineEventHandler(async (event) => {
       apd.semester,
       apd.course_id,
       apd.status,
+      apd.grade,
       c.course_code,
       c.course_name,
       c.credit_hour
@@ -99,13 +100,16 @@ export default defineEventHandler(async (event) => {
       course_code: detail.course_code,
       course_name: detail.course_name,
       credit_hour: detail.credit_hour,
-      status: detail.status || 'Planned',
+      status: detail.status || "Planned",
+      grade: detail.grade || null,
     });
     totalCredits += detail.credit_hour;
     totalCourses++;
-    
-    if (detail.status === 'Transferred') {
+
+    if (detail.status === "Transferred") {
       transferredCredits += detail.credit_hour;
+    } else if (detail.status === "Passed" || detail.status === "Failed") {
+      plannedCredits += detail.credit_hour;
     } else {
       plannedCredits += detail.credit_hour;
     }
@@ -119,6 +123,15 @@ export default defineEventHandler(async (event) => {
       total_credits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
     }))
     .sort((a, b) => a.semester - b.semester);
+
+  // Get result slips for this plan
+  const [resultSlipRows] = await pool.query(
+    `SELECT semester, result_slip_filename, submitted_at
+     FROM semester_results
+     WHERE academic_plan_id = ?
+     ORDER BY semester`,
+    [planId],
+  );
 
   return {
     plan: {
@@ -138,6 +151,7 @@ export default defineEventHandler(async (event) => {
       total_credit_transferred: plan.total_credit_transferred,
     },
     semesters,
+    resultSlips: resultSlipRows as any[],
     summary: {
       total_semesters: semesters.length,
       total_credits: totalCredits,

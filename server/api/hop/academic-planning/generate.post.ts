@@ -497,8 +497,9 @@ export default defineEventHandler(async (event) => {
                 : creditLimits.short_min;
             }
 
-            // Helper: find nearest non-LI semester with available capacity
+            // Helper: find nearest semester with available capacity
             // Prefers under-minimum semesters first, then nearest by proximity
+            // LI semesters are excluded — only non-LI semesters for regular courses
             const nonLiPlans = creditPlans.filter((p) => !p.is_li);
             function findNearestSemester(
               defaultSem: number,
@@ -562,24 +563,8 @@ export default defineEventHandler(async (event) => {
               return null;
             }
 
-            // Assign IT courses to LI semesters first
-            for (const plan of creditPlans) {
-              if (plan.is_li) {
-                for (const itCourse of itCourses) {
-                  courseAssignments.push({
-                    course_id: itCourse.course_id,
-                    semester: plan.semester_number,
-                    status: "Planned",
-                  });
-                  assignedCourseIds.add(itCourse.course_id);
-                  semesterCreditsUsed.set(
-                    plan.semester_number,
-                    (semesterCreditsUsed.get(plan.semester_number) || 0) +
-                      itCourse.credit_hour,
-                  );
-                }
-              }
-            }
+            // IT courses will be assigned AFTER all regular courses are scheduled
+            // (LI requires all other courses to be completed first)
 
             // ── Pre-schedule: Reserve long-only prerequisite chains (e.g., FYP1→FYP2) ──
             // FYP2 must go on a Long semester. If we schedule normally, FYP1 may land
@@ -706,7 +691,6 @@ export default defineEventHandler(async (event) => {
 
               if (
                 defaultPlan &&
-                !defaultPlan.is_li &&
                 (!longOnly || defaultPlan.semester_type === "L") &&
                 defaultPlan.semester_number > prereqSem
               ) {
@@ -775,7 +759,6 @@ export default defineEventHandler(async (event) => {
 
               if (
                 defaultPlan &&
-                !defaultPlan.is_li &&
                 defaultPlan.semester_number > prereqSem &&
                 (!longOnly || defaultPlan.semester_type === "L")
               ) {
@@ -879,6 +862,53 @@ export default defineEventHandler(async (event) => {
                     (semesterCreditsUsed.get(lastPlan.semester_number) || 0) +
                       course.credit_hour,
                   );
+                }
+              }
+            }
+
+            // ── Assign IT courses to LI semester AFTER all regular courses ──
+            // LI requires all other courses to be completed first
+            if (itCourses.length > 0) {
+              // Find the latest semester with a scheduled regular course
+              let lastScheduledSem = 0;
+              for (const a of courseAssignments) {
+                if (a.semester > lastScheduledSem)
+                  lastScheduledSem = a.semester;
+              }
+
+              for (const itCourse of itCourses) {
+                // Find first remaining LI semester after all regular courses
+                const liPlan = creditPlans.find(
+                  (p) => p.is_li && p.semester_number > lastScheduledSem,
+                );
+                if (liPlan) {
+                  courseAssignments.push({
+                    course_id: itCourse.course_id,
+                    semester: liPlan.semester_number,
+                    status: "Planned",
+                  });
+                  assignedCourseIds.add(itCourse.course_id);
+                  semesterCreditsUsed.set(
+                    liPlan.semester_number,
+                    (semesterCreditsUsed.get(liPlan.semester_number) || 0) +
+                      itCourse.credit_hour,
+                  );
+                } else {
+                  // No LI after last course — use original LI if still available
+                  const anyLi = creditPlans.find((p) => p.is_li);
+                  if (anyLi) {
+                    courseAssignments.push({
+                      course_id: itCourse.course_id,
+                      semester: anyLi.semester_number,
+                      status: "Planned",
+                    });
+                    assignedCourseIds.add(itCourse.course_id);
+                    semesterCreditsUsed.set(
+                      anyLi.semester_number,
+                      (semesterCreditsUsed.get(anyLi.semester_number) || 0) +
+                        itCourse.credit_hour,
+                    );
+                  }
                 }
               }
             }

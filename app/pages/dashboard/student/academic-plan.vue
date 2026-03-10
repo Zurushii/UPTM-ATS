@@ -17,6 +17,7 @@ interface Course {
   credit_hour: number;
   semester: number;
   status: "Planned" | "Transferred" | "Passed" | "Failed";
+  grade: string | null;
 }
 
 interface ResultSlip {
@@ -70,6 +71,22 @@ const resultSlipMap = computed(() => {
   return map;
 });
 
+// Grade point mapping (Malaysian university standard)
+const gradePointMap: Record<string, number> = {
+  "A+": 4.0,
+  A: 4.0,
+  "A-": 3.67,
+  "B+": 3.33,
+  B: 3.0,
+  "B-": 2.67,
+  "C+": 2.33,
+  C: 2.0,
+  "C-": 1.67,
+  "D+": 1.33,
+  D: 1.0,
+  F: 0.0,
+};
+
 // Get scheduled semesters (from start_semester onwards, non-Transferred courses)
 const scheduledSemesters = computed(() => {
   if (!data.value?.courses || !data.value?.plan) return [];
@@ -93,6 +110,25 @@ const scheduledSemesters = computed(() => {
       const courses = grouped[sem] || [];
       const passed = courses.filter((c) => c.status === "Passed").length;
       const failed = courses.filter((c) => c.status === "Failed").length;
+
+      // Calculate semester GPA
+      const graded = courses.filter(
+        (c) => (c.status === "Passed" || c.status === "Failed") && c.grade,
+      );
+      let semGpa: string | null = null;
+      if (graded.length > 0) {
+        let pts = 0,
+          cr = 0;
+        for (const c of graded) {
+          const gp = gradePointMap[c.grade!.toUpperCase()];
+          if (gp !== undefined) {
+            pts += gp * c.credit_hour;
+            cr += c.credit_hour;
+          }
+        }
+        if (cr > 0) semGpa = (pts / cr).toFixed(2);
+      }
+
       return {
         semester: sem,
         courses,
@@ -101,6 +137,7 @@ const scheduledSemesters = computed(() => {
         failed,
         has_result: passed + failed > 0,
         result_slip: resultSlipMap.value.get(sem) || null,
+        gpa: semGpa,
       };
     });
 });
@@ -194,6 +231,33 @@ const statusInfo = computed(() => {
     default:
       return { color: "badge-warning", icon: "⏳", text: "Draft" };
   }
+});
+
+// Calculate CGPA from all graded courses (grade replacement: latest entry per course)
+const cgpa = computed(() => {
+  if (!data.value?.courses) return null;
+  const graded = data.value.courses.filter(
+    (c) => (c.status === "Passed" || c.status === "Failed") && c.grade,
+  );
+  if (graded.length === 0) return null;
+
+  // Grade replacement: keep only the latest entry per course_id
+  const latestByCourse = new Map<number, (typeof graded)[0]>();
+  for (const c of graded) {
+    latestByCourse.set(c.course_id, c); // later entries overwrite earlier
+  }
+
+  let totalPoints = 0;
+  let totalCredits = 0;
+  for (const c of latestByCourse.values()) {
+    const gp = gradePointMap[c.grade!.toUpperCase()];
+    if (gp !== undefined) {
+      totalPoints += gp * c.credit_hour;
+      totalCredits += c.credit_hour;
+    }
+  }
+  if (totalCredits === 0) return null;
+  return (totalPoints / totalCredits).toFixed(2);
 });
 
 // Format semester label
@@ -326,6 +390,7 @@ const submitResults = async () => {
         Object.entries(courseResults.value).map(([courseId, status]) => ({
           course_id: Number(courseId),
           status,
+          grade: courseGrades.value[Number(courseId)] || undefined,
         })),
       ),
     );
@@ -470,7 +535,7 @@ const revokeResult = async () => {
     <!-- Has Plan -->
     <template v-else>
       <!-- Stats Overview -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
         <!-- Status -->
         <div class="card bg-base-100 shadow-sm border border-base-200">
           <div class="card-body p-4 flex flex-row items-center gap-4">
@@ -524,6 +589,43 @@ const revokeResult = async () => {
               </div>
               <div class="font-bold text-lg">
                 Semester {{ data.plan.start_semester }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CGPA -->
+        <div class="card bg-base-100 shadow-sm border border-base-200">
+          <div class="card-body p-4 flex flex-row items-center gap-4">
+            <div
+              class="w-12 h-12 rounded-xl flex items-center justify-center"
+              :class="
+                cgpa
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-base-200 text-base-content/40'
+              "
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-6 h-6"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
+                />
+              </svg>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wide text-base-content/60">
+                CGPA
+              </div>
+              <div class="font-bold text-lg">
+                {{ cgpa ?? "—" }}
               </div>
             </div>
           </div>
@@ -753,6 +855,9 @@ const revokeResult = async () => {
                   {{ sem.failed }} Failed
                 </span>
               </template>
+              <span v-if="sem.gpa" class="badge badge-accent badge-sm font-mono"
+                >GPA {{ sem.gpa }}</span
+              >
               <div class="badge badge-lg variant-soft font-mono">
                 {{ sem.total_credits }} Credits
               </div>

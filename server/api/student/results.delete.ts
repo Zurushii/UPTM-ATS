@@ -65,7 +65,7 @@ export default defineEventHandler(async (event) => {
     // Reset all course statuses for that semester back to 'Planned' (except 'Transferred')
     await connection.query(
       `UPDATE academic_plan_details
-       SET status = 'Planned'
+       SET status = 'Planned', grade = NULL
        WHERE academic_plan_id = ? AND semester = ? AND status IN ('Passed', 'Failed')`,
       [plan.id, semester],
     );

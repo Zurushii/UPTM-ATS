@@ -82,8 +82,12 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Parse results JSON: [{ course_id: number, status: "Passed" | "Failed" }]
-  let courseResults: { course_id: number; status: "Passed" | "Failed" }[];
+  // Parse results JSON: [{ course_id: number, status: "Passed" | "Failed", grade?: string }]
+  let courseResults: {
+    course_id: number;
+    status: "Passed" | "Failed";
+    grade?: string;
+  }[];
   try {
     courseResults = JSON.parse(resultsField.data.toString());
   } catch {
@@ -159,17 +163,64 @@ export default defineEventHandler(async (event) => {
       [student.id, plan.id, semester, filename, relativePath],
     );
 
-    // Update each course status
+    // Update each course status and grade
     for (const r of courseResults) {
       await connection.query(
         `UPDATE academic_plan_details
-         SET status = ?
+         SET status = ?, grade = ?
          WHERE academic_plan_id = ? AND course_id = ? AND semester = ?`,
-        [r.status, plan.id, r.course_id, semester],
+        [r.status, r.grade || null, plan.id, r.course_id, semester],
+      );
+    }
+
+    // Prerequisite cascade: remove planned dependents of failed courses
+    const failedCourseIds = courseResults
+      .filter((r) => r.status === "Failed")
+      .map((r) => r.course_id);
+
+    const cascadedCourses: number[] = [];
+    if (failedCourseIds.length > 0) {
+      // Find planned courses that depend on any failed course
+      const [dependentRows] = await connection.query(
+        `SELECT apd.id, apd.course_id, c.course_code
+         FROM academic_plan_details apd
+         JOIN program_courses pc ON apd.course_id = pc.course_id
+         JOIN courses c ON apd.course_id = c.id
+         WHERE apd.academic_plan_id = ?
+           AND apd.status = 'Planned'
+           AND pc.prerequisite_course_id IN (?)
+           AND pc.session_id = (
+             SELECT pc2.session_id FROM program_courses pc2
+             WHERE pc2.course_id = apd.course_id LIMIT 1
+           )`,
+        [plan.id, failedCourseIds],
+      );
+
+      const dependents = dependentRows as any[];
+      if (dependents.length > 0) {
+        const idsToDelete = dependents.map((d) => d.id);
+        cascadedCourses.push(...dependents.map((d) => d.course_id));
+        await connection.query(
+          `DELETE FROM academic_plan_details WHERE id IN (?)`,
+          [idsToDelete],
+        );
+      }
+
+      // Auto-revert plan to draft so student can reschedule
+      await connection.query(
+        `UPDATE academic_plans SET status = 'draft' WHERE id = ?`,
+        [plan.id],
       );
     }
 
     await connection.commit();
+
+    return {
+      success: true,
+      message: "Results submitted successfully",
+      cascaded_courses: cascadedCourses,
+      plan_reverted: failedCourseIds.length > 0,
+    };
   } catch (error) {
     await connection.rollback();
     throw createError({
@@ -179,6 +230,4 @@ export default defineEventHandler(async (event) => {
   } finally {
     connection.release();
   }
-
-  return { success: true, message: "Results submitted successfully" };
 });

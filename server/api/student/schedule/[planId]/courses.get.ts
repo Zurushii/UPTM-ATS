@@ -117,6 +117,56 @@ export default defineEventHandler(async (event) => {
 
   const program = (programRows as any[])[0];
 
+  // Calculate student's current CGPA from graded courses (grade replacement: latest entry per course)
+  const [gradedRows] = await pool.query(
+    `SELECT apd.grade, c.credit_hour
+     FROM academic_plan_details apd
+     JOIN courses c ON apd.course_id = c.id
+     WHERE apd.academic_plan_id = ?
+       AND apd.status IN ('Passed', 'Failed')
+       AND apd.grade IS NOT NULL
+       AND apd.id = (
+         SELECT MAX(apd2.id) FROM academic_plan_details apd2
+         WHERE apd2.academic_plan_id = apd.academic_plan_id
+           AND apd2.course_id = apd.course_id
+           AND apd2.status IN ('Passed', 'Failed')
+           AND apd2.grade IS NOT NULL
+       )`,
+    [planId],
+  );
+
+  const gradePointMap: Record<string, number> = {
+    "A+": 4.0,
+    A: 4.0,
+    "A-": 3.67,
+    "B+": 3.33,
+    B: 3.0,
+    "B-": 2.67,
+    "C+": 2.33,
+    C: 2.0,
+    "C-": 1.67,
+    "D+": 1.33,
+    D: 1.0,
+    F: 0.0,
+  };
+
+  let cgpa: number | null = null;
+  const gradedCourses = gradedRows as any[];
+  if (gradedCourses.length > 0) {
+    let totalPoints = 0;
+    let totalCredits = 0;
+    for (const row of gradedCourses) {
+      const gp = gradePointMap[row.grade?.toUpperCase()];
+      if (gp !== undefined) {
+        totalPoints += gp * row.credit_hour;
+        totalCredits += row.credit_hour;
+      }
+    }
+    if (totalCredits > 0) {
+      cgpa = totalPoints / totalCredits;
+    }
+  }
+
   // If no matching rule found AND student starts at semester 1,
   // infer semester types from program structure credits.
   // Students with entry_semester > 1 must rely on HOP-configured rules.
@@ -173,14 +223,87 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const longMin = program?.long_sem_min_credit ?? 12;
+  const longMax = program?.long_sem_max_credit ?? 20;
+  const shortMin2 = program?.short_sem_min_credit ?? 6;
+  const shortMax2 = program?.short_sem_max_credit ?? 10;
+
+  // CGPA < 2.5: restrict max credits to minimum for each semester type
+  const onProbation = cgpa !== null && cgpa < 2.5;
+
+  // Get failed courses that need retaking (Failed but not also Passed in another entry)
+  const [failedRows] = await pool.query(
+    `SELECT DISTINCT apd.course_id, c.course_code, c.course_name, c.credit_hour,
+            pc.semester AS default_semester, pc.course_type, pc.course_group,
+            pc.prerequisite_course_id, prereq.course_code AS prerequisite_code
+     FROM academic_plan_details apd
+     JOIN courses c ON apd.course_id = c.id
+     JOIN program_courses pc ON pc.course_id = c.id AND pc.session_id = ?
+     LEFT JOIN courses prereq ON pc.prerequisite_course_id = prereq.id
+     WHERE apd.academic_plan_id = ? AND apd.status = 'Failed'
+       AND apd.course_id NOT IN (
+         SELECT course_id FROM academic_plan_details
+         WHERE academic_plan_id = ? AND status = 'Passed'
+       )`,
+    [sessionId, planId, planId],
+  );
+
+  // Get max semester from semester rules for extension logic
+  const maxProgramSemester =
+    semesterRules.length > 0
+      ? Math.max(...semesterRules.map((r: any) => r.semester_number))
+      : 12;
+
+  // Auto-extend semester rules if retake courses exist beyond max program semester
+  // Detect the program's cycle pattern (L/L/S or S/L/L) from existing non-LI rules
+  if ((failedRows as any[]).length > 0) {
+    const lastSem = maxProgramSemester;
+    // Detect cycle: count L vs S at each modulo-3 position from non-LI semesters
+    const posLong = [0, 0, 0];
+    const posTotal = [0, 0, 0];
+    for (const r of semesterRules) {
+      if (!r.is_li) {
+        const pos = (r.semester_number - 1) % 3;
+        posTotal[pos]++;
+        if (r.semester_type === "L") posLong[pos]++;
+      }
+    }
+    const cycle = posTotal.map((total, i) =>
+      total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
+    );
+    // Add 3 extra semesters for retake scheduling room
+    for (let i = 1; i <= 3; i++) {
+      const semNum = lastSem + i;
+      if (!semesterRules.find((r: any) => r.semester_number === semNum)) {
+        const semType = cycle[(semNum - 1) % 3];
+        semesterRules.push({
+          semester_number: semNum,
+          semester_type: semType,
+          is_li: false,
+          target_credits: semType === "S" ? shortMin2 : longMin,
+        });
+      }
+    }
+  }
+
   return {
     courses: courseRows,
     semester_rules: semesterRules,
     credit_limits: {
-      long_min: program?.long_sem_min_credit ?? 12,
-      long_max: program?.long_sem_max_credit ?? 20,
-      short_min: program?.short_sem_min_credit ?? 6,
-      short_max: program?.short_sem_max_credit ?? 10,
+      long_min: longMin,
+      long_max: onProbation ? longMin : longMax,
+      short_min: shortMin2,
+      short_max: onProbation ? shortMin2 : shortMax2,
     },
+    base_credit_limits: {
+      long_min: longMin,
+      long_max: longMax,
+      short_min: shortMin2,
+      short_max: shortMax2,
+    },
+    cgpa: cgpa !== null ? parseFloat(cgpa.toFixed(2)) : null,
+    on_probation: onProbation,
+    retake_courses: failedRows,
+    max_program_semester: maxProgramSemester,
   };
 });

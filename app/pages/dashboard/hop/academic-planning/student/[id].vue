@@ -21,7 +21,14 @@ interface Course {
   course_code: string;
   course_name: string;
   credit_hour: number;
-  status: "Planned" | "Transferred";
+  status: "Planned" | "Transferred" | "Passed" | "Failed";
+  grade: string | null;
+}
+
+interface ResultSlip {
+  semester: number;
+  result_slip_filename: string;
+  submitted_at: string;
 }
 
 interface Semester {
@@ -48,6 +55,7 @@ interface PlanData {
     total_credit_transferred: number | null;
   };
   semesters: Semester[];
+  resultSlips: ResultSlip[];
   summary: {
     total_semesters: number;
     total_credits: number;
@@ -58,10 +66,9 @@ interface PlanData {
 }
 
 // Fetch plan data
-const {
-  data: planData,
-  pending: loading,
-} = await useFetch<PlanData>(`/api/hop/academic-planning/plan/${planId}`);
+const { data: planData, pending: loading } = await useFetch<PlanData>(
+  `/api/hop/academic-planning/plan/${planId}`,
+);
 
 // Check if plan exists
 if (!loading.value && !planData.value) {
@@ -74,8 +81,18 @@ const formatIntake = (intake: string | null) => {
   const month = parseInt(intake.substring(0, 2));
   const year = parseInt(intake.substring(2, 4));
   const monthNames = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
   const fullYear = year >= 50 ? 1900 + year : 2000 + year;
   return `${monthNames[month - 1]} ${fullYear}`;
@@ -109,6 +126,10 @@ const getCourseStatusClass = (status: string) => {
       return "badge-success";
     case "Planned":
       return "badge-primary";
+    case "Passed":
+      return "badge-success";
+    case "Failed":
+      return "badge-error";
     default:
       return "badge-ghost";
   }
@@ -135,7 +156,7 @@ const transferredCollapsed = ref(true);
 // Get all transferred courses grouped together
 const allTransferredCourses = computed(() => {
   if (!planData.value) return [];
-  
+
   const transferred: Course[] = [];
   for (const semester of planData.value.semesters) {
     for (const course of semester.courses) {
@@ -147,22 +168,103 @@ const allTransferredCourses = computed(() => {
   return transferred;
 });
 
-// Get only scheduled semesters (from start_semester onwards, with only Planned courses)
+// Result slip map by semester
+const resultSlipMap = computed(() => {
+  const map = new Map<number, ResultSlip>();
+  if (planData.value?.resultSlips) {
+    for (const slip of planData.value.resultSlips) {
+      map.set(slip.semester, slip);
+    }
+  }
+  return map;
+});
+
+// Grade point mapping (Malaysian standard)
+const gradePointMap: Record<string, number> = {
+  "A+": 4.0,
+  A: 4.0,
+  "A-": 3.67,
+  "B+": 3.33,
+  B: 3.0,
+  "B-": 2.67,
+  "C+": 2.33,
+  C: 2.0,
+  "C-": 1.67,
+  "D+": 1.33,
+  D: 1.0,
+  F: 0.0,
+};
+
+// Get only scheduled semesters (from start_semester onwards, with non-Transferred courses)
 const scheduledSemesters = computed(() => {
   if (!planData.value) return [];
-  
+
   const startSem = planData.value.plan.start_semester || 1;
-  
+
   return planData.value.semesters
-    .filter(sem => sem.semester >= startSem)
-    .map(sem => ({
-      ...sem,
-      courses: sem.courses.filter(c => c.status === "Planned"),
-      total_credits: sem.courses
-        .filter(c => c.status === "Planned")
-        .reduce((sum, c) => sum + c.credit_hour, 0)
-    }))
-    .filter(sem => sem.courses.length > 0); // Only show semesters with courses
+    .filter((sem) => sem.semester >= startSem)
+    .map((sem) => {
+      const courses = sem.courses.filter((c) => c.status !== "Transferred");
+      const passed = courses.filter((c) => c.status === "Passed").length;
+      const failed = courses.filter((c) => c.status === "Failed").length;
+
+      // Calculate GPA for this semester
+      let gpa: string | null = null;
+      const gradedCourses = courses.filter(
+        (c) =>
+          (c.status === "Passed" || c.status === "Failed") &&
+          c.grade &&
+          gradePointMap[c.grade] !== undefined,
+      );
+      if (gradedCourses.length > 0) {
+        const totalWeighted = gradedCourses.reduce(
+          (sum, c) => sum + gradePointMap[c.grade!] * c.credit_hour,
+          0,
+        );
+        const totalCredits = gradedCourses.reduce(
+          (sum, c) => sum + c.credit_hour,
+          0,
+        );
+        gpa = (totalWeighted / totalCredits).toFixed(2);
+      }
+
+      return {
+        ...sem,
+        courses,
+        total_credits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
+        passed,
+        failed,
+        has_result: passed > 0 || failed > 0,
+        result_slip: resultSlipMap.value.get(sem.semester) || null,
+        gpa,
+      };
+    })
+    .filter((sem) => sem.courses.length > 0);
+});
+
+// Overall CGPA (grade replacement: latest entry per course)
+const cgpa = computed(() => {
+  if (!planData.value) return null;
+  const latestByCourse = new Map<number, Course>();
+  for (const sem of planData.value.semesters) {
+    for (const c of sem.courses) {
+      if (
+        (c.status === "Passed" || c.status === "Failed") &&
+        c.grade &&
+        gradePointMap[c.grade] !== undefined
+      ) {
+        latestByCourse.set(c.course_id, c); // later entries overwrite earlier
+      }
+    }
+  }
+  if (latestByCourse.size === 0) return null;
+  let totalWeighted = 0;
+  let totalCredits = 0;
+  for (const c of latestByCourse.values()) {
+    totalWeighted += gradePointMap[c.grade!] * c.credit_hour;
+    totalCredits += c.credit_hour;
+  }
+  return (totalWeighted / totalCredits).toFixed(2);
 });
 
 // Status update modals
@@ -260,9 +362,11 @@ const goToSchedule = () => {
 // Go back to intake page
 const goBack = () => {
   if (planData.value?.plan.intake_id) {
-    navigateTo(`/dashboard/hop/academic-planning/${planData.value.plan.intake_id}`);
+    navigateTo(
+      `/dashboard/hop/academic-planning/${planData.value.plan.intake_id}`,
+    );
   } else {
-    navigateTo('/dashboard/hop/academic-planning');
+    navigateTo("/dashboard/hop/academic-planning");
   }
 };
 </script>
@@ -271,9 +375,7 @@ const goBack = () => {
   <div class="p-6 w-full space-y-6">
     <!-- Back Button & Header -->
     <div class="flex items-start gap-4">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">
-        ← Back
-      </button>
+      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
       <div class="flex-1">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -333,12 +435,17 @@ const goBack = () => {
             <div>
               <span class="text-base-content/60">Intake:</span>
               <div class="font-medium">
-                {{ planData.plan.intake_name || formatIntake(planData.plan.intake_year) }}
+                {{
+                  planData.plan.intake_name ||
+                  formatIntake(planData.plan.intake_year)
+                }}
               </div>
             </div>
             <div>
               <span class="text-base-content/60">Starting Semester:</span>
-              <div class="font-medium">Semester {{ planData.plan.start_semester }}</div>
+              <div class="font-medium">
+                Semester {{ planData.plan.start_semester }}
+              </div>
             </div>
             <div>
               <span class="text-base-content/60">Transferred Credits:</span>
@@ -360,13 +467,18 @@ const goBack = () => {
       <div class="stats shadow w-full">
         <div class="stat">
           <div class="stat-title">Total Semesters</div>
-          <div class="stat-value text-2xl">{{ planData.summary.total_semesters }}</div>
+          <div class="stat-value text-2xl">
+            {{ planData.summary.total_semesters }}
+          </div>
         </div>
         <div class="stat">
           <div class="stat-title">Total Credits</div>
-          <div class="stat-value text-2xl">{{ planData.summary.total_credits }}</div>
+          <div class="stat-value text-2xl">
+            {{ planData.summary.total_credits }}
+          </div>
           <div class="stat-desc">
-            {{ planData.summary.transferred_credits }} transferred + {{ planData.summary.planned_credits }} planned
+            {{ planData.summary.transferred_credits }} transferred +
+            {{ planData.summary.planned_credits }} planned
           </div>
         </div>
         <div class="stat">
@@ -375,10 +487,41 @@ const goBack = () => {
             {{ planData.summary.total_courses }}
           </div>
         </div>
+        <div class="stat">
+          <div class="stat-title">CGPA</div>
+          <div class="stat-value text-2xl">
+            {{ cgpa ?? "—" }}
+          </div>
+          <div v-if="cgpa" class="stat-desc">Cumulative GPA</div>
+        </div>
+      </div>
+
+      <!-- CGPA Probation Warning -->
+      <div v-if="cgpa && parseFloat(cgpa) < 2.5" class="alert alert-warning">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="stroke-current shrink-0 h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
+        </svg>
+        <div>
+          <h3 class="font-bold">Academic Probation</h3>
+          <div class="text-sm">
+            This student's CGPA ({{ cgpa }}) is below 2.5. They are restricted
+            to minimum credit hours only when scheduling.
+          </div>
+        </div>
       </div>
 
       <!-- Legend -->
-      <div class="flex items-center gap-4 text-sm">
+      <div class="flex items-center gap-4 text-sm flex-wrap">
         <div class="flex items-center gap-2">
           <span class="badge badge-success badge-sm">Transferred</span>
           <span class="text-base-content/60">Credited from previous study</span>
@@ -387,12 +530,23 @@ const goBack = () => {
           <span class="badge badge-primary badge-sm">Planned</span>
           <span class="text-base-content/60">To be taken</span>
         </div>
+        <div class="flex items-center gap-2">
+          <span class="badge badge-success badge-sm">Passed</span>
+          <span class="text-base-content/60">Completed successfully</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="badge badge-error badge-sm">Failed</span>
+          <span class="text-base-content/60">Needs to retake</span>
+        </div>
       </div>
 
       <!-- Transferred Courses Section (Collapsible) -->
-      <div v-if="allTransferredCourses.length > 0" class="card bg-success/5 border border-success/30 shadow-sm">
+      <div
+        v-if="allTransferredCourses.length > 0"
+        class="card bg-success/5 border border-success/30 shadow-sm"
+      >
         <div class="card-body">
-          <div 
+          <div
             class="flex items-center justify-between cursor-pointer hover:bg-success/10 p-2 -mx-2 rounded-lg transition-colors select-none"
             @click="transferredCollapsed = !transferredCollapsed"
           >
@@ -411,9 +565,7 @@ const goBack = () => {
                   clip-rule="evenodd"
                 />
               </svg>
-              <h3 class="font-medium text-success">
-                Transferred Courses
-              </h3>
+              <h3 class="font-medium text-success">Transferred Courses</h3>
             </div>
             <div class="flex items-center gap-2">
               <span class="badge badge-success">
@@ -425,7 +577,7 @@ const goBack = () => {
             </div>
           </div>
 
-          <div 
+          <div
             v-show="!transferredCollapsed"
             class="overflow-x-auto transition-all duration-300 origin-top mt-2"
           >
@@ -451,7 +603,9 @@ const goBack = () => {
               <tfoot>
                 <tr class="font-medium">
                   <td colspan="2" class="text-right">Total:</td>
-                  <td class="text-right">{{ planData.summary.transferred_credits }}</td>
+                  <td class="text-right">
+                    {{ planData.summary.transferred_credits }}
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -486,10 +640,17 @@ const goBack = () => {
         <div
           v-for="semester in scheduledSemesters"
           :key="semester.semester"
-          class="card bg-base-100 border border-base-300 shadow-sm"
+          class="card bg-base-100 border shadow-sm"
+          :class="
+            semester.has_result
+              ? semester.failed > 0
+                ? 'border-warning/40'
+                : 'border-success/40'
+              : 'border-base-300'
+          "
         >
           <div class="card-body">
-            <div 
+            <div
               class="flex items-center justify-between mb-2 cursor-pointer hover:bg-base-200/50 p-2 -mx-2 rounded-lg transition-colors select-none"
               @click="toggleSemester(semester.semester)"
             >
@@ -500,7 +661,11 @@ const goBack = () => {
                   viewBox="0 0 20 20"
                   fill="currentColor"
                   class="w-5 h-5 transition-transform duration-200"
-                  :class="collapsedSemesters.has(semester.semester) ? '-rotate-90' : 'rotate-0'"
+                  :class="
+                    collapsedSemesters.has(semester.semester)
+                      ? '-rotate-90'
+                      : 'rotate-0'
+                  "
                 >
                   <path
                     fill-rule="evenodd"
@@ -513,13 +678,31 @@ const goBack = () => {
                 </h3>
               </div>
               <div class="flex items-center gap-2">
+                <!-- Result badges -->
+                <template v-if="semester.has_result">
+                  <span class="badge badge-success badge-sm gap-1">
+                    ✓ {{ semester.passed }} Passed
+                  </span>
+                  <span
+                    v-if="semester.failed > 0"
+                    class="badge badge-error badge-sm gap-1"
+                  >
+                    ✗ {{ semester.failed }} Failed
+                  </span>
+                </template>
+                <span
+                  v-if="semester.gpa"
+                  class="badge badge-accent badge-sm font-mono"
+                >
+                  GPA {{ semester.gpa }}
+                </span>
                 <span class="badge badge-outline">
                   {{ semester.total_credits }} credits
                 </span>
               </div>
             </div>
 
-            <div 
+            <div
               v-show="!collapsedSemesters.has(semester.semester)"
               class="overflow-x-auto transition-all duration-300 origin-top"
             >
@@ -529,6 +712,7 @@ const goBack = () => {
                     <th>Course Code</th>
                     <th>Course Name</th>
                     <th class="text-right">Credits</th>
+                    <th class="text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -539,15 +723,45 @@ const goBack = () => {
                     <td class="font-mono text-sm">{{ course.course_code }}</td>
                     <td>{{ course.course_name }}</td>
                     <td class="text-right">{{ course.credit_hour }}</td>
+                    <td class="text-center">
+                      <span
+                        class="badge badge-xs"
+                        :class="getCourseStatusClass(course.status)"
+                      >
+                        {{ course.status }}
+                      </span>
+                    </td>
                   </tr>
                 </tbody>
                 <tfoot>
                   <tr class="font-medium">
-                    <td colspan="2" class="text-right">Total:</td>
+                    <td colspan="3" class="text-right">Total:</td>
                     <td class="text-right">{{ semester.total_credits }}</td>
                   </tr>
                 </tfoot>
               </table>
+
+              <!-- Result slip indicator -->
+              <div
+                v-if="semester.result_slip"
+                class="mt-2 flex items-center gap-2 text-sm text-base-content/60"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                  class="w-4 h-4"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                  />
+                </svg>
+                Result slip: {{ semester.result_slip.result_slip_filename }}
+              </div>
             </div>
           </div>
         </div>
@@ -557,33 +771,54 @@ const goBack = () => {
           v-if="scheduledSemesters.length === 0"
           class="text-center py-8 text-base-content/60 border border-dashed border-base-300 rounded-lg"
         >
-          <p>No scheduled semesters yet. Click "Schedule Semester" to start planning.</p>
+          <p>
+            No scheduled semesters yet. Click "Schedule Semester" to start
+            planning.
+          </p>
         </div>
       </div>
     </template>
   </div>
 
   <!-- Approve Plan Modal -->
-  <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': showApproveModal }">
+  <dialog
+    class="modal modal-bottom sm:modal-middle"
+    :class="{ 'modal-open': showApproveModal }"
+  >
     <div class="modal-box">
       <h3 class="font-bold text-lg text-success flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="w-6 h-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+          />
         </svg>
         Approve Academic Plan
       </h3>
       <p class="py-4">
-        Are you sure you want to approve this plan? The student will be notified that their academic plan has been officially approved.
+        Are you sure you want to approve this plan? The student will be notified
+        that their academic plan has been officially approved.
       </p>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="closeAllModals">Cancel</button>
-        <button 
-          class="btn btn-success" 
+        <button
+          class="btn btn-success"
           :disabled="statusLoading"
           @click="confirmApprove"
         >
-          <span v-if="statusLoading" class="loading loading-spinner loading-sm"></span>
-          {{ statusLoading ? 'Approving...' : 'Yes, Approve Plan' }}
+          <span
+            v-if="statusLoading"
+            class="loading loading-spinner loading-sm"
+          ></span>
+          {{ statusLoading ? "Approving..." : "Yes, Approve Plan" }}
         </button>
       </div>
     </div>
@@ -593,32 +828,62 @@ const goBack = () => {
   </dialog>
 
   <!-- Mark Complete Modal -->
-  <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': showCompleteModal }">
+  <dialog
+    class="modal modal-bottom sm:modal-middle"
+    :class="{ 'modal-open': showCompleteModal }"
+  >
     <div class="modal-box">
       <h3 class="font-bold text-lg text-info flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0 1 18 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3 1.5 1.5 3-3.75" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="w-6 h-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0 1 18 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3 1.5 1.5 3-3.75"
+          />
         </svg>
         Mark Plan as Completed
       </h3>
       <div class="py-4 space-y-3">
         <p>Are you sure you want to mark this plan as completed?</p>
         <div class="alert alert-warning text-sm">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
           </svg>
-          <span>This action cannot be undone. A completed plan is considered finalized.</span>
+          <span
+            >This action cannot be undone. A completed plan is considered
+            finalized.</span
+          >
         </div>
       </div>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="closeAllModals">Cancel</button>
-        <button 
-          class="btn btn-info" 
+        <button
+          class="btn btn-info"
           :disabled="statusLoading"
           @click="confirmComplete"
         >
-          <span v-if="statusLoading" class="loading loading-spinner loading-sm"></span>
-          {{ statusLoading ? 'Processing...' : 'Yes, Mark Complete' }}
+          <span
+            v-if="statusLoading"
+            class="loading loading-spinner loading-sm"
+          ></span>
+          {{ statusLoading ? "Processing..." : "Yes, Mark Complete" }}
         </button>
       </div>
     </div>
@@ -628,19 +893,43 @@ const goBack = () => {
   </dialog>
 
   <!-- Re-schedule Modal -->
-  <dialog class="modal modal-bottom sm:modal-middle" :class="{ 'modal-open': showReScheduleModal }">
+  <dialog
+    class="modal modal-bottom sm:modal-middle"
+    :class="{ 'modal-open': showReScheduleModal }"
+  >
     <div class="modal-box">
       <h3 class="font-bold text-lg text-warning flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="w-6 h-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+          />
         </svg>
         Re-schedule Plan
       </h3>
       <div class="py-4 space-y-3">
         <p>Are you sure you want to re-schedule this plan?</p>
         <div class="alert alert-info text-sm">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-5 h-5">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            class="stroke-current shrink-0 w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            ></path>
           </svg>
           <div>
             <p class="font-medium">This will:</p>
@@ -654,13 +943,16 @@ const goBack = () => {
       </div>
       <div class="modal-action">
         <button class="btn btn-ghost" @click="closeAllModals">Cancel</button>
-        <button 
-          class="btn btn-warning" 
+        <button
+          class="btn btn-warning"
           :disabled="reScheduleLoading"
           @click="confirmReSchedule"
         >
-          <span v-if="reScheduleLoading" class="loading loading-spinner loading-sm"></span>
-          {{ reScheduleLoading ? 'Processing...' : 'Yes, Re-schedule' }}
+          <span
+            v-if="reScheduleLoading"
+            class="loading loading-spinner loading-sm"
+          ></span>
+          {{ reScheduleLoading ? "Processing..." : "Yes, Re-schedule" }}
         </button>
       </div>
     </div>

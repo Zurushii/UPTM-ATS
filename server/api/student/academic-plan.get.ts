@@ -47,6 +47,7 @@ export default defineEventHandler(async (event) => {
     `SELECT 
       apd.semester,
       apd.status,
+      apd.grade,
       c.id as course_id,
       c.course_code,
       c.course_name,
