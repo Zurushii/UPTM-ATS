@@ -1220,6 +1220,25 @@ const filteredProcessedStudents = computed(() => {
             View Students
           </NuxtLink>
         </div>
+
+        <!-- Next Step Prompt -->
+        <div class="mt-6 card bg-base-200 shadow-sm">
+          <div class="card-body flex-row items-center justify-between py-4">
+            <div>
+              <p class="text-sm text-base-content/60">Next Step</p>
+              <p class="font-semibold">Generate Academic Plans</p>
+              <p class="text-sm text-base-content/70">
+                Create and approve academic plans for your students
+              </p>
+            </div>
+            <NuxtLink
+              to="/dashboard/hop/academic-planning"
+              class="btn btn-primary btn-sm"
+            >
+              Academic Planning &rarr;
+            </NuxtLink>
+          </div>
+        </div>
       </div>
     </div>
   </div>

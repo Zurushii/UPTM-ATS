@@ -51,7 +51,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: "Course not found" });
   }
 
-  // Get all students who have this course in their academic plan (all intakes)
+  // Get students currently taking this course (active semester only)
   // Exclude students who have this course as a credit transfer
   const [studentRows] = await pool.query(
     `SELECT 
@@ -64,9 +64,12 @@ export default defineEventHandler(async (event) => {
     FROM academic_plan_details apd
     JOIN academic_plans ap ON ap.id = apd.academic_plan_id
     JOIN students s ON s.id = ap.student_id
+    JOIN academic_planning_intakes api ON api.id = ap.intake_id
     LEFT JOIN \`user\` u ON u.id = s.user_id
     WHERE apd.course_id = ?
       AND s.program_id = ?
+      AND apd.semester = api.current_semester + ap.start_semester - 1
+      AND apd.status = 'Planned'
       AND NOT EXISTS (
         SELECT 1 FROM student_transferred_courses stc
         WHERE stc.student_id = s.id AND stc.course_id = apd.course_id

@@ -39,6 +39,7 @@ export default defineEventHandler(async (event) => {
       ps.session_name,
       api.intake_type,
       api.status,
+      api.current_semester,
       api.total_students,
       api.successful_plans,
       api.failed_plans,

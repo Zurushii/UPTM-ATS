@@ -43,35 +43,34 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event);
   const search = (query.search as string) || "";
 
-  // Get distinct courses from the current session's intake period
-  // with student enrollment counts across ALL intakes
+  // Show all distinct courses in the program;
+  // student_count = students currently taking the course in their active semester
   let sql = `
-    SELECT 
+    SELECT
       c.id AS course_id,
       c.course_code,
       c.course_name,
       c.credit_hour,
       MIN(pc.semester) AS semester,
       MIN(pc.course_type) AS course_type,
-      COUNT(DISTINCT apd.id) AS student_count
+      COUNT(DISTINCT active_apd.student_id) AS student_count
     FROM program_courses pc
     JOIN courses c ON c.id = pc.course_id
     JOIN program_sessions ps ON ps.id = pc.session_id
-    LEFT JOIN academic_plan_details apd ON apd.course_id = c.id
-      AND apd.academic_plan_id IN (
-        SELECT ap.id FROM academic_plans ap
-        JOIN students s ON s.id = ap.student_id
-        WHERE s.program_id = ?
-      )
+    LEFT JOIN (
+      SELECT apd.course_id, ap.student_id
+      FROM academic_plan_details apd
+      JOIN academic_plans ap ON ap.id = apd.academic_plan_id
+      JOIN students s ON s.id = ap.student_id
+      JOIN academic_planning_intakes api ON api.id = ap.intake_id
+      WHERE s.program_id = ?
+        AND apd.semester = api.current_semester + ap.start_semester - 1
+        AND apd.status = 'Planned'
+    ) active_apd ON active_apd.course_id = c.id
     WHERE ps.program_id = ?
-      AND ps.intake_year = ?
   `;
 
-  const params: any[] = [
-    programId,
-    programId,
-    currentSession.active_intake_period,
-  ];
+  const params: any[] = [programId, programId];
 
   if (search) {
     sql += ` AND (c.course_code LIKE ? OR c.course_name LIKE ?)`;
@@ -80,6 +79,7 @@ export default defineEventHandler(async (event) => {
 
   sql += `
     GROUP BY c.id, c.course_code, c.course_name, c.credit_hour
+    HAVING student_count > 0
     ORDER BY semester ASC, c.course_code ASC
   `;
 

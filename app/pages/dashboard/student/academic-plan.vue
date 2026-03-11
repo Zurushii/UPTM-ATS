@@ -119,10 +119,16 @@ const currentSemester = computed(() => {
   if (!sems.length) return null;
   if (!data.value?.plan) return null;
 
-  // Use the per-intake current_semester set by HOP
+  // Use the per-intake current_semester set by HOP.
+  // current_semester is relative (1 = first semester of this cohort),
+  // so convert to absolute by adding the student's starting semester offset.
   const intakeSem = data.value.intakeCurrentSemester;
-  if (intakeSem != null && sems.some((s) => s.semester === intakeSem)) {
-    return intakeSem;
+  if (intakeSem != null) {
+    const startSem = data.value.plan.start_semester || 1;
+    const absoluteSem = startSem + intakeSem - 1;
+    if (sems.some((s) => s.semester === absoluteSem)) {
+      return absoluteSem;
+    }
   }
 
   // Fallback: first semester without result

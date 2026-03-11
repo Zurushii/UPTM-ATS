@@ -1001,5 +1001,21 @@ const viewIntake = (intake: IntakeData) => {
         <button @click="closeDeleteModal">close</button>
       </form>
     </dialog>
+
+    <!-- Next Step Prompt -->
+    <div class="mt-8 card bg-base-200 shadow-sm">
+      <div class="card-body flex-row items-center justify-between py-4">
+        <div>
+          <p class="text-sm text-base-content/60">Next Step</p>
+          <p class="font-semibold">Review Your Students</p>
+          <p class="text-sm text-base-content/70">
+            View student profiles and monitor their academic progress
+          </p>
+        </div>
+        <NuxtLink to="/dashboard/hop/students" class="btn btn-primary btn-sm">
+          Students &rarr;
+        </NuxtLink>
+      </div>
+    </div>
   </div>
 </template>

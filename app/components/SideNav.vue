@@ -67,12 +67,118 @@ const toggleSidebar = () => emit("toggle");
         </NuxtLink>
       </li>
 
-      <!-- HoP Section -->
+      <!-- HoP Section: Setup -->
       <li
         v-if="user?.role === 'HOP' && expanded"
         class="menu-title transition-opacity duration-300"
       >
-        Management
+        Setup
+      </li>
+      <li
+        v-else-if="user?.role === 'HOP' && !expanded"
+        class="menu-title text-center px-0"
+      >
+        S
+      </li>
+
+      <template v-if="user?.role === 'HOP'">
+        <li>
+          <NuxtLink
+            to="/dashboard/hop/semester-rules"
+            @click="handleClick"
+            :class="[
+              { active: isActive('/dashboard/hop/semester-rules') },
+              expanded ? '' : 'justify-center',
+            ]"
+            class="flex items-center"
+            :title="!expanded ? 'Semester Rules' : ''"
+          >
+            <span class="text-xl">📐</span>
+            <template v-if="expanded">
+              <span class="badge badge-primary badge-xs ml-1">1</span>
+              <span class="ml-2 truncate">Semester Rules</span>
+            </template>
+          </NuxtLink>
+        </li>
+        <li>
+          <NuxtLink
+            to="/dashboard/hop/program-structure"
+            @click="handleClick"
+            :class="[
+              { active: isActive('/dashboard/hop/program-structure') },
+              expanded ? '' : 'justify-center',
+            ]"
+            class="flex items-center"
+            :title="!expanded ? 'Program Structure' : ''"
+          >
+            <span class="text-xl">📚</span>
+            <template v-if="expanded">
+              <span class="badge badge-primary badge-xs ml-1">2</span>
+              <span class="ml-2 truncate">Program Structure</span>
+            </template>
+          </NuxtLink>
+        </li>
+      </template>
+
+      <!-- HoP Section: Operations -->
+      <li
+        v-if="user?.role === 'HOP' && expanded"
+        class="menu-title transition-opacity duration-300"
+      >
+        Operations
+      </li>
+      <li
+        v-else-if="user?.role === 'HOP' && !expanded"
+        class="menu-title text-center px-0"
+      >
+        O
+      </li>
+
+      <template v-if="user?.role === 'HOP'">
+        <li>
+          <NuxtLink
+            to="/dashboard/hop/intake-assessment"
+            @click="handleClick"
+            :class="[
+              { active: isActive('/dashboard/hop/intake-assessment') },
+              expanded ? '' : 'justify-center',
+            ]"
+            class="flex items-center"
+            :title="!expanded ? 'Intake Assessment' : ''"
+          >
+            <span class="text-xl">📋</span>
+            <template v-if="expanded">
+              <span class="badge badge-primary badge-xs ml-1">3</span>
+              <span class="ml-2 truncate">Intake Assessment</span>
+            </template>
+          </NuxtLink>
+        </li>
+        <li>
+          <NuxtLink
+            to="/dashboard/hop/academic-planning"
+            @click="handleClick"
+            :class="[
+              { active: isActive('/dashboard/hop/academic-planning') },
+              expanded ? '' : 'justify-center',
+            ]"
+            class="flex items-center"
+            :title="!expanded ? 'Academic Planning' : ''"
+          >
+            <span class="text-xl">🗂</span>
+            <template v-if="expanded">
+              <span class="badge badge-primary badge-xs ml-1">4</span>
+              <span class="ml-2 truncate">Academic Planning</span>
+            </template>
+          </NuxtLink>
+        </li>
+      </template>
+
+      <!-- HoP Section: Monitoring -->
+      <li
+        v-if="user?.role === 'HOP' && expanded"
+        class="menu-title transition-opacity duration-300"
+      >
+        Monitoring
       </li>
       <li
         v-else-if="user?.role === 'HOP' && !expanded"
@@ -95,66 +201,6 @@ const toggleSidebar = () => emit("toggle");
           >
             <span class="text-xl">🎓</span>
             <span v-if="expanded" class="ml-3 truncate">Students</span>
-          </NuxtLink>
-        </li>
-        <li>
-          <NuxtLink
-            to="/dashboard/hop/intake-assessment"
-            @click="handleClick"
-            :class="[
-              { active: isActive('/dashboard/hop/intake-assessment') },
-              expanded ? '' : 'justify-center',
-            ]"
-            class="flex items-center"
-            :title="!expanded ? 'Intake Assessment' : ''"
-          >
-            <span class="text-xl">📋</span>
-            <span v-if="expanded" class="ml-3 truncate">Intake Assessment</span>
-          </NuxtLink>
-        </li>
-        <li>
-          <NuxtLink
-            to="/dashboard/hop/semester-rules"
-            @click="handleClick"
-            :class="[
-              { active: isActive('/dashboard/hop/semester-rules') },
-              expanded ? '' : 'justify-center',
-            ]"
-            class="flex items-center"
-            :title="!expanded ? 'Semester Rules' : ''"
-          >
-            <span class="text-xl">📐</span>
-            <span v-if="expanded" class="ml-3 truncate">Semester Rules</span>
-          </NuxtLink>
-        </li>
-        <li>
-          <NuxtLink
-            to="/dashboard/hop/program-structure"
-            @click="handleClick"
-            :class="[
-              { active: isActive('/dashboard/hop/program-structure') },
-              expanded ? '' : 'justify-center',
-            ]"
-            class="flex items-center"
-            :title="!expanded ? 'Program Structure' : ''"
-          >
-            <span class="text-xl">📚</span>
-            <span v-if="expanded" class="ml-3 truncate">Program Structure</span>
-          </NuxtLink>
-        </li>
-        <li>
-          <NuxtLink
-            to="/dashboard/hop/academic-planning"
-            @click="handleClick"
-            :class="[
-              { active: isActive('/dashboard/hop/academic-planning') },
-              expanded ? '' : 'justify-center',
-            ]"
-            class="flex items-center"
-            :title="!expanded ? 'Academic Planning' : ''"
-          >
-            <span class="text-xl">🗂</span>
-            <span v-if="expanded" class="ml-3 truncate">Academic Planning</span>
           </NuxtLink>
         </li>
         <li>
