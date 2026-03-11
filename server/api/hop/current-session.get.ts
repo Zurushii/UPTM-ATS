@@ -29,13 +29,11 @@ export default defineEventHandler(async (event) => {
   const programId = hopData[0].program_id;
 
   const [rows] = await pool.query(
-    `SELECT intake_period, semester_type, updated_at
+    `SELECT active_intake_period, semester_type, updated_at
      FROM program_current_session
      WHERE program_id = ?`,
     [programId],
   );
 
-  const data = (rows as any[])[0] || null;
-
-  return { current_session: data };
+  return { current_session: (rows as any[])[0] ?? null };
 });

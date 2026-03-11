@@ -691,6 +691,7 @@ export default defineEventHandler(async (event) => {
 
               if (
                 defaultPlan &&
+                !defaultPlan.is_li &&
                 (!longOnly || defaultPlan.semester_type === "L") &&
                 defaultPlan.semester_number > prereqSem
               ) {
@@ -759,6 +760,7 @@ export default defineEventHandler(async (event) => {
 
               if (
                 defaultPlan &&
+                !defaultPlan.is_li &&
                 defaultPlan.semester_number > prereqSem &&
                 (!longOnly || defaultPlan.semester_type === "L")
               ) {

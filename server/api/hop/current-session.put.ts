@@ -13,10 +13,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event);
-  const { intake_period, semester_type } = body;
+  const { active_intake_period, semester_type } = body;
 
-  // Validate intake_period: must be 4 digits, MMYY format
-  if (!intake_period || !/^\d{4}$/.test(intake_period)) {
+  // Validate active_intake_period: must be 4 digits, MMYY format
+  if (!active_intake_period || !/^\d{4}$/.test(active_intake_period)) {
     throw createError({
       statusCode: 400,
       statusMessage:
@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const month = parseInt(intake_period.substring(0, 2), 10);
+  const month = parseInt(active_intake_period.substring(0, 2), 10);
   if (month < 1 || month > 12) {
     throw createError({
       statusCode: 400,
@@ -56,23 +56,22 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  // Upsert: insert or update if already exists
+  // Upsert single row per program
   await pool.query(
-    `INSERT INTO program_current_session (program_id, intake_period, semester_type)
+    `INSERT INTO program_current_session (program_id, active_intake_period, semester_type)
      VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       intake_period = VALUES(intake_period),
+       active_intake_period = VALUES(active_intake_period),
        semester_type = VALUES(semester_type)`,
-    [programId, intake_period, semester_type],
+    [programId, active_intake_period, semester_type],
   );
 
-  // Return the updated record
   const [rows] = await pool.query(
-    `SELECT intake_period, semester_type, updated_at
+    `SELECT active_intake_period, semester_type, updated_at
      FROM program_current_session
      WHERE program_id = ?`,
     [programId],
   );
 
-  return { current_session: (rows as any[])[0] };
+  return { current_session: (rows as any[])[0] ?? null };
 });

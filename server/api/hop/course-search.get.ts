@@ -28,11 +28,23 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
+  // Get current session for filtering
+  const [sessionRows] = await pool.query(
+    `SELECT active_intake_period, semester_type FROM program_current_session WHERE program_id = ?`,
+    [programId],
+  );
+  const currentSession = (sessionRows as any[])[0] || null;
+
+  // No current session → return empty (banner will warn the user)
+  if (!currentSession) {
+    return { courses: [], has_session: false };
+  }
+
   const query = getQuery(event);
   const search = (query.search as string) || "";
 
-  // Get distinct courses in the HOP's program with student enrollment counts
-  // A course appears once regardless of how many sessions it's in
+  // Get distinct courses from the current session's intake period
+  // with student enrollment counts across ALL intakes
   let sql = `
     SELECT 
       c.id AS course_id,
@@ -52,9 +64,14 @@ export default defineEventHandler(async (event) => {
         WHERE s.program_id = ?
       )
     WHERE ps.program_id = ?
+      AND ps.intake_year = ?
   `;
 
-  const params: any[] = [programId, programId];
+  const params: any[] = [
+    programId,
+    programId,
+    currentSession.active_intake_period,
+  ];
 
   if (search) {
     sql += ` AND (c.course_code LIKE ? OR c.course_name LIKE ?)`;
@@ -70,5 +87,6 @@ export default defineEventHandler(async (event) => {
 
   return {
     courses: rows,
+    has_session: true,
   };
 });

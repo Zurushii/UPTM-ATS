@@ -222,6 +222,7 @@ CREATE TABLE academic_planning_intakes (
   session_id INT NOT NULL,                   -- Program structure to apply
   intake_type VARCHAR(50) NOT NULL,          -- Semester rules intake type
   status ENUM('draft', 'generated', 'finalized') DEFAULT 'draft',
+  current_semester INT NOT NULL DEFAULT 1,   -- Per-intake current semester set by HOP
   total_students INT DEFAULT 0,
   successful_plans INT DEFAULT 0,
   failed_plans INT DEFAULT 0,
@@ -291,7 +292,7 @@ CREATE TABLE plan_activity_logs (
 CREATE TABLE program_current_session (
   id INT AUTO_INCREMENT PRIMARY KEY,
   program_id INT NOT NULL,
-  intake_period VARCHAR(4) NOT NULL,           -- MMYY format, e.g., "0525"
+  active_intake_period VARCHAR(4) NOT NULL,     -- MMYY of the currently active intake (e.g., "0525")
   semester_type ENUM('L', 'S') NOT NULL,       -- L = Long Semester, S = Short Semester
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

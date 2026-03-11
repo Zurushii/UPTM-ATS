@@ -33,6 +33,13 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
+  // Get current session for filtering
+  const [sessionRows] = await pool.query(
+    `SELECT active_intake_period, semester_type FROM program_current_session WHERE program_id = ?`,
+    [programId],
+  );
+  const currentSession = (sessionRows as any[])[0] || null;
+
   // Get course info
   const [courseRows] = await pool.query(
     `SELECT id, course_code, course_name, credit_hour FROM courses WHERE id = ?`,
@@ -44,9 +51,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: "Course not found" });
   }
 
-  // Get students who have this course in their academic plan
+  // Get all students who have this course in their academic plan (all intakes)
   // Exclude students who have this course as a credit transfer
-  const [students] = await pool.query(
+  const [studentRows] = await pool.query(
     `SELECT 
       s.id AS student_id,
       s.matric_no,
@@ -67,6 +74,7 @@ export default defineEventHandler(async (event) => {
     ORDER BY s.intake_year DESC, s.matric_no ASC`,
     [courseId, programId],
   );
+  const students = studentRows as any[];
 
   // Get which sessions this course appears in
   const [sessions] = await pool.query(
@@ -88,5 +96,6 @@ export default defineEventHandler(async (event) => {
     students,
     sessions,
     total_students: (students as any[]).length,
+    session_missing: false,
   };
 });

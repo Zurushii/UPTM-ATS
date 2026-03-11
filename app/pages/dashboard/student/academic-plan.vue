@@ -32,16 +32,41 @@ interface AcademicPlan {
   start_semester: number;
 }
 
+interface SemesterMeta {
+  semester_number: number;
+  semester_type: "L" | "S";
+  is_li: boolean;
+}
+
 interface PlanResponse {
   plan: AcademicPlan | null;
   courses: Course[];
   resultSlips: ResultSlip[];
+  semesterMeta: SemesterMeta[];
+  intakeCurrentSemester: number | null;
 }
 
 const { data, pending, refresh } = await useFetch<PlanResponse>(
   "/api/student/academic-plan",
 );
 const { data: profile } = await useFetch<any>("/api/student/profile");
+
+// Fetch current session
+interface CurrentSession {
+  active_intake_period: string;
+  semester_type: "L" | "S";
+  current_semester: number;
+  updated_at: string;
+}
+const { data: sessionData, refresh: refreshSession } = await useFetch<{
+  current_session: CurrentSession | null;
+}>("/api/current-session");
+
+// Poll every 15s so currentSemester updates when HOP changes the session
+onMounted(() => {
+  const interval = setInterval(refreshSession, 5000);
+  onUnmounted(() => clearInterval(interval));
+});
 
 // Track which semesters are expanded
 const expandedSemesters = ref<Set<number>>(new Set());
@@ -69,6 +94,40 @@ const resultSlipMap = computed(() => {
     }
   }
   return map;
+});
+
+// Semester type lookup map (still used for LI display/labels)
+const semesterMetaMap = computed(() => {
+  const map = new Map<number, { semester_type: "L" | "S"; is_li: boolean }>();
+  for (const m of data.value?.semesterMeta ?? []) {
+    map.set(m.semester_number, {
+      semester_type: m.semester_type,
+      is_li: m.is_li,
+    });
+  }
+  return map;
+});
+
+// Whether the student has uploaded any result at all
+const hasAnyResult = computed(() =>
+  scheduledSemesters.value.some((s) => s.has_result),
+);
+
+// Current semester: per-intake value set by HOP, or fallback to first sem without result
+const currentSemester = computed(() => {
+  const sems = scheduledSemesters.value;
+  if (!sems.length) return null;
+  if (!data.value?.plan) return null;
+
+  // Use the per-intake current_semester set by HOP
+  const intakeSem = data.value.intakeCurrentSemester;
+  if (intakeSem != null && sems.some((s) => s.semester === intakeSem)) {
+    return intakeSem;
+  }
+
+  // Fallback: first semester without result
+  const sequential = sems.find((s) => !s.has_result);
+  return sequential?.semester ?? null;
 });
 
 // Grade point mapping (Malaysian university standard)
@@ -535,7 +594,7 @@ const revokeResult = async () => {
     <!-- Has Plan -->
     <template v-else>
       <!-- Stats Overview -->
-      <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- Status -->
         <div class="card bg-base-100 shadow-sm border border-base-200">
           <div class="card-body p-4 flex flex-row items-center gap-4">
@@ -781,11 +840,18 @@ const revokeResult = async () => {
             expandedSemesters.has(sem.semester)
               ? 'ring-2 ring-base-200 shadow-md'
               : 'hover:border-base-300',
-            sem.has_result
-              ? sem.failed > 0
-                ? 'border-warning/40'
-                : 'border-success/40'
-              : 'border-base-200',
+            sem.semester === currentSemester
+              ? 'ring-2 ring-primary border-primary/40'
+              : hasAnyResult &&
+                  currentSemester !== null &&
+                  sem.semester < currentSemester &&
+                  !sem.has_result
+                ? 'ring-1 ring-warning border-warning/40'
+                : sem.has_result
+                  ? sem.failed > 0
+                    ? 'border-warning/40'
+                    : 'border-success/40'
+                  : 'border-base-200',
           ]"
         >
           <!-- Header Trigger -->
@@ -807,7 +873,25 @@ const revokeResult = async () => {
                 {{ sem.semester }}
               </div>
               <div>
-                <div class="font-bold">{{ formatSemester(sem.semester) }}</div>
+                <div class="font-bold flex items-center gap-2">
+                  {{ formatSemester(sem.semester) }}
+                  <span
+                    v-if="sem.semester === currentSemester"
+                    class="badge badge-primary badge-sm"
+                    >Current</span
+                  >
+                  <span
+                    v-if="
+                      hasAnyResult &&
+                      currentSemester !== null &&
+                      sem.semester < currentSemester &&
+                      !sem.has_result
+                    "
+                    class="badge badge-warning badge-sm gap-1"
+                  >
+                    ⚠ Missing Result
+                  </span>
+                </div>
                 <div class="text-xs text-base-content/60">
                   {{ sem.courses.length }} courses
                 </div>

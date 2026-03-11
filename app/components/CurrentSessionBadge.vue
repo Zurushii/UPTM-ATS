@@ -1,6 +1,6 @@
 <script setup lang="ts">
 interface CurrentSession {
-  intake_period: string;
+  active_intake_period: string;
   semester_type: "L" | "S";
   updated_at: string;
 }
@@ -15,16 +15,37 @@ watch(sessionUpdated, () => {
   refresh();
 });
 
-const semesterLabel = computed(() => {
-  if (!data.value?.current_session) return "";
-  return data.value.current_session.semester_type === "L"
-    ? "Long Semester"
-    : "Short Semester";
-});
+// Format MMYY → "Mon 'YY" (e.g., "0524" → "May '24")
+const formatIntakeMMMYY = (mmyy: string) => {
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const mm = parseInt(mmyy.slice(0, 2), 10);
+  const yy = mmyy.slice(2);
+  return `${months[mm - 1] ?? "?"} '${yy}`;
+};
 
 const intakeLabel = computed(() => {
   if (!data.value?.current_session) return "";
-  return data.value.current_session.intake_period;
+  return formatIntakeMMMYY(data.value.current_session.active_intake_period);
+});
+
+const semLabel = computed(() => {
+  if (!data.value?.current_session) return "";
+  const type =
+    data.value.current_session.semester_type === "L" ? "Long" : "Short";
+  return `${type} Semester`;
 });
 </script>
 
@@ -49,7 +70,7 @@ const intakeLabel = computed(() => {
     </svg>
     <div class="flex flex-col leading-tight">
       <span class="text-xs font-bold text-primary">{{ intakeLabel }}</span>
-      <span class="text-[10px] text-primary/70">{{ semesterLabel }}</span>
+      <span class="text-[10px] text-primary/70">{{ semLabel }}</span>
     </div>
   </div>
   <div

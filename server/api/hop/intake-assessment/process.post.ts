@@ -104,6 +104,28 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  // Validate intake matches current session
+  const [sessionRows] = await pool.query(
+    `SELECT active_intake_period FROM program_current_session WHERE program_id = ?`,
+    [programId],
+  );
+  const currentSession = (sessionRows as any[])[0] || null;
+
+  if (!currentSession) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        "Current session is not set. Please configure the current session before processing an intake.",
+    });
+  }
+
+  if (intake !== currentSession.active_intake_period) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `Intake ${intake} does not match the current session ${currentSession.active_intake_period}. Update the current session to process a different intake.`,
+    });
+  }
+
   // Get semester entry rules for the selected intake type
   const [ruleRows] = await pool.query(
     `SELECT credit_transfer, entry_semester 
@@ -117,7 +139,8 @@ export default defineEventHandler(async (event) => {
   if (rules.length === 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "No semester entry rules found for the selected intake type",
+      statusMessage:
+        "No semester entry rules found for the selected intake type",
     });
   }
 
@@ -127,8 +150,14 @@ export default defineEventHandler(async (event) => {
     [programId],
   );
 
-  const studentsMap = new Map<string, { id: number; matric_no: string; status: string }>();
-  const studentsById = new Map<number, { id: number; matric_no: string; status: string }>();
+  const studentsMap = new Map<
+    string,
+    { id: number; matric_no: string; status: string }
+  >();
+  const studentsById = new Map<
+    number,
+    { id: number; matric_no: string; status: string }
+  >();
 
   for (const student of studentRows as any[]) {
     studentsMap.set(student.matric_no.toLowerCase(), {
@@ -147,7 +176,7 @@ export default defineEventHandler(async (event) => {
   const [courseRows] = await pool.query(
     `SELECT id, course_code, credit_hour FROM courses`,
   );
-  
+
   const courseCodeToId = new Map<string, number>();
   const courseIdToCreditHour = new Map<number, number>();
   for (const course of courseRows as any[]) {
@@ -261,16 +290,24 @@ export default defineEventHandler(async (event) => {
       matricNoCol !== -1 ? row.getCell(matricNoCol).value : null;
     const creditValue = row.getCell(creditCol).value;
     const transferredCoursesValue =
-      transferredCoursesCol !== -1 ? row.getCell(transferredCoursesCol).value : null;
+      transferredCoursesCol !== -1
+        ? row.getCell(transferredCoursesCol).value
+        : null;
     const intakeYearValue =
       intakeYearCol !== -1 ? row.getCell(intakeYearCol).value : null;
     const startingSemesterValue =
-      startingSemesterCol !== -1 ? row.getCell(startingSemesterCol).value : null;
+      startingSemesterCol !== -1
+        ? row.getCell(startingSemesterCol).value
+        : null;
     const programCodeValue =
       programCodeCol !== -1 ? row.getCell(programCodeCol).value : null;
 
     // 1. First validate intake_year matches the selected intake from Step 1
-    if (intakeYearCol !== -1 && intakeYearValue !== null && intakeYearValue !== undefined) {
+    if (
+      intakeYearCol !== -1 &&
+      intakeYearValue !== null &&
+      intakeYearValue !== undefined
+    ) {
       const excelIntakeYear = String(intakeYearValue).trim();
       if (excelIntakeYear !== intake) {
         failedRecords.push({
@@ -284,7 +321,11 @@ export default defineEventHandler(async (event) => {
     }
 
     // 2. Validate program_code matches the HoP's program
-    if (programCodeCol !== -1 && programCodeValue !== null && programCodeValue !== undefined) {
+    if (
+      programCodeCol !== -1 &&
+      programCodeValue !== null &&
+      programCodeValue !== undefined
+    ) {
       const excelProgramCode = String(programCodeValue).trim().toUpperCase();
       if (excelProgramCode !== programCode.toUpperCase()) {
         failedRecords.push({
@@ -298,11 +339,16 @@ export default defineEventHandler(async (event) => {
     }
 
     // 3. Validate starting_semester must be empty or 0
-    if (startingSemesterCol !== -1 && startingSemesterValue !== null && startingSemesterValue !== undefined) {
-      const semesterVal = typeof startingSemesterValue === "number" 
-        ? startingSemesterValue 
-        : parseFloat(String(startingSemesterValue).trim());
-      
+    if (
+      startingSemesterCol !== -1 &&
+      startingSemesterValue !== null &&
+      startingSemesterValue !== undefined
+    ) {
+      const semesterVal =
+        typeof startingSemesterValue === "number"
+          ? startingSemesterValue
+          : parseFloat(String(startingSemesterValue).trim());
+
       // Must be empty (NaN after parse of empty string) or 0
       if (!isNaN(semesterVal) && semesterVal !== 0) {
         failedRecords.push({
@@ -419,7 +465,10 @@ export default defineEventHandler(async (event) => {
       }
 
       // 8. Validate that total_credit_transferred matches the sum of transferred courses
-      if (transferredCourseIds.length > 0 && credits !== transferredCoursesCredits) {
+      if (
+        transferredCourseIds.length > 0 &&
+        credits !== transferredCoursesCredits
+      ) {
         failedRecords.push({
           row: rowNum,
           matric_no: student.matric_no,
@@ -438,7 +487,9 @@ export default defineEventHandler(async (event) => {
       total_credit_transferred: credits,
       starting_semester: 0, // Always 0 as per validation
       program_code: programCode,
-      transferred_courses: transferredCoursesValue ? String(transferredCoursesValue) : "",
+      transferred_courses: transferredCoursesValue
+        ? String(transferredCoursesValue)
+        : "",
       entry_semester: entrySemester,
       transferred_course_ids: transferredCourseIds,
       is_new_student: isNewStudent,
@@ -518,8 +569,9 @@ export default defineEventHandler(async (event) => {
       total_records: processedStudents.length + failedRecords.length,
       successful: processedStudents.length,
       failed: failedRecords.length,
-      new_students: processedStudents.filter(s => s.is_new_student).length,
-      updated_students: processedStudents.filter(s => !s.is_new_student).length,
+      new_students: processedStudents.filter((s) => s.is_new_student).length,
+      updated_students: processedStudents.filter((s) => !s.is_new_student)
+        .length,
     },
     processed_students: processedStudents.map((s) => ({
       student_id: s.student_id,

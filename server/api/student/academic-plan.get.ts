@@ -12,9 +12,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: "Students only" });
   }
 
-  // Get student ID
+  // Get student ID and program
   const [studentRows] = await pool.query(
-    "SELECT id FROM students WHERE user_id = ?",
+    "SELECT id, program_id FROM students WHERE user_id = ?",
     [session.user.id],
   );
 
@@ -24,6 +24,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const studentId = students[0].id;
+  const programId = students[0].program_id;
 
   // Get academic plan
   const [planRows] = await pool.query(
@@ -67,6 +68,29 @@ export default defineEventHandler(async (event) => {
     [plan.id],
   );
 
+  // Get semester type metadata for this program
+  const [semesterMetaRows] = await pool.query(
+    `SELECT scp.semester_number, scp.semester_type, scp.is_li
+     FROM semester_credit_plans scp
+     JOIN semester_entry_rules ser ON scp.rule_id = ser.id
+     WHERE ser.program_id = ?
+     GROUP BY scp.semester_number, scp.semester_type, scp.is_li
+     ORDER BY scp.semester_number`,
+    [programId],
+  );
+
+  // Get per-intake current_semester for this student's intake
+  const [studentIntakeRows] = await pool.query(
+    `SELECT api.current_semester
+     FROM academic_planning_intakes api
+     JOIN students s ON s.program_id = api.program_id AND s.intake_year = api.intake_year
+     WHERE s.id = ?
+     LIMIT 1`,
+    [studentId],
+  );
+  const intakeCurrentSemester =
+    (studentIntakeRows as any[])[0]?.current_semester ?? null;
+
   return {
     plan: {
       id: plan.id,
@@ -76,5 +100,7 @@ export default defineEventHandler(async (event) => {
     },
     courses: courseRows,
     resultSlips: resultSlips,
+    semesterMeta: semesterMetaRows,
+    intakeCurrentSemester,
   };
 });

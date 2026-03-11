@@ -75,7 +75,7 @@ const timeAgo = (dateStr: string) => {
 
 // Current Session
 interface CurrentSessionData {
-  intake_period: string;
+  active_intake_period: string;
   semester_type: "L" | "S";
   updated_at: string;
 }
@@ -86,22 +86,21 @@ const { data: currentSessionData, refresh: refreshCurrentSession } =
   );
 
 const sessionForm = reactive({
-  intake_period: "",
+  active_intake_period: "",
   semester_type: "L" as "L" | "S",
+});
+
+// Pre-fill form whenever the fetched session changes
+watchEffect(() => {
+  const cs = currentSessionData.value?.current_session;
+  if (cs) {
+    sessionForm.active_intake_period = cs.active_intake_period;
+    sessionForm.semester_type = cs.semester_type;
+  }
 });
 
 const sessionSaving = ref(false);
 const sessionSaved = ref(false);
-
-// Populate form when data loads
-watchEffect(() => {
-  if (currentSessionData.value?.current_session) {
-    sessionForm.intake_period =
-      currentSessionData.value.current_session.intake_period;
-    sessionForm.semester_type =
-      currentSessionData.value.current_session.semester_type;
-  }
-});
 
 const saveCurrentSession = async () => {
   sessionSaving.value = true;
@@ -110,14 +109,15 @@ const saveCurrentSession = async () => {
     await $fetch("/api/hop/current-session", {
       method: "PUT",
       body: {
-        intake_period: sessionForm.intake_period,
+        active_intake_period: sessionForm.active_intake_period,
         semester_type: sessionForm.semester_type,
       },
     });
     await refreshCurrentSession();
+    // Notify CurrentSessionBadge to refresh
+    const sessionUpdated = useState<number>("currentSessionUpdated", () => 0);
+    sessionUpdated.value++;
     sessionSaved.value = true;
-    // Force refresh the header badge by triggering a global state update
-    useState("currentSessionUpdated", () => 0).value = Date.now();
     setTimeout(() => {
       sessionSaved.value = false;
     }, 3000);
@@ -125,6 +125,60 @@ const saveCurrentSession = async () => {
     alert(error?.data?.statusMessage || "Failed to update session");
   } finally {
     sessionSaving.value = false;
+  }
+};
+
+// Per-intake current semester management
+interface IntakeData {
+  id: number;
+  intake_year: string;
+  intake_name: string;
+  current_semester: number;
+  status: string;
+}
+
+const { data: intakesData, refresh: refreshIntakes } = await useFetch<
+  IntakeData[]
+>("/api/hop/academic-planning");
+
+// Editable state per intake row
+const intakeEdits = reactive<Record<number, number>>({});
+const intakeSaving = reactive<Record<number, boolean>>({});
+
+// Format MMYY → "Mon 'YY"
+const formatIntake = (mmyy: string) => {
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const mm = parseInt(mmyy.substring(0, 2), 10);
+  const yy = mmyy.substring(2);
+  return `${months[mm - 1] ?? "?"} '${yy}`;
+};
+
+const saveIntakeSemester = async (intake: IntakeData) => {
+  const sem = intakeEdits[intake.id] ?? intake.current_semester;
+  intakeSaving[intake.id] = true;
+  try {
+    await $fetch(`/api/hop/academic-planning/${intake.id}`, {
+      method: "PATCH",
+      body: { current_semester: sem },
+    });
+    await refreshIntakes();
+  } catch (error: any) {
+    alert(error?.data?.statusMessage || "Failed to update intake semester");
+  } finally {
+    intakeSaving[intake.id] = false;
   }
 };
 </script>
@@ -286,11 +340,11 @@ const saveCurrentSession = async () => {
           <div class="form-control w-full sm:w-auto">
             <label class="label">
               <span class="label-text text-xs font-medium"
-                >Intake Period (MMYY)</span
+                >Current Session (MMYY)</span
               >
             </label>
             <input
-              v-model="sessionForm.intake_period"
+              v-model="sessionForm.active_intake_period"
               type="text"
               placeholder="e.g. 0525"
               maxlength="4"
@@ -312,11 +366,95 @@ const saveCurrentSession = async () => {
           <button
             class="btn btn-primary btn-sm"
             :class="{ loading: sessionSaving }"
-            :disabled="sessionSaving || !sessionForm.intake_period"
+            :disabled="sessionSaving || !sessionForm.active_intake_period"
             @click="saveCurrentSession"
           >
-            {{ sessionSaving ? "Saving..." : "Update Session" }}
+            {{ sessionSaving ? "Saving..." : "Set Global" }}
           </button>
+        </div>
+        <!-- Current value display -->
+        <div
+          v-if="currentSessionData?.current_session"
+          class="mt-3 flex items-center gap-2 text-xs text-base-content/60"
+        >
+          <span>Currently:</span>
+          <span class="badge badge-sm badge-primary badge-outline font-mono">
+            {{
+              formatIntake(
+                currentSessionData.current_session.active_intake_period,
+              )
+            }}
+          </span>
+          <span class="badge badge-sm badge-outline">
+            {{
+              currentSessionData.current_session.semester_type === "L"
+                ? "Long"
+                : "Short"
+            }}
+            Semester
+          </span>
+          <span class="text-base-content/40">
+            — updated
+            {{ timeAgo(currentSessionData.current_session.updated_at) }}
+          </span>
+        </div>
+
+        <!-- Per-Intake Current Semester -->
+        <div
+          v-if="intakesData?.length"
+          class="mt-5 border-t border-base-200 pt-4"
+        >
+          <p class="text-xs font-medium text-base-content/60 mb-2">
+            Per-Intake Semester
+          </p>
+          <div class="overflow-x-auto">
+            <table class="table table-xs">
+              <thead>
+                <tr>
+                  <th>Intake</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Current Sem</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="intake in intakesData" :key="intake.id">
+                  <td class="font-mono font-medium">
+                    {{ formatIntake(intake.intake_year) }}
+                  </td>
+                  <td>{{ intake.intake_name }}</td>
+                  <td>
+                    <span class="badge badge-sm badge-outline">
+                      {{ intake.status }}
+                    </span>
+                  </td>
+                  <td>
+                    <input
+                      :value="intakeEdits[intake.id] ?? intake.current_semester"
+                      type="number"
+                      min="1"
+                      class="input input-bordered input-xs w-16"
+                      @input="
+                        intakeEdits[intake.id] = Number(
+                          ($event.target as HTMLInputElement).value,
+                        )
+                      "
+                    />
+                  </td>
+                  <td>
+                    <button
+                      class="btn btn-xs btn-ghost btn-primary"
+                      :disabled="intakeSaving[intake.id]"
+                      @click="saveIntakeSemester(intake)"
+                    >
+                      {{ intakeSaving[intake.id] ? "..." : "Set" }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

@@ -36,22 +36,40 @@ interface CourseDetail {
     course_type: string;
   }[];
   total_students: number;
+  session_missing?: boolean;
 }
+
+interface CurrentSession {
+  active_intake_period: string;
+  semester_type: "L" | "S";
+  updated_at: string;
+}
+
+const { data: sessionData } = await useFetch<{
+  current_session: CurrentSession | null;
+}>("/api/current-session");
+
+const sessionLabel = computed(() => {
+  if (!sessionData.value?.current_session) return "";
+  return sessionData.value.current_session.semester_type === "L"
+    ? "Long Semester"
+    : "Short Semester";
+});
 
 const searchQuery = ref("");
 const selectedCourseId = ref<number | null>(null);
 const showDetailModal = ref(false);
 
 // Fetch courses
-const { data, status, refresh } = await useFetch<{ courses: CourseResult[] }>(
-  "/api/hop/course-search",
-  {
-    query: computed(() => ({
-      search: searchQuery.value || undefined,
-    })),
-    watch: false,
-  },
-);
+const { data, status, refresh } = await useFetch<{
+  courses: CourseResult[];
+  has_session: boolean;
+}>("/api/hop/course-search", {
+  query: computed(() => ({
+    search: searchQuery.value || undefined,
+  })),
+  watch: false,
+});
 
 // Debounced search
 let searchTimeout: ReturnType<typeof setTimeout>;
@@ -136,6 +154,53 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
       <p class="text-base-content/60 font-medium">
         Search courses and view student enrollment details.
       </p>
+    </div>
+
+    <!-- Session Banner -->
+    <div v-if="sessionData?.current_session" class="alert shadow-sm">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke-width="1.5"
+        stroke="currentColor"
+        class="w-5 h-5 shrink-0"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+        />
+      </svg>
+      <span
+        >Showing courses from
+        <strong>{{
+          formatIntake(sessionData.current_session.active_intake_period)
+        }}</strong>
+        · {{ sessionLabel }} · Students from all intakes</span
+      >
+    </div>
+    <div v-else class="alert alert-warning shadow-sm">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="stroke-current shrink-0 h-5 w-5"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
+      </svg>
+      <span
+        >Current session not set — student counts show 0. Configure the session
+        in
+        <NuxtLink to="/dashboard/hop" class="link link-primary font-medium"
+          >Settings</NuxtLink
+        >.</span
+      >
     </div>
 
     <!-- Filters -->
@@ -365,6 +430,31 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <div
+              v-else-if="courseDetail.session_missing"
+              class="text-center py-8"
+            >
+              <div class="badge badge-warning badge-lg gap-2 mb-2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                No Session Set
+              </div>
+              <p class="text-base-content/50 text-sm">
+                Set the current session to view enrolled students.
+              </p>
             </div>
 
             <div v-else class="text-center py-8 text-base-content/40">
