@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { authClient } from "@@/utils/auth-client";
 
 definePageMeta({
@@ -73,6 +73,20 @@ const timeAgo = (dateStr: string) => {
   return `${Math.floor(diff / 86400)}d ago`;
 };
 
+// Toast notification state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "info",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
 // Current Session
 interface CurrentSessionData {
   active_intake_period: string;
@@ -122,7 +136,10 @@ const saveCurrentSession = async () => {
       sessionSaved.value = false;
     }, 3000);
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to update session");
+    showToast(
+      error?.data?.statusMessage || "Failed to update session",
+      "error",
+    );
   } finally {
     sessionSaving.value = false;
   }
@@ -145,7 +162,7 @@ const { data: intakesData, refresh: refreshIntakes } = await useFetch<
 const intakeEdits = reactive<Record<number, number>>({});
 const intakeSaving = reactive<Record<number, boolean>>({});
 
-// Format MMYY → "Mon 'YY"
+// Format MMYY â†’ "Mon 'YY"
 const formatIntake = (mmyy: string) => {
   const months = [
     "Jan",
@@ -176,15 +193,59 @@ const saveIntakeSemester = async (intake: IntakeData) => {
     });
     await refreshIntakes();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to update intake semester");
+    showToast(
+      error?.data?.statusMessage || "Failed to update intake semester",
+      "error",
+    );
   } finally {
     intakeSaving[intake.id] = false;
   }
 };
+
+interface StudentData {
+  student_id: number;
+  matric_no: string;
+  student_name: string;
+  email: string;
+  intake: string;
+  entry_semester: number | null;
+  academic_plan_status: string;
+  account_status: string;
+}
+
+const { data: allStudents } =
+  await useFetch<StudentData[]>("/api/hop/students");
+
+const totalStudents = computed(() => allStudents.value?.length || 0);
+const draftPlans = computed(() => {
+  if (!allStudents.value) return 0;
+  return allStudents.value.filter((s) => s.academic_plan_status === "draft")
+    .length;
+});
+const approvedPlans = computed(() => {
+  if (!allStudents.value) return 0;
+  return allStudents.value.filter((s) => s.academic_plan_status === "approved")
+    .length;
+});
 </script>
 
 <template>
   <div class="p-6 w-full space-y-8">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-lg"
+        :class="{
+          'alert-info': toast.type === 'info',
+          'alert-success': toast.type === 'success',
+          'alert-warning': toast.type === 'warning',
+          'alert-error': toast.type === 'error',
+        }"
+      >
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
+
     <!-- Hero Section -->
     <div
       class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
@@ -286,7 +347,7 @@ const saveIntakeSemester = async (intake: IntakeData) => {
             to="/dashboard/hop/academic-planning"
             class="text-sm text-warning hover:underline"
           >
-            View all {{ notificationData.unread_count }} pending requests →
+            View all {{ notificationData.unread_count }} pending requests â†’
           </NuxtLink>
         </div>
       </div>
@@ -397,7 +458,7 @@ const saveIntakeSemester = async (intake: IntakeData) => {
             Semester
           </span>
           <span class="text-base-content/40">
-            — updated
+            â€” updated
             {{ timeAgo(currentSessionData.current_session.updated_at) }}
           </span>
         </div>
@@ -462,120 +523,89 @@ const saveIntakeSemester = async (intake: IntakeData) => {
       </div>
     </div>
 
-    <!-- Stats Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Stats Overview -->
+    <div
+      class="stats stats-vertical lg:stats-horizontal shadow-sm border border-base-200 w-full bg-base-100"
+    >
       <!-- Total Students -->
-      <div
-        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
-      >
-        <div class="card-body relative overflow-hidden">
+      <div class="stat group hover:bg-base-200/50 transition-colors">
+        <div class="stat-figure text-primary">
           <div
-            class="absolute -right-4 -top-4 w-24 h-24 bg-primary/10 rounded-full group-hover:scale-150 transition-transform duration-500"
-          ></div>
-
-          <div class="flex items-center gap-4 z-10">
-            <div
-              class="p-3 bg-primary/10 text-primary rounded-xl group-hover:bg-primary group-hover:text-primary-content transition-colors duration-300"
+            class="p-3 bg-primary/10 rounded-xl group-hover:bg-primary group-hover:text-primary-content transition-colors duration-300"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+              class="w-6 h-6"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
-                />
-              </svg>
-            </div>
-            <div>
-              <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">
-                Total Students
-              </div>
-            </div>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
+              />
+            </svg>
           </div>
         </div>
+        <div class="stat-title font-medium">Total Students</div>
+        <div class="stat-value text-primary">{{ totalStudents }}</div>
+        <div class="stat-desc">Enrolled across all intakes</div>
       </div>
 
-      <!-- Pending Transfers -->
-      <div
-        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
-      >
-        <div class="card-body relative overflow-hidden">
+      <!-- Draft Plans -->
+      <div class="stat group hover:bg-base-200/50 transition-colors">
+        <div class="stat-figure text-warning">
           <div
-            class="absolute -right-4 -top-4 w-24 h-24 bg-secondary/10 rounded-full group-hover:scale-150 transition-transform duration-500"
-          ></div>
-
-          <div class="flex items-center gap-4 z-10">
-            <div
-              class="p-3 bg-secondary/10 text-secondary rounded-xl group-hover:bg-secondary group-hover:text-secondary-content transition-colors duration-300"
+            class="p-3 bg-warning/10 rounded-xl group-hover:bg-warning group-hover:text-warning-content transition-colors duration-300"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+              class="w-6 h-6"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                />
-              </svg>
-            </div>
-            <div>
-              <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">
-                Pending Transfers
-              </div>
-            </div>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              />
+            </svg>
           </div>
         </div>
+        <div class="stat-title font-medium">Draft Plans</div>
+        <div class="stat-value text-warning">{{ draftPlans }}</div>
+        <div class="stat-desc">Awaiting student acceptance</div>
       </div>
 
-      <!-- Plans Generated -->
-      <div
-        class="card bg-base-100/50 backdrop-blur-md border border-base-200/50 shadow-sm hover:shadow-md transition-all duration-300 group"
-      >
-        <div class="card-body relative overflow-hidden">
+      <!-- Approved Plans -->
+      <div class="stat group hover:bg-base-200/50 transition-colors">
+        <div class="stat-figure text-success">
           <div
-            class="absolute -right-4 -top-4 w-24 h-24 bg-accent/10 rounded-full group-hover:scale-150 transition-transform duration-500"
-          ></div>
-
-          <div class="flex items-center gap-4 z-10">
-            <div
-              class="p-3 bg-accent/10 text-accent rounded-xl group-hover:bg-accent group-hover:text-accent-content transition-colors duration-300"
+            class="p-3 bg-success/10 rounded-xl group-hover:bg-success group-hover:text-success-content transition-colors duration-300"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+              class="w-6 h-6"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                />
-              </svg>
-            </div>
-            <div>
-              <div class="text-3xl font-bold tabular-nums">—</div>
-              <div class="text-sm font-medium text-base-content/60">
-                Plans Generated
-              </div>
-            </div>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+              />
+            </svg>
           </div>
         </div>
+        <div class="stat-title font-medium">Approved Plans</div>
+        <div class="stat-value text-success">{{ approvedPlans }}</div>
+        <div class="stat-desc">Finalized and scheduled</div>
       </div>
     </div>
 

@@ -12,6 +12,20 @@ if (!session.value) {
   await navigateTo("/sign-in");
 }
 
+// Toast state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "info",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
 // Types
 interface IntakeData {
   id: number;
@@ -264,7 +278,7 @@ const validateAndSetFile = (file: File) => {
   );
 
   if (!hasValidType && !hasValidExtension) {
-    alert("Please select a valid Excel file (.xlsx or .xls)");
+    showToast("Please select a valid Excel file (.xlsx or .xls)");
     return;
   }
 
@@ -318,7 +332,10 @@ const createIntake = async () => {
     newIntakeId.value = response.id;
     currentStep.value = 2;
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to create intake");
+    showToast(
+      error.data?.message || error.message || "Failed to create intake",
+      "error",
+    );
   } finally {
     createLoading.value = false;
   }
@@ -344,7 +361,10 @@ const previewFile = async () => {
     previewResult.value = response as typeof previewResult.value;
     currentStep.value = 3;
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Preview failed");
+    showToast(
+      error.data?.message || error.message || "Preview failed",
+      "error",
+    );
   } finally {
     isPreviewLoading.value = false;
   }
@@ -371,7 +391,10 @@ const generatePlans = async () => {
     currentStep.value = 4;
     await refreshIntakes();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Generation failed");
+    showToast(
+      error.data?.message || error.message || "Generation failed",
+      "error",
+    );
   } finally {
     isGenerating.value = false;
   }
@@ -403,7 +426,10 @@ const deleteIntake = async () => {
     await refreshIntakes();
     closeDeleteModal();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to delete intake");
+    showToast(
+      error.data?.message || error.message || "Failed to delete intake",
+      "error",
+    );
   } finally {
     deleteLoading.value = false;
   }
@@ -416,7 +442,21 @@ const viewIntake = (intake: IntakeData) => {
 </script>
 
 <template>
-  <div class="p-6 max-w-6xl space-y-6">
+  <div class="p-6 max-w-7xl mx-auto w-full space-y-6">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-lg"
+        :class="{
+          'alert-info': toast.type === 'info',
+          'alert-success': toast.type === 'success',
+          'alert-warning': toast.type === 'warning',
+          'alert-error': toast.type === 'error',
+        }"
+      >
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
     <!-- Page Header -->
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">

@@ -12,6 +12,18 @@ if (!session.value) {
   await navigateTo("/sign-in");
 }
 
+// Toast state
+const toast = reactive({ show: false, message: '', type: 'info' });
+const showToast = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
+
 // Step management
 const currentStep = ref(1);
 const totalSteps = 4;
@@ -218,7 +230,7 @@ const validateAndSetFile = (file: File) => {
   );
 
   if (!hasValidType && !hasValidExtension) {
-    alert("Please select a valid Excel file (.xlsx or .xls)");
+    showToast("Please select a valid Excel file (.xlsx or .xls)");
     return;
   }
 
@@ -261,7 +273,7 @@ const processFile = async () => {
     >;
     currentStep.value = 4;
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Processing failed");
+    showToast(error.data?.message || error.message || "Processing failed", "error");
   } finally {
     isProcessing.value = false;
   }
@@ -293,7 +305,7 @@ const exportToExcel = async () => {
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Export failed");
+    showToast(error.data?.message || error.message || "Export failed", "error");
   }
 };
 
@@ -359,6 +371,17 @@ const filteredProcessedStudents = computed(() => {
 
 <template>
   <div class="p-6 w-full space-y-6">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div class="alert shadow-lg" :class="{
+        'alert-info': toast.type === 'info',
+        'alert-success': toast.type === 'success',
+        'alert-warning': toast.type === 'warning',
+        'alert-error': toast.type === 'error'
+      }">
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
     <!-- Page Header -->
     <div class="space-y-1">
       <h1 class="text-2xl font-semibold">Intake Assessment</h1>

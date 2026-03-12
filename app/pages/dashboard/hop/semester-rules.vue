@@ -58,6 +58,20 @@ const deletingIntakeType = ref<string | null>(null);
 const collapsedIntakes = ref<Set<string>>(new Set());
 const isDragging = ref(false);
 
+// Toast state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "info",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
 const handleDrop = (event: DragEvent) => {
   isDragging.value = false;
   if (event.dataTransfer?.files && event.dataTransfer.files[0]) {
@@ -65,7 +79,7 @@ const handleDrop = (event: DragEvent) => {
     if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
       importFile.value = file;
     } else {
-      alert("Please upload a valid Excel file (.xlsx or .xls)");
+      showToast("Please upload a valid Excel file (.xlsx or .xls)", "error");
     }
   }
 };
@@ -179,11 +193,11 @@ const saveCreditLimits = async () => {
 
   const { long_min, long_max, short_min, short_max } = creditLimitsForm.value;
   if (long_min > long_max) {
-    alert("Long semester minimum cannot exceed maximum.");
+    showToast("Long semester minimum cannot exceed maximum.");
     return;
   }
   if (short_min > short_max) {
-    alert("Short semester minimum cannot exceed maximum.");
+    showToast("Short semester minimum cannot exceed maximum.");
     return;
   }
 
@@ -196,7 +210,7 @@ const saveCreditLimits = async () => {
     await refreshCreditLimits();
     isEditingCreditLimits.value = false;
   } catch (error: any) {
-    alert(
+    showToast(
       error.data?.message || error.message || "Failed to save credit limits",
     );
   } finally {
@@ -283,7 +297,7 @@ const openCreditPlanModal = async (rule: Rule) => {
       }
     }
   } catch (error: any) {
-    alert(
+    showToast(
       error.data?.message || error.message || "Failed to load credit plans",
     );
     isCreditPlanModalOpen.value = false;
@@ -334,12 +348,12 @@ const addRule = async () => {
     !formData.value.intake_type ||
     formData.value.intake_type.trim().length === 0
   ) {
-    alert("Please enter an intake type name");
+    showToast("Please enter an intake type name");
     return;
   }
 
   if (formData.value.credit_transfer < 0) {
-    alert("Credit transfer must be a non-negative number");
+    showToast("Credit transfer must be a non-negative number");
     return;
   }
 
@@ -359,7 +373,10 @@ const addRule = async () => {
     await refreshRules();
     await refreshIntakes();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to add rule");
+    showToast(
+      error.data?.message || error.message || "Failed to add rule",
+      "error",
+    );
   } finally {
     isSubmitting.value = false;
   }
@@ -370,7 +387,7 @@ const updateRule = async () => {
   if (isSubmitting.value || !editingRule.value) return;
 
   if (formData.value.credit_transfer < 0) {
-    alert("Credit transfer must be a non-negative number");
+    showToast("Credit transfer must be a non-negative number");
     return;
   }
 
@@ -388,7 +405,10 @@ const updateRule = async () => {
     closeModals();
     await refreshRules();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to update rule");
+    showToast(
+      error.data?.message || error.message || "Failed to update rule",
+      "error",
+    );
   } finally {
     isSubmitting.value = false;
   }
@@ -409,7 +429,10 @@ const deleteRule = async () => {
     await refreshRules();
     await refreshIntakes();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to delete rule");
+    showToast(
+      error.data?.message || error.message || "Failed to delete rule",
+      "error",
+    );
   } finally {
     isSubmitting.value = false;
   }
@@ -437,7 +460,7 @@ const deleteIntakeRules = async () => {
     await refreshRules();
     await refreshIntakes();
   } catch (error: any) {
-    alert(
+    showToast(
       error.data?.message || error.message || "Failed to delete intake rules",
     );
   } finally {
@@ -453,7 +476,7 @@ const saveCreditPlans = async () => {
   if (hasCreditPlanErrors.value) {
     const lr = CREDIT_RULES.value.L;
     const sr = CREDIT_RULES.value.S;
-    alert(
+    showToast(
       `Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min ${lr.min}, max ${lr.max} credit hours\n- Short Semester: min ${sr.min}, max ${sr.max} credit hours`,
     );
     return;
@@ -474,7 +497,7 @@ const saveCreditPlans = async () => {
 
     closeModals();
   } catch (error: any) {
-    alert(
+    showToast(
       error.data?.message || error.message || "Failed to save credit plans",
     );
   } finally {
@@ -527,7 +550,10 @@ const importRules = async () => {
     await refreshRules();
     await refreshIntakes();
   } catch (error: any) {
-    alert(error.data?.message || error.message || "Failed to import rules");
+    showToast(
+      error.data?.message || error.message || "Failed to import rules",
+      "error",
+    );
   } finally {
     isImporting.value = false;
   }
@@ -546,6 +572,21 @@ const closeImportModal = () => {
 
 <template>
   <div class="p-6 w-full space-y-8">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-lg"
+        :class="{
+          'alert-info': toast.type === 'info',
+          'alert-success': toast.type === 'success',
+          'alert-warning': toast.type === 'warning',
+          'alert-error': toast.type === 'error',
+        }"
+      >
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
+
     <!-- Page Header -->
     <div
       class="flex flex-col md:flex-row md:items-center justify-between gap-4"

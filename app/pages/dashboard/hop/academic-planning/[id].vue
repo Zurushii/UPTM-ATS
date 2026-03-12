@@ -76,11 +76,7 @@ const filteredStudents = computed(() => {
 
   // Filter by status
   if (filterStatus.value !== "all") {
-    if (filterStatus.value === "no_plan") {
-      students = students.filter((s) => !s.academic_plan_id);
-    } else {
-      students = students.filter((s) => s.plan_status === filterStatus.value);
-    }
+    students = students.filter((s) => s.plan_status === filterStatus.value);
   }
 
   return students;
@@ -89,14 +85,14 @@ const filteredStudents = computed(() => {
 // Stats
 const stats = computed(() => {
   if (!intakeData.value?.students) {
-    return { total: 0, withPlan: 0, noPlan: 0, approved: 0 };
+    return { total: 0, withPlan: 0, draftPlanned: 0, approved: 0 };
   }
 
   const students = intakeData.value.students;
   return {
     total: students.length,
     withPlan: students.filter((s) => s.academic_plan_id).length,
-    noPlan: students.filter((s) => !s.academic_plan_id).length,
+    draftPlanned: students.filter((s) => s.plan_status === "draft").length,
     approved: students.filter((s) => s.plan_status === "approved").length,
   };
 });
@@ -159,7 +155,7 @@ const goBack = () => {
     <!-- Back Button & Header -->
     <div class="flex items-start gap-4">
       <button class="btn btn-ghost btn-sm mt-1" @click="goBack">
-        ← Back
+        &larr; Back
       </button>
       <div class="flex-1">
         <div class="flex flex-wrap items-center justify-between gap-4">
@@ -168,7 +164,7 @@ const goBack = () => {
               {{ intakeData?.intake_name || "Loading..." }}
             </h1>
             <p class="text-sm text-base-content/60">
-              {{ formatIntake(intakeData?.intake_year || "") }} •
+              {{ formatIntake(intakeData?.intake_year || "") }} &bull;
               {{ intakeData?.session_name }}
             </p>
           </div>
@@ -204,11 +200,11 @@ const goBack = () => {
           <div class="stat-value text-2xl text-success">{{ stats.withPlan }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
-          <div class="stat-title">No Plan</div>
-          <div class="stat-value text-2xl text-warning">{{ stats.noPlan }}</div>
+          <div class="stat-title">Draft Planned</div>
+          <div class="stat-value text-2xl text-warning">{{ stats.draftPlanned }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
-          <div class="stat-title">Approved</div>
+          <div class="stat-title">Approve Planned</div>
           <div class="stat-value text-2xl text-info">{{ stats.approved }}</div>
         </div>
       </div>
@@ -262,9 +258,8 @@ const goBack = () => {
                 class="select select-bordered select-sm"
               >
                 <option value="all">All Status</option>
-                <option value="no_plan">No Plan</option>
-                <option value="draft">Draft</option>
-                <option value="approved">Approved</option>
+                <option value="draft">Draft Planned</option>
+                <option value="approved">Approve Planned</option>
                 <option value="completed">Completed</option>
               </select>
             </div>
@@ -340,3 +335,9 @@ const goBack = () => {
     </template>
   </div>
 </template>
+
+
+
+
+
+

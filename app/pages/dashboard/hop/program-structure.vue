@@ -68,6 +68,20 @@ if (!session.value) {
   await navigateTo("/sign-in");
 }
 
+// Toast state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "info",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
 // Fetch program sessions
 const {
   data: sessions,
@@ -350,7 +364,10 @@ async function handleCreateSession() {
     showCreateSessionModal.value = false;
     newSession.value = { session_name: "", intake_year: "" };
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to create session");
+    showToast(
+      error?.data?.statusMessage || "Failed to create session",
+      "error",
+    );
   } finally {
     createSessionLoading.value = false;
   }
@@ -383,7 +400,7 @@ async function handleCloneSession() {
     showCloneSessionModal.value = false;
     cloneSession.value = { source_id: null, session_name: "", intake_year: "" };
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to clone session");
+    showToast(error?.data?.statusMessage || "Failed to clone session", "error");
   } finally {
     cloneSessionLoading.value = false;
   }
@@ -417,7 +434,10 @@ async function confirmDeleteSession() {
     }
     closeDeleteSessionModal();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to delete session");
+    showToast(
+      error?.data?.statusMessage || "Failed to delete session",
+      "error",
+    );
   } finally {
     deleteSessionLoading.value = false;
   }
@@ -460,7 +480,7 @@ async function handleAddCourse() {
     await refreshCourses();
     await refreshSessions();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to add course");
+    showToast(error?.data?.statusMessage || "Failed to add course", "error");
   } finally {
     addLoading.value = false;
   }
@@ -496,7 +516,7 @@ async function handleCreateCourse() {
       showAddModal.value = true;
     }
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to create course");
+    showToast(error?.data?.statusMessage || "Failed to create course", "error");
   } finally {
     createCourseLoading.value = false;
   }
@@ -539,7 +559,7 @@ async function handleUpdateCourse() {
     await refreshStructure();
     await refreshCourses();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to update course");
+    showToast(error?.data?.statusMessage || "Failed to update course", "error");
   } finally {
     editLoading.value = false;
   }
@@ -563,7 +583,7 @@ async function handleDeleteCourse(courseId: number) {
     await refreshStructure();
     await refreshSessions();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to delete course");
+    showToast(error?.data?.statusMessage || "Failed to delete course", "error");
   } finally {
     deleteLoading.value = null;
   }
@@ -628,6 +648,21 @@ async function handleImport() {
 
 <template>
   <div class="p-6 w-full space-y-8">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-lg"
+        :class="{
+          'alert-info': toast.type === 'info',
+          'alert-success': toast.type === 'success',
+          'alert-warning': toast.type === 'warning',
+          'alert-error': toast.type === 'error',
+        }"
+      >
+        <span>{{ toast.message }}</span>
+      </div>
+    </div>
+
     <!-- Page Header -->
     <div
       class="flex flex-col md:flex-row md:items-center justify-between gap-4"
