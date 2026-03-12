@@ -94,7 +94,9 @@ export default defineEventHandler(async (event) => {
     // Check if this is a column header row
     if (firstCell.toUpperCase() === "PROGRAM") {
       headerRow = rowValues.map((cell: any) =>
-        String(cell || "").trim().toUpperCase(),
+        String(cell || "")
+          .trim()
+          .toUpperCase(),
       );
 
       return;
@@ -119,8 +121,6 @@ export default defineEventHandler(async (event) => {
     const creditTransfer = parseInt(rowValues[creditTransferIdx]);
     if (isNaN(creditTransfer)) return;
 
-
-
     // Parse semester credits from columns
     const creditPlans: ParsedRule["credit_plans"] = [];
 
@@ -139,16 +139,16 @@ export default defineEventHandler(async (event) => {
           const headerUpper = header.toUpperCase();
 
           // Check for Industrial Training (LI)
-          const isLI = headerUpper.includes("(LI)") || headerUpper.includes(" LI");
+          const isLI =
+            headerUpper.includes("(LI)") || headerUpper.includes(" LI");
 
           // Check if header ends with S or contains (S) or has " S " or "_S"
           const isShort =
-            !isLI && (
-              headerUpper.endsWith(" S") ||
+            !isLI &&
+            (headerUpper.endsWith(" S") ||
               headerUpper.endsWith("_S") ||
               headerUpper.includes("(S)") ||
-              /\bS\s*$/.test(headerUpper)
-            );
+              /\bS\s*$/.test(headerUpper));
 
           // LI is always Long semester; otherwise check Short/Long
           const semesterType: "L" | "S" = isLI ? "L" : isShort ? "S" : "L";
@@ -246,7 +246,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Auto-create base rules (entry_semester=1) for each unique intake type that doesn't have one
-  const uniqueIntakeTypes = [...new Set(parsedRules.map(r => r.intake_type))];
+  const uniqueIntakeTypes = [...new Set(parsedRules.map((r) => r.intake_type))];
   let baseRulesCreated = 0;
 
   for (const intakeType of uniqueIntakeTypes) {
@@ -277,12 +277,12 @@ export default defineEventHandler(async (event) => {
 
       // Get the latest session that has program_courses for this program
       const [sessionRows] = await pool.query(
-        `SELECT DISTINCT pc.session_id
-         FROM program_courses pc
-         JOIN sessions s ON pc.session_id = s.id
-         WHERE s.program_id = ?
-         ORDER BY s.id DESC
-         LIMIT 1`,
+        `SELECT pc.session_id
+        FROM program_courses pc
+        JOIN program_sessions s ON pc.session_id = s.id
+        WHERE s.program_id = ?
+        ORDER BY s.id DESC
+        LIMIT 1`,
         [programId],
       );
 
@@ -303,7 +303,8 @@ export default defineEventHandler(async (event) => {
         const planValues: any[][] = [];
         for (const row of semCredits as any[]) {
           const credits = Number(row.total_credits);
-          const semType = (credits >= shortMin && credits <= shortMax) ? 'S' : 'L';
+          const semType =
+            credits >= shortMin && credits <= shortMax ? "S" : "L";
           planValues.push([baseRuleId, row.semester, semType, 0, credits]);
         }
 
