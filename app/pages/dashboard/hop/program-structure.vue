@@ -647,42 +647,48 @@ async function handleImport() {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-8">
+  <div class="p-4 md:p-6 lg:p-8 w-full max-w-[1400px] mx-auto flex flex-col space-y-8 h-full relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
     <!-- Toast Notification -->
     <div v-if="toast.show" class="toast toast-top toast-end z-50">
       <div
-        class="alert shadow-lg"
+        class="alert shadow-xl border backdrop-blur-md"
         :class="{
-          'alert-info': toast.type === 'info',
-          'alert-success': toast.type === 'success',
-          'alert-warning': toast.type === 'warning',
-          'alert-error': toast.type === 'error',
+          'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
+          'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
+          'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
+          'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error',
         }"
       >
-        <span>{{ toast.message }}</span>
+        <span class="font-bold">{{ toast.message }}</span>
       </div>
     </div>
 
     <!-- Page Header -->
     <div
-      class="flex flex-col md:flex-row md:items-center justify-between gap-4"
+      class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
     >
-      <div class="space-y-1">
-        <h1 class="text-3xl font-bold">Program Structure</h1>
-        <p class="text-base text-base-content/70">
-          Manage course arrangements per session.
+      <div class="space-y-2">
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+          Program <span class="text-primary">Structure</span>
+        </h1>
+        <p class="text-base-content/60 font-medium max-w-xl">
+          Create overarching sessions and assign core courses to your established semesters.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-3">
         <button
-          class="btn btn-outline btn-sm gap-2"
+          class="btn btn-outline border-base-300 hover:border-primary/50 btn-sm gap-2 rounded-xl transition-colors"
           @click="showCreateSessionModal = true"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
-            stroke-width="1.5"
+            stroke-width="2"
             stroke="currentColor"
             class="w-4 h-4"
           >
@@ -692,18 +698,19 @@ async function handleImport() {
               d="M12 4.5v15m7.5-7.5h-15"
             />
           </svg>
-          New Session
+          <span class="hidden sm:inline">New Session</span>
+          <span class="sm:hidden">New</span>
         </button>
         <button
           v-if="selectedSessionId"
-          class="btn btn-primary btn-sm shadow-lg shadow-primary/20 gap-2"
+          class="btn btn-primary btn-sm shadow-lg shadow-primary/20 gap-2 hover:-translate-y-0.5 transition-transform rounded-xl"
           @click="showAddModal = true"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
-            stroke-width="1.5"
+            stroke-width="2.5"
             stroke="currentColor"
             class="w-4 h-4"
           >
@@ -726,17 +733,17 @@ async function handleImport() {
     <div v-else-if="sessions?.length" class="space-y-6">
       <!-- Session Tabs -->
       <div
-        class="flex flex-wrap items-center gap-4 border-b border-base-200 pb-2"
+        class="flex flex-wrap items-center gap-4 pb-2 relative z-10"
       >
-        <div class="tabs tabs-boxed bg-base-100/50 p-1 gap-1">
+        <div class="tabs tabs-boxed bg-base-100 border border-base-200 p-1.5 gap-1 shadow-sm rounded-2xl">
           <a
             v-for="sess in sessions"
             :key="sess.id"
-            class="tab transition-all duration-300"
+            class="tab transition-all duration-300 font-bold rounded-xl px-4 py-1.5"
             :class="
               selectedSessionId === sess.id
-                ? 'tab-active shadow-sm'
-                : 'hover:bg-base-200/50'
+                ? 'tab-active shadow-sm shadow-primary/20 text-primary-content bg-primary'
+                : 'hover:bg-base-200/50 text-base-content/60'
             "
             @click="selectedSessionId = sess.id"
           >
@@ -744,9 +751,8 @@ async function handleImport() {
           </a>
         </div>
 
-        <!-- Session Config Dropdown -->
-        <div v-if="selectedSession" class="dropdown dropdown-end ml-auto">
-          <label tabindex="0" class="btn btn-ghost btn-sm btn-square">
+        <div v-if="selectedSession" class="dropdown dropdown-end md:ml-auto">
+          <label tabindex="0" class="btn btn-ghost border border-base-200 shadow-sm bg-base-100 hover:bg-base-200 transition-colors btn-sm btn-square rounded-xl">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
@@ -783,45 +789,46 @@ async function handleImport() {
       <!-- Program Summary Card -->
       <div
         v-if="structureData?.program"
-        class="card bg-base-100/60 backdrop-blur shadow-xl border border-white/20 relative overflow-hidden"
+        class="card bg-base-100 shadow-sm border border-base-200 relative overflow-hidden"
       >
         <div
           class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none"
         ></div>
         <div class="card-body p-6 relative z-10">
           <div class="flex flex-col md:flex-row justify-between gap-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <!-- Program Info -->
-            <div>
+            <div class="p-4 rounded-xl bg-base-200/30 border border-base-200 flex flex-col justify-center">
               <div
-                class="text-xs uppercase font-bold text-base-content/50 mb-1"
+                class="text-[10px] uppercase font-bold tracking-widest text-base-content/50 mb-1"
               >
                 Program
               </div>
               <div class="font-bold text-lg leading-tight">
                 {{ structureData.program.program_code }}
               </div>
-              <div class="text-sm opacity-70">
+              <div class="text-xs font-semibold opacity-70 mt-1 line-clamp-1" :title="structureData.program.program_name">
                 {{ structureData.program.program_name }}
               </div>
             </div>
             <!-- Intake Info -->
-            <div>
+            <div class="p-4 rounded-xl bg-base-200/30 border border-base-200 flex flex-col justify-center">
               <div
-                class="text-xs uppercase font-bold text-base-content/50 mb-1"
+                class="text-[10px] uppercase font-bold tracking-widest text-base-content/50 mb-1"
               >
                 Intake
               </div>
               <div class="font-bold text-lg">
                 {{ structureData.session?.intake_year }}
               </div>
-              <div class="text-sm opacity-70">
+              <div class="text-xs font-semibold opacity-70 mt-1 line-clamp-1" :title="structureData.session?.session_name">
                 {{ structureData.session?.session_name }}
               </div>
             </div>
             <!-- Stats -->
-            <div>
+            <div class="p-4 rounded-xl bg-base-200/30 border border-base-200 flex flex-col justify-center">
               <div
-                class="text-xs uppercase font-bold text-base-content/50 mb-1"
+                class="text-[10px] uppercase font-bold tracking-widest text-base-content/50 mb-1"
               >
                 Structure
               </div>
@@ -829,22 +836,27 @@ async function handleImport() {
                 <span class="font-bold text-2xl font-mono">{{
                   structureData.totalCourses
                 }}</span>
-                <span class="text-xs">Courses</span>
+                <span class="text-[10px] uppercase font-bold tracking-wider opacity-60">Courses</span>
               </div>
-              <div class="text-sm opacity-70">
+              <div class="text-xs font-semibold opacity-70 mt-1">
                 {{ structureData.program.duration_semesters }} Semesters
               </div>
             </div>
             <!-- Credit Validation -->
-            <div>
+            <div class="p-4 rounded-xl border flex flex-col justify-center transition-colors duration-300"
+              :class="{
+                'bg-success/5 border-success/20': creditStatus === 'matched',
+                'bg-error/5 border-error/20': creditStatus === 'exceeded',
+                'bg-warning/5 border-warning/20': creditStatus === 'under',
+              }">
               <div
-                class="text-xs uppercase font-bold text-base-content/50 mb-1"
+                class="text-[10px] uppercase font-bold tracking-widest text-base-content/50 mb-1"
               >
                 Total Credits
               </div>
               <div class="flex items-baseline gap-1">
                 <span
-                  class="font-bold text-2xl font-mono"
+                  class="font-black text-2xl font-mono"
                   :class="{
                     'text-success': creditStatus === 'matched',
                     'text-error': creditStatus === 'exceeded',
@@ -853,12 +865,12 @@ async function handleImport() {
                 >
                   {{ structureData.totalCredits }}
                 </span>
-                <span class="text-sm text-base-content/50"
+                <span class="text-xs font-bold text-base-content/40"
                   >/ {{ structureData.program.total_credit_required }}</span
                 >
               </div>
               <div
-                class="text-xs"
+                class="text-[10px] font-bold uppercase tracking-wider mt-1"
                 :class="{
                   'text-success': creditStatus === 'matched',
                   'text-error': creditStatus === 'exceeded',
@@ -869,11 +881,12 @@ async function handleImport() {
                   creditStatus === "matched"
                     ? "Requirement Met"
                     : creditStatus === "exceeded"
-                      ? `Exceeded by ${creditsDifference} credits`
-                      : "Check Requirements"
+                      ? `Exceeded (+${creditsDifference})`
+                      : "Requirements Not Met"
                 }}
               </div>
             </div>
+          </div>
             <!-- Actions -->
             <div class="flex items-center justify-end gap-2">
               <button
@@ -973,39 +986,46 @@ async function handleImport() {
         <div
           v-for="sem in structureData.semesters"
           :key="sem.semester"
-          class="collapse collapse-arrow bg-base-100 border border-base-200 shadow-sm"
-          :class="collapsedSemesters.has(sem.semester) ? '' : 'collapse-open'"
+          class="collapse collapse-arrow bg-base-100 border border-base-200 transition-all duration-300 relative group overflow-hidden"
+          :class="collapsedSemesters.has(sem.semester) ? '' : 'collapse-open shadow-md'"
         >
+          <div class="absolute left-0 top-0 bottom-0 w-1 bg-primary/0 group-hover:bg-primary/20 transition-colors duration-300" :class="collapsedSemesters.has(sem.semester) ? '' : '!bg-primary'"></div>
           <input
             type="checkbox"
             :checked="!collapsedSemesters.has(sem.semester)"
             @change="toggleSemester(sem.semester)"
           />
           <div
-            class="collapse-title text-lg font-medium flex items-center gap-4 pr-12 py-3 min-h-0"
+            class="collapse-title text-lg font-medium flex items-center gap-5 pr-12 py-4 min-h-0"
           >
-            <span class="font-bold">{{ formatSemester(sem.semester) }}</span>
-            <div
-              class="flex items-center gap-2 text-sm font-normal text-base-content/60"
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg shadow-sm"
+              :class="collapsedSemesters.has(sem.semester) ? 'bg-base-200 text-base-content/60' : 'bg-primary/10 text-primary'"
             >
-              <span class="badge badge-sm badge-ghost"
-                >{{ sem.totalCredits }} Credits</span
+              {{ sem.semester }}
+            </div>
+            <div class="flex flex-col">
+              <span class="font-extrabold">{{ formatSemester(sem.semester) }}</span>
+              <div
+                class="flex items-center gap-3 mt-0.5 text-[10px] font-bold text-base-content/50 uppercase tracking-widest"
               >
-              <span>{{ sem.courseCount }} Courses</span>
+                <span>{{ sem.totalCredits }} Credits</span>
+                <span class="w-1 h-1 rounded-full bg-base-300"></span>
+                <span>{{ sem.courseCount }} Courses</span>
+              </div>
             </div>
           </div>
-          <div class="collapse-content !pt-0">
-            <div class="overflow-x-auto rounded-lg border border-base-200">
-              <table class="table table-sm w-full table-zebra table-fixed">
-                <thead class="bg-base-200/50 text-base-content">
-                  <tr class="text-xs uppercase">
-                    <th class="w-[5%]">No.</th>
-                    <th class="w-[15%]">Course Code</th>
-                    <th class="w-[30%]">Course Name</th>
-                    <th class="text-center w-[10%]">Credit</th>
-                    <th class="w-[20%]">Status</th>
-                    <th class="w-[10%]">Pre-Req</th>
-                    <th class="text-right w-[10%]">Actions</th>
+          <div class="collapse-content !pt-0 px-5 pb-5">
+            <div class="overflow-x-auto rounded-xl border border-base-200 shadow-sm">
+              <table class="table table-sm w-full table-fixed bg-base-100 text-sm">
+                <thead class="bg-base-200/50 text-base-content text-[10px] font-bold tracking-widest uppercase">
+                  <tr>
+                    <th class="w-[5%] border-b border-base-200">No.</th>
+                    <th class="w-[15%] border-b border-base-200">Course Code</th>
+                    <th class="w-[30%] border-b border-base-200">Course Name</th>
+                    <th class="text-center w-[10%] border-b border-base-200">Credit</th>
+                    <th class="w-[20%] border-b border-base-200">Status</th>
+                    <th class="w-[10%] border-b border-base-200">Pre-Req</th>
+                    <th class="text-right w-[10%] border-b border-base-200">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1148,7 +1168,7 @@ async function handleImport() {
       <!-- Empty state for selected session -->
       <div
         v-else-if="selectedSessionId && !structurePending"
-        class="card bg-base-100/60 backdrop-blur border-dashed border-2 border-base-300 p-12 text-center"
+        class="card bg-base-100 border-dashed border-2 border-base-300 p-12 text-center"
       >
         <div class="max-w-md mx-auto space-y-4">
           <div
@@ -1189,7 +1209,7 @@ async function handleImport() {
     <!-- No sessions state -->
     <div
       v-else-if="!sessionsPending"
-      class="card bg-base-100/60 backdrop-blur border-dashed border-2 border-base-300 p-12 text-center"
+      class="card bg-base-100 border-dashed border-2 border-base-300 p-12 text-center"
     >
       <div class="max-w-md mx-auto space-y-4">
         <div

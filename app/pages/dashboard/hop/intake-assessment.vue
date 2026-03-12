@@ -370,16 +370,19 @@ const filteredProcessedStudents = computed(() => {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-6">
+  <div class="p-4 md:p-6 lg:p-8 w-full max-w-[1400px] mx-auto flex flex-col space-y-8 h-full relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-accent/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
     <!-- Toast Notification -->
     <div v-if="toast.show" class="toast toast-top toast-end z-50">
-      <div class="alert shadow-lg" :class="{
-        'alert-info': toast.type === 'info',
-        'alert-success': toast.type === 'success',
-        'alert-warning': toast.type === 'warning',
-        'alert-error': toast.type === 'error'
+      <div class="alert shadow-xl border" :class="{
+        'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
+        'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
+        'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
+        'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error'
       }">
-        <span>{{ toast.message }}</span>
+        <span class="font-bold">{{ toast.message }}</span>
       </div>
     </div>
     <!-- Page Header -->
@@ -773,18 +776,18 @@ const filteredProcessedStudents = computed(() => {
               class="hidden"
               @change="handleFileSelect"
             />
+            <!-- Ambient upload glow on hover -->
+            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-base-content/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
 
-            <div v-if="!selectedFile" class="space-y-4">
-              <div
-                class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center mx-auto mb-4"
-              >
+            <div v-if="!selectedFile" class="flex flex-col sm:flex-row items-center gap-6 w-full max-w-2xl mx-auto relative z-10 pointer-events-none">
+              <div class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center shrink-0 shadow-sm border border-base-300 group-hover:border-primary/30 group-hover:text-primary transition-colors duration-300">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke-width="1.5"
                   stroke="currentColor"
-                  class="w-8 h-8 text-base-content/60"
+                  class="w-8 h-8 text-base-content/50 group-hover:text-primary transition-colors duration-300"
                 >
                   <path
                     stroke-linecap="round"
@@ -793,27 +796,27 @@ const filteredProcessedStudents = computed(() => {
                   />
                 </svg>
               </div>
-              <div>
-                <p class="text-lg font-medium">Drag & Drop Excel File</p>
-                <p class="text-sm text-base-content/60 mt-1">
-                  or click to browse
+              <div class="text-center sm:text-left flex-1">
+                <p class="text-xl font-bold text-base-content">Drag & Drop Excel File</p>
+                <p class="text-sm font-medium text-base-content/60 mt-0.5">
+                  or click anywhere to browse from your computer
                 </p>
+                <div class="mt-2 text-[10px] font-bold tracking-wider text-base-content/40 uppercase bg-base-200/50 inline-block px-2 py-0.5 rounded border border-base-200">
+                  Supported formats: .xlsx, .xls
+                </div>
               </div>
-              <button
-                class="btn btn-outline btn-sm mt-4"
-                @click="triggerFileInput"
-              >
-                Choose File
-              </button>
-              <p class="text-xs text-base-content/40 mt-4">
-                Supported formats: .xlsx, .xls
-              </p>
+              <div class="shrink-0 mt-4 sm:mt-0 pointer-events-auto">
+                <button
+                  class="btn btn-outline btn-sm rounded-lg shadow-sm font-bold border-base-300 hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors"
+                  @click.stop="triggerFileInput"
+                >
+                  Choose File
+                </button>
+              </div>
             </div>
 
-            <div v-else class="space-y-6">
-              <div
-                class="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center mx-auto text-success"
-              >
+            <div v-else class="flex flex-col sm:flex-row items-center gap-6 w-full max-w-2xl mx-auto relative z-10 pointer-events-none">
+              <div class="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center shrink-0 border border-success/20 text-success shadow-sm shadow-success/10">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
@@ -829,18 +832,25 @@ const filteredProcessedStudents = computed(() => {
                   />
                 </svg>
               </div>
-              <div>
-                <p class="font-bold text-lg">{{ selectedFile.name }}</p>
-                <p class="text-sm text-base-content/60">
+              <div class="text-center sm:text-left flex-1 truncate">
+                <p class="font-extrabold text-xl text-base-content truncate" :title="selectedFile.name">
+                  {{ selectedFile.name }}
+                </p>
+                <p class="text-sm font-medium text-base-content/60 mt-0.5">
                   {{ (selectedFile.size / 1024).toFixed(2) }} KB
                 </p>
               </div>
-              <button
-                class="btn btn-ghost btn-sm text-error hover:bg-error/10"
-                @click="removeFile"
-              >
-                Remove File
-              </button>
+              <div class="shrink-0 mt-4 sm:mt-0 pointer-events-auto">
+                <button
+                  class="btn btn-ghost btn-sm text-error font-bold hover:bg-error/10 border border-transparent hover:border-error/20"
+                  @click.stop="removeFile"
+                >
+                  Remove File
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 ml-1 inline">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
 

@@ -571,37 +571,42 @@ const closeImportModal = () => {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-8">
+  <div class="p-4 md:p-6 lg:p-8 w-full max-w-[1400px] mx-auto flex flex-col space-y-8 h-full relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
     <!-- Toast Notification -->
     <div v-if="toast.show" class="toast toast-top toast-end z-50">
       <div
-        class="alert shadow-lg"
+        class="alert shadow-xl border backdrop-blur-md"
         :class="{
-          'alert-info': toast.type === 'info',
-          'alert-success': toast.type === 'success',
-          'alert-warning': toast.type === 'warning',
-          'alert-error': toast.type === 'error',
+          'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
+          'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
+          'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
+          'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error',
         }"
       >
-        <span>{{ toast.message }}</span>
+        <span class="font-bold">{{ toast.message }}</span>
       </div>
     </div>
 
     <!-- Page Header -->
     <div
-      class="flex flex-col md:flex-row md:items-center justify-between gap-4"
+      class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
     >
-      <div class="space-y-1">
-        <h1 class="text-3xl font-bold">Semester Entry Rules</h1>
-        <p class="text-base text-base-content/70">
-          Define how transferred credits determine a student's starting
-          semester.
+      <div class="space-y-2">
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+          Semester Entry <span class="text-primary">Rules</span>
+        </h1>
+        <p class="text-base-content/60 font-medium max-w-xl">
+          Define how transferred credits determine a student's starting semester and manage overarching program limits.
         </p>
       </div>
 
       <div class="flex items-center gap-3">
         <button
-          class="btn btn-primary shadow-lg shadow-primary/20 gap-2"
+          class="btn btn-primary shadow-lg shadow-primary/20 gap-2 hover:-translate-y-0.5 transition-transform rounded-xl"
           @click="openAddModal()"
         >
           <svg
@@ -624,12 +629,9 @@ const closeImportModal = () => {
     </div>
 
     <!-- Credit Hour Settings Card -->
-    <div
-      class="card bg-base-100 shadow-xl border border-base-200 overflow-hidden"
-    >
-      <div
-        class="p-4 flex items-center justify-between border-b border-base-200"
-      >
+    <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden relative group">
+      <div class="absolute inset-0 bg-gradient-to-r from-info/5 via-transparent to-transparent pointer-events-none"></div>
+      <div class="p-5 flex items-center justify-between border-b border-base-200 relative z-10">
         <div class="flex items-center gap-3">
           <div
             class="w-8 h-8 rounded-full bg-info/10 flex items-center justify-center"
@@ -680,32 +682,24 @@ const closeImportModal = () => {
       </div>
 
       <!-- View Mode -->
-      <div v-if="!isEditingCreditLimits" class="p-4">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg">
-            <div class="badge badge-primary badge-outline">Long</div>
-            <div class="text-sm">
-              <span class="font-mono font-bold">{{
-                creditLimitsData?.long_min ?? 12
-              }}</span>
-              <span class="text-base-content/50"> – </span>
-              <span class="font-mono font-bold">{{
-                creditLimitsData?.long_max ?? 20
-              }}</span>
-              <span class="text-xs text-base-content/50 ml-1">credits</span>
+      <div v-if="!isEditingCreditLimits" class="p-5 relative z-10">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div class="flex items-center gap-4 p-4 bg-base-100 border border-base-200 hover:border-primary/30 transition-colors shadow-sm rounded-xl">
+            <div class="badge badge-primary font-bold shadow-sm shadow-primary/20 p-3 bg-primary/10 text-primary border-primary/20">Long Sem</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-2xl font-black text-primary">{{ creditLimitsData?.long_min ?? 12 }}</span>
+              <span class="text-base-content/40 font-bold">to</span>
+              <span class="text-2xl font-black text-primary">{{ creditLimitsData?.long_max ?? 20 }}</span>
+              <span class="text-[10px] uppercase tracking-wider font-bold text-base-content/50 ml-1">Credits</span>
             </div>
           </div>
-          <div class="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg">
-            <div class="badge badge-secondary badge-outline">Short</div>
-            <div class="text-sm">
-              <span class="font-mono font-bold">{{
-                creditLimitsData?.short_min ?? 6
-              }}</span>
-              <span class="text-base-content/50"> – </span>
-              <span class="font-mono font-bold">{{
-                creditLimitsData?.short_max ?? 10
-              }}</span>
-              <span class="text-xs text-base-content/50 ml-1">credits</span>
+          <div class="flex items-center gap-4 p-4 bg-base-100 border border-base-200 hover:border-secondary/30 transition-colors shadow-sm rounded-xl">
+            <div class="badge badge-secondary font-bold shadow-sm shadow-secondary/20 p-3 bg-secondary/10 text-secondary border-secondary/20">Short Sem</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-2xl font-black text-secondary">{{ creditLimitsData?.short_min ?? 6 }}</span>
+              <span class="text-base-content/40 font-bold">to</span>
+              <span class="text-2xl font-black text-secondary">{{ creditLimitsData?.short_max ?? 10 }}</span>
+              <span class="text-[10px] uppercase tracking-wider font-bold text-base-content/50 ml-1">Credits</span>
             </div>
           </div>
         </div>
@@ -796,11 +790,11 @@ const closeImportModal = () => {
 
     <!-- Main Content Card -->
     <div
-      class="card bg-base-100 shadow-xl border border-base-200 overflow-hidden"
+      class="card bg-base-100 border border-base-200 shadow-sm overflow-hidden"
     >
       <!-- Filter Bar -->
       <div
-        class="p-4 border-b border-base-200 bg-base-100/80 backdrop-blur sticky top-0 z-20"
+        class="p-4 border-b border-base-200 bg-base-100/95 sticky top-0 z-20"
       >
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div
@@ -884,20 +878,19 @@ const closeImportModal = () => {
                   : 'bg-base-100'
               "
             >
-              <!-- Intake Header -->
               <div
                 class="p-4 flex items-center justify-between cursor-pointer hover:bg-base-200/50 transition-colors select-none"
                 @click="toggleIntake(intakeType as string)"
               >
                 <div class="flex items-center gap-4">
                   <div
-                    class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-content transition-colors"
+                    class="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-content transition-all shadow-sm"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       fill="none"
                       viewBox="0 0 24 24"
-                      stroke-width="2"
+                      stroke-width="2.5"
                       stroke="currentColor"
                       class="w-4 h-4 transition-transform duration-300"
                       :class="
@@ -972,18 +965,17 @@ const closeImportModal = () => {
                 v-show="!collapsedIntakes.has(intakeType as string)"
                 class="divide-y divide-base-200"
               >
-                <!-- Header Row -->
                 <div
-                  class="grid grid-cols-12 gap-4 px-6 py-3 bg-base-200/50 text-xs uppercase font-bold text-base-content/50"
+                  class="grid grid-cols-12 gap-4 px-6 py-3 bg-base-200/40 text-[10px] uppercase font-bold tracking-widest text-base-content/50 border-y border-base-200"
                 >
-                  <div class="col-span-3">Transfer Condition</div>
+                  <div class="col-span-12 md:col-span-3">Transfer Condition</div>
                   <div
                     class="col-span-1 hidden md:flex justify-center items-center"
                   >
                     <!-- Spacer/Connector -->
                   </div>
-                  <div class="col-span-3">Target Entry</div>
-                  <div class="col-span-5 text-right">Actions</div>
+                  <div class="col-span-12 md:col-span-3">Target Entry</div>
+                  <div class="col-span-12 md:col-span-5 text-right">Actions</div>
                 </div>
 
                 <!-- Item Rows -->
@@ -1805,20 +1797,22 @@ const closeImportModal = () => {
     </dialog>
 
     <!-- Next Step Prompt -->
-    <div class="mt-8 card bg-base-200 shadow-sm">
-      <div class="card-body flex-row items-center justify-between py-4">
+    <div class="mt-4 card bg-gradient-to-r from-base-200 to-base-100 border border-base-200 shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden">
+      <div class="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+      <div class="card-body flex-col md:flex-row items-center justify-between p-6">
         <div>
-          <p class="text-sm text-base-content/60">Next Step</p>
-          <p class="font-semibold">Set Up Program Structure</p>
-          <p class="text-sm text-base-content/70">
-            Create sessions and assign courses to semesters
+          <span class="badge badge-primary badge-sm font-bold uppercase tracking-wider mb-2 shadow-sm">Next Step</span>
+          <h3 class="text-xl font-extrabold text-base-content group-hover:text-primary transition-colors">Set Up Program Structure</h3>
+          <p class="text-sm font-medium text-base-content/60 mt-1">
+            Create overarching sessions and assign core courses to your established semesters.
           </p>
         </div>
         <NuxtLink
           to="/dashboard/hop/program-structure"
-          class="btn btn-primary btn-sm"
+          class="btn btn-primary shadow-lg shadow-primary/20 w-full md:w-auto mt-4 md:mt-0 rounded-xl group-hover:scale-105 transition-transform"
         >
-          Program Structure &rarr;
+          Proceed to Program Structure
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
         </NuxtLink>
       </div>
     </div>

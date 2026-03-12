@@ -579,7 +579,7 @@ const goBack = () => {
 
           <div
             v-show="!transferredCollapsed"
-            class="overflow-x-auto transition-all duration-300 origin-top mt-2"
+            class="overflow-x-auto transition-colors origin-top mt-2"
           >
             <table class="table table-sm">
               <thead>
@@ -704,7 +704,7 @@ const goBack = () => {
 
             <div
               v-show="!collapsedSemesters.has(semester.semester)"
-              class="overflow-x-auto transition-all duration-300 origin-top"
+              class="overflow-x-auto transition-colors origin-top"
             >
               <table class="table table-sm">
                 <thead>

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { authClient } from "@@/utils/auth-client";
 
 definePageMeta({
@@ -230,512 +230,345 @@ const approvedPlans = computed(() => {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-8">
+  <div class="p-4 md:p-6 lg:p-8 w-full max-w-[1400px] mx-auto flex flex-col space-y-8 h-full">
     <!-- Toast Notification -->
     <div v-if="toast.show" class="toast toast-top toast-end z-50">
       <div
-        class="alert shadow-lg"
+        class="alert shadow-xl border"
         :class="{
-          'alert-info': toast.type === 'info',
-          'alert-success': toast.type === 'success',
-          'alert-warning': toast.type === 'warning',
-          'alert-error': toast.type === 'error',
+          'alert-info border-info/20 text-info-content bg-info/10 backdrop-blur-md': toast.type === 'info',
+          'alert-success border-success/20 text-success-content bg-success/10 backdrop-blur-md': toast.type === 'success',
+          'alert-warning border-warning/20 text-warning-content bg-warning/10 backdrop-blur-md': toast.type === 'warning',
+          'alert-error border-error/20 text-error-content bg-error/10 backdrop-blur-md': toast.type === 'error',
         }"
       >
-        <span>{{ toast.message }}</span>
+        <span class="font-bold">{{ toast.message }}</span>
       </div>
     </div>
 
-    <!-- Hero Section -->
-    <div
-      class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
-    >
-      <div class="space-y-1">
-        <h1
-          class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary"
-        >
-          HoP Dashboard
+    <!-- Header Section -->
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 flex-none relative">
+      <div class="space-y-2 z-10">
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+          HoP <span class="text-primary">Dashboard</span>
         </h1>
-        <p class="text-base-content/60 font-medium">
-          Overview of student intakes and academic tracking status.
+        <p class="text-base-content/60 font-medium max-w-xl">
+          Overview of student intakes, academic tracking status, and quick workflow access.
         </p>
       </div>
+      <!-- Ambient glow -->
+      <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
     </div>
 
-    <!-- Notifications Section -->
-    <div
-      v-if="notificationData && notificationData.unread_count > 0"
-      class="card bg-warning/10 border border-warning/30 shadow-sm"
-    >
-      <div class="card-body p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div class="indicator">
-              <span class="indicator-item badge badge-warning badge-sm">{{
-                notificationData.unread_count
-              }}</span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6 text-warning"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
-                />
-              </svg>
+    <!-- Top Grid: Notifications & Stats -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+      
+      <!-- Left: KPIs/Stats in 2x2 or row based on space -->
+      <div class="lg:col-span-8 flex flex-col space-y-6">
+        <h2 class="text-xl font-bold flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13h2.625l1.5-3h3.75l1.5 3H15M18 13h2.25M6 13v6a2 2 0 002 2h8a2 2 0 002-2v-6m-9-6V6a2 2 0 012-2h2a2 2 0 012 2v1" /></svg>
+          Quick Insights
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <!-- Total Students -->
+          <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-shadow group overflow-hidden relative">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-primary/5 rounded-full group-hover:bg-primary/10 transition-colors duration-300"></div>
+            <div class="card-body p-5">
+              <div class="flex justify-between items-start">
+                <div>
+                  <div class="text-sm font-bold text-base-content/50 uppercase tracking-widest mb-1">Total Students</div>
+                  <div class="text-3xl font-black text-primary">{{ totalStudents }}</div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 group-hover:bg-primary group-hover:text-primary-content transition-all duration-300 shadow-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
+                </div>
+              </div>
             </div>
-            <h3 class="font-semibold text-warning">
-              Plans Needing Re-Approval
-            </h3>
           </div>
-          <button class="btn btn-ghost btn-xs" @click="markAllRead">
-            Mark all read
-          </button>
+
+          <!-- Draft Plans -->
+          <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-shadow group overflow-hidden relative">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-warning/5 rounded-full group-hover:bg-warning/10 transition-colors duration-300"></div>
+            <div class="card-body p-5">
+              <div class="flex justify-between items-start">
+                <div>
+                  <div class="text-sm font-bold text-base-content/50 uppercase tracking-widest mb-1">Draft Plans</div>
+                  <div class="text-3xl font-black text-warning">{{ draftPlans }}</div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-warning/10 flex items-center justify-center text-warning group-hover:scale-110 group-hover:bg-warning group-hover:text-warning-content transition-all duration-300 shadow-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Approved Plans -->
+          <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-shadow group overflow-hidden relative">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-success/5 rounded-full group-hover:bg-success/10 transition-colors duration-300"></div>
+            <div class="card-body p-5">
+              <div class="flex justify-between items-start">
+                <div>
+                  <div class="text-sm font-bold text-base-content/50 uppercase tracking-widest mb-1">Approved</div>
+                  <div class="text-3xl font-black text-success">{{ approvedPlans }}</div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center text-success group-hover:scale-110 group-hover:bg-success group-hover:text-success-content transition-all duration-300 shadow-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="space-y-2">
-          <div
-            v-for="notification in notificationData.notifications.slice(0, 5)"
-            :key="notification.id"
-            class="flex items-center justify-between p-3 bg-base-100 rounded-lg border border-base-200 hover:border-warning/50 cursor-pointer transition-colors"
-            @click="goToStudentPlan(notification.plan_id, notification.id)"
-          >
-            <div class="flex items-center gap-3">
+        <!-- System Workflow -->
+        <div class="mt-4 flex-1">
+          <h2 class="text-xl font-bold flex items-center gap-2 mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" /></svg>
+            System Workflow
+          </h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            
+            <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md hover:border-primary/40 hover:-translate-y-1 transition-transform transition-colors transition-shadow duration-300">
+              <div class="card-body p-5">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">1</div>
+                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                </div>
+                <h3 class="font-bold text-base-content mb-1">Semester Rules</h3>
+                <p class="text-xs text-base-content/60 leading-relaxed max-w-[200px] mb-4 flex-grow">Define credit transfer rules for entry semester calculations.</p>
+                <NuxtLink to="/dashboard/hop/semester-rules" class="text-sm font-bold text-primary flex items-center gap-1 group">
+                  Configure <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>
+                </NuxtLink>
+              </div>
+            </div>
+
+            <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md hover:border-primary/40 hover:-translate-y-1 transition-transform transition-colors transition-shadow duration-300">
+              <div class="card-body p-5">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">2</div>
+                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                </div>
+                <h3 class="font-bold text-base-content mb-1">Program Structure</h3>
+                <p class="text-xs text-base-content/60 leading-relaxed max-w-[200px] mb-4 flex-grow">Create overarching sessions and assign core courses.</p>
+                <NuxtLink to="/dashboard/hop/program-structure" class="text-sm font-bold text-primary flex items-center gap-1 group">
+                  Configure <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>
+                </NuxtLink>
+              </div>
+            </div>
+
+            <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md hover:border-secondary/40 hover:-translate-y-1 transition-transform transition-colors transition-shadow duration-300">
+              <div class="card-body p-5">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center text-secondary font-bold text-lg">3</div>
+                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                </div>
+                <h3 class="font-bold text-base-content mb-1">Active Session</h3>
+                <p class="text-xs text-base-content/60 leading-relaxed mb-4 flex-grow">Assign the current active period globally.</p>
+                <a href="#session-config" class="text-sm font-bold text-secondary flex items-center gap-1 group transition-colors">
+                  Set Below <span class="group-hover:translate-y-1 transition-transform">&darr;</span>
+                </a>
+              </div>
+            </div>
+
+            <!-- row 2 items can span wider on medium -->
+            <div class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md hover:border-accent/40 hover:-translate-y-1 transition-transform transition-colors transition-shadow duration-300">
+              <div class="card-body p-5">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent font-bold text-lg">4</div>
+                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                </div>
+                <h3 class="font-bold text-base-content mb-1">Intake Assessment</h3>
+                <p class="text-xs text-base-content/60 leading-relaxed mb-4 flex-grow">Inject student sheets & process credit transfers automatically.</p>
+                <NuxtLink to="/dashboard/hop/intake-assessment" class="text-sm font-bold text-accent flex items-center gap-1 group">
+                  Assess <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>
+                </NuxtLink>
+              </div>
+            </div>
+
+            <div class="card bg-accent text-accent-content shadow-xl shadow-accent/20 hover:shadow-accent/40 hover:-translate-y-1 transition-all duration-300 relative overflow-hidden sm:col-span-2 lg:col-span-2">
+              <div class="absolute -right-10 top-0 opacity-10 blur-xl">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="w-48 h-48" viewBox="0 0 24 24" fill="currentColor"><path d="M11.7 2.8L1.7 8.5C1.3 8.7 1.3 9.3 1.7 9.5L11.7 15.2C11.9 15.3 12.1 15.3 12.3 15.2L22.3 9.5C22.7 9.3 22.7 8.7 22.3 8.5L12.3 2.8C12.1 2.7 11.9 2.7 11.7 2.8ZM3.5 11L1.7 12C1.3 12.2 1.3 12.8 1.7 13L11.7 18.7C11.9 18.8 12.1 18.8 12.3 18.7L22.3 13C22.7 12.8 22.7 12.2 22.3 12L20.5 11L12.3 15.7C12.1 15.8 11.9 15.8 11.7 15.7L3.5 11ZM3.5 14.5L1.7 15.5C1.3 15.7 1.3 16.3 1.7 16.5L11.7 22.2C11.9 22.3 12.1 22.3 12.3 22.2L22.3 16.5C22.7 16.3 22.7 15.7 22.3 15.5L20.5 14.5L12.3 19.2C12.1 19.3 11.9 19.3 11.7 19.2L3.5 14.5Z" /></svg>
+              </div>
+              <div class="card-body p-6 relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="inline-flex w-7 h-7 rounded bg-white text-accent items-center justify-center font-bold text-sm shadow-sm">5</span>
+                    <span class="badge border-white/30 bg-white/10 text-white badge-sm text-[10px] uppercase font-bold tracking-wider backdrop-blur-md">Final Phase</span>
+                  </div>
+                  <h3 class="font-extrabold text-2xl mb-1">Academic Planning</h3>
+                  <p class="text-accent-content/80 text-sm max-w-sm">Generate, review, and finalize academic plans for enrolled students.</p>
+                </div>
+                <div class="mt-4 sm:mt-0 flex-shrink-0">
+                  <NuxtLink to="/dashboard/hop/academic-planning" class="btn bg-white hover:bg-base-200 text-accent border-none shadow-lg px-6 rounded-xl group transition-all">
+                    Open Planning
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 group-hover:translate-x-1 transition-transform"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+                  </NuxtLink>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Notifications -->
+      <div class="lg:col-span-4 flex flex-col h-full">
+        <h2 class="text-xl font-bold flex items-center gap-2 mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" /></svg>
+          Attention Required
+        </h2>
+
+        <div v-if="notificationData && notificationData.unread_count > 0" class="card bg-base-100 border border-warning/30 shadow-md shadow-warning/5 flex-grow">
+          <div class="card-body p-0 flex flex-col h-full">
+            <div class="p-4 border-b border-base-200 bg-warning/5 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="badge badge-warning font-bold shadow-sm">{{ notificationData.unread_count }}</span>
+                <span class="text-sm font-bold text-warning-content">Re-Approval Requests</span>
+              </div>
+              <button class="btn btn-xs btn-ghost text-base-content/50 hover:text-base-content" @click="markAllRead">Clear All</button>
+            </div>
+            
+            <div class="flex-grow overflow-y-auto p-3 space-y-2">
               <div
-                class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center"
+                v-for="notification in notificationData.notifications.slice(0, 5)"
+                :key="notification.id"
+                class="group flex flex-col p-3 rounded-xl bg-base-100 border border-base-200 hover:border-warning/40 hover:bg-warning/5 cursor-pointer transition-all duration-200"
+                @click="goToStudentPlan(notification.plan_id, notification.id)"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke-width="1.5"
-                  stroke="currentColor"
-                  class="w-4 h-4 text-warning"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
-                  />
-                </svg>
-              </div>
-              <div>
-                <div class="font-medium text-sm">
-                  {{ notification.student_name }}
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="font-bold text-sm group-hover:text-primary transition-colors text-base-content line-clamp-1">
+                    {{ notification.student_name }}
+                  </div>
+                  <span class="text-[10px] font-semibold text-base-content/40 whitespace-nowrap">{{ timeAgo(notification.created_at) }}</span>
                 </div>
-                <div class="text-xs text-base-content/60">
-                  {{ notification.matric_no }} requested to re-schedule
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5 bg-base-200 px-2 py-0.5 rounded text-[10px] font-mono font-bold text-base-content/70">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3 text-warning"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    {{ notification.matric_no }}
+                  </div>
+                  <span class="text-[10px] text-warning font-bold uppercase tracking-wider">Review &rarr;</span>
                 </div>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <span class="badge badge-warning badge-sm">Needs Review</span>
-              <span class="text-xs text-base-content/50">{{
-                timeAgo(notification.created_at)
-              }}</span>
+
+            <div v-if="notificationData.unread_count > 5" class="p-3 bg-base-50 border-t border-base-200 text-center mt-auto">
+              <NuxtLink to="/dashboard/hop/academic-planning" class="text-xs font-bold text-base-content/60 hover:text-primary transition-colors">
+                View all {{ notificationData.unread_count }} pending in Planning
+              </NuxtLink>
             </div>
           </div>
         </div>
 
-        <div v-if="notificationData.unread_count > 5" class="text-center mt-2">
-          <NuxtLink
-            to="/dashboard/hop/academic-planning"
-            class="text-sm text-warning hover:underline"
-          >
-            View all {{ notificationData.unread_count }} pending requests â†’
-          </NuxtLink>
-        </div>
-      </div>
-    </div>
-
-    <!-- Current Session Setting -->
-    <div
-      id="session-config"
-      class="card bg-base-100 border border-base-200 shadow-sm scroll-mt-24"
-    >
-      <div class="card-body p-5">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="p-2 bg-primary/10 text-primary rounded-lg">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-5 h-5"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
-              />
-            </svg>
-          </div>
+        <div v-else class="card bg-base-100/50 border border-base-200 border-dashed flex-grow flex items-center justify-center p-8 text-center text-base-content/50 h-[300px]">
           <div>
-            <h2 class="text-lg font-semibold">Current Academic Session</h2>
-            <p class="text-xs text-base-content/60">
-              Set the active session displayed across the system
-            </p>
+            <div class="w-16 h-16 rounded-full bg-base-200 flex items-center justify-center mx-auto mb-4 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 opacity-40"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <p class="font-bold mb-1">All caught up!</p>
+            <p class="text-sm max-w-[200px]">No pending plan re-approvals at this time.</p>
           </div>
-          <div v-if="sessionSaved" class="ml-auto badge badge-success gap-1">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-3 h-3"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="m4.5 12.75 6 6 9-13.5"
-              />
-            </svg>
-            Saved
-          </div>
-        </div>
-        <div class="flex flex-col sm:flex-row items-end gap-3">
-          <div class="form-control w-full sm:w-auto">
-            <label class="label">
-              <span class="label-text text-xs font-medium"
-                >Current Session (MMYY)</span
-              >
-            </label>
-            <input
-              v-model="sessionForm.active_intake_period"
-              type="text"
-              placeholder="e.g. 0525"
-              maxlength="4"
-              class="input input-bordered input-sm w-full sm:w-36"
-            />
-          </div>
-          <div class="form-control w-full sm:w-auto">
-            <label class="label">
-              <span class="label-text text-xs font-medium">Semester Type</span>
-            </label>
-            <select
-              v-model="sessionForm.semester_type"
-              class="select select-bordered select-sm w-full sm:w-44"
-            >
-              <option value="L">Long Semester</option>
-              <option value="S">Short Semester</option>
-            </select>
-          </div>
-          <button
-            class="btn btn-primary btn-sm"
-            :class="{ loading: sessionSaving }"
-            :disabled="sessionSaving || !sessionForm.active_intake_period"
-            @click="saveCurrentSession"
-          >
-            {{ sessionSaving ? "Saving..." : "Set Global" }}
-          </button>
-        </div>
-        <!-- Current value display -->
-        <div
-          v-if="currentSessionData?.current_session"
-          class="mt-3 flex items-center gap-2 text-xs text-base-content/60"
-        >
-          <span>Currently:</span>
-          <span class="badge badge-sm badge-primary badge-outline font-mono">
-            {{
-              formatIntake(
-                currentSessionData.current_session.active_intake_period,
-              )
-            }}
-          </span>
-          <span class="badge badge-sm badge-outline">
-            {{
-              currentSessionData.current_session.semester_type === "L"
-                ? "Long"
-                : "Short"
-            }}
-            Semester
-          </span>
-          <span class="text-base-content/40">
-            â€” updated
-            {{ timeAgo(currentSessionData.current_session.updated_at) }}
-          </span>
         </div>
 
-        <!-- Per-Intake Current Semester -->
-        <div
-          v-if="intakesData?.length"
-          class="mt-5 border-t border-base-200 pt-4"
-        >
-          <p class="text-xs font-medium text-base-content/60 mb-2">
-            Per-Intake Semester
-          </p>
-          <div class="overflow-x-auto">
-            <table class="table table-xs">
-              <thead>
-                <tr>
-                  <th>Intake</th>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Current Sem</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="intake in intakesData" :key="intake.id">
-                  <td class="font-mono font-medium">
-                    {{ formatIntake(intake.intake_year) }}
-                  </td>
-                  <td>{{ intake.intake_name }}</td>
-                  <td>
-                    <span class="badge badge-sm badge-outline">
-                      {{ intake.status }}
-                    </span>
-                  </td>
-                  <td>
-                    <input
-                      :value="intakeEdits[intake.id] ?? intake.current_semester"
-                      type="number"
-                      min="1"
-                      class="input input-bordered input-xs w-16"
-                      @input="
-                        intakeEdits[intake.id] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        )
-                      "
-                    />
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-xs btn-ghost btn-primary"
-                      :disabled="intakeSaving[intake.id]"
-                      @click="saveIntakeSemester(intake)"
-                    >
-                      {{ intakeSaving[intake.id] ? "..." : "Set" }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </div>
 
-    <!-- Stats Overview -->
-    <div
-      class="stats stats-vertical lg:stats-horizontal shadow-sm border border-base-200 w-full bg-base-100"
-    >
-      <!-- Total Students -->
-      <div class="stat group hover:bg-base-200/50 transition-colors">
-        <div class="stat-figure text-primary">
-          <div
-            class="p-3 bg-primary/10 rounded-xl group-hover:bg-primary group-hover:text-primary-content transition-colors duration-300"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-6 h-6"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
-              />
-            </svg>
-          </div>
-        </div>
-        <div class="stat-title font-medium">Total Students</div>
-        <div class="stat-value text-primary">{{ totalStudents }}</div>
-        <div class="stat-desc">Enrolled across all intakes</div>
-      </div>
 
-      <!-- Draft Plans -->
-      <div class="stat group hover:bg-base-200/50 transition-colors">
-        <div class="stat-figure text-warning">
-          <div
-            class="p-3 bg-warning/10 rounded-xl group-hover:bg-warning group-hover:text-warning-content transition-colors duration-300"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-6 h-6"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-              />
-            </svg>
-          </div>
-        </div>
-        <div class="stat-title font-medium">Draft Plans</div>
-        <div class="stat-value text-warning">{{ draftPlans }}</div>
-        <div class="stat-desc">Awaiting student acceptance</div>
-      </div>
-
-      <!-- Approved Plans -->
-      <div class="stat group hover:bg-base-200/50 transition-colors">
-        <div class="stat-figure text-success">
-          <div
-            class="p-3 bg-success/10 rounded-xl group-hover:bg-success group-hover:text-success-content transition-colors duration-300"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="w-6 h-6"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-              />
-            </svg>
-          </div>
-        </div>
-        <div class="stat-title font-medium">Approved Plans</div>
-        <div class="stat-value text-success">{{ approvedPlans }}</div>
-        <div class="stat-desc">Finalized and scheduled</div>
-      </div>
-    </div>
-
-    <!-- System Workflow -->
-    <div>
-      <h2 class="text-lg font-semibold mb-1">System Workflow</h2>
-      <p class="text-sm text-base-content/60 mb-4">
-        Follow these steps in order to set up and manage your academic tracking
-        system.
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <!-- Step 1: Semester Rules -->
-        <div
-          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-all duration-300 relative"
-        >
-          <div class="card-body p-4 gap-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-primary badge-sm font-bold">1</span>
-              <span class="badge badge-ghost badge-xs">One-time Setup</span>
+    <!-- Current Session Setting (Full Width) -->
+    <div id="session-config" class="card bg-base-100 border border-base-200 shadow-sm mt-4 scroll-mt-24 overflow-hidden relative">
+      <div class="absolute inset-0 bg-gradient-to-r from-secondary/5 via-transparent to-transparent pointer-events-none"></div>
+      <div class="card-body p-6 md:p-8 relative z-10">
+        
+        <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
+          <div class="flex items-start gap-4">
+            <div class="p-3 bg-secondary/10 text-secondary rounded-2xl shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" /></svg>
             </div>
             <div>
-              <h3 class="font-semibold text-sm">Semester Rules</h3>
-              <p class="text-xs text-base-content/60 mt-1">
-                Define credit transfer rules for entry semester placement
+              <h2 class="text-xl font-bold flex items-center gap-3">
+                Global Academic Session
+                <div v-if="sessionSaved" class="badge badge-success badge-sm font-bold gap-1 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg> Saved</div>
+              </h2>
+              <p class="text-sm text-base-content/60 mt-1 max-w-sm">
+                Control the currently active semester across the entire application.
               </p>
             </div>
-            <NuxtLink
-              to="/dashboard/hop/semester-rules"
-              class="btn btn-primary btn-sm btn-block mt-auto"
-            >
-              Go <span class="ml-1">&rarr;</span>
-            </NuxtLink>
+          </div>
+
+          <div class="flex-shrink-0 flex flex-col items-center gap-2">
+             <div class="flex items-center gap-2">
+                 <div class="form-control w-full sm:w-28">
+                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Period (MMYY)</span></label>
+                     <input v-model="sessionForm.active_intake_period" type="text" placeholder="0525" maxlength="4" class="input input-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-mono font-bold text-center" />
+                 </div>
+                 <div class="form-control w-full sm:w-44">
+                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Type</span></label>
+                     <select v-model="sessionForm.semester_type" class="select select-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-bold">
+                       <option value="L">Long Semester</option>
+                       <option value="S">Short Semester</option>
+                     </select>
+                 </div>
+                 <div class="form-control flex justify-end">
+                     <button class="btn btn-secondary btn-sm rounded-lg px-6 mt-[28px] shadow-sm shadow-secondary/20" :class="{ loading: sessionSaving }" :disabled="sessionSaving || !sessionForm.active_intake_period" @click="saveCurrentSession">
+                       {{ sessionSaving ? "Saving" : "Update" }}
+                     </button>
+                 </div>
+              </div>
+            <div v-if="currentSessionData?.current_session" class="flex items-center justify-center md:justify-end gap-2 text-xs text-base-content/50 w-full mt-2">
+              <div class="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+              <span>Currently Active:</span>
+              <span class="font-bold text-base-content">{{ formatIntake(currentSessionData.current_session.active_intake_period) }}</span>
+              <span class="px-1.5 py-0.5 rounded bg-base-100 border border-base-300">{{ currentSessionData.current_session.semester_type === "L" ? "Long" : "Short" }}</span>
+              <span>· {{ timeAgo(currentSessionData.current_session.updated_at) }}</span>
+            </div>
           </div>
         </div>
 
-        <!-- Step 2: Program Structure -->
-        <div
-          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-all duration-300 relative"
-        >
-          <div class="card-body p-4 gap-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-primary badge-sm font-bold">2</span>
-              <span class="badge badge-ghost badge-xs">One-time Setup</span>
+        <!-- Per-Intake Current Semester Table -->
+        <div v-if="intakesData?.length" class="mt-6">
+          <h3 class="text-sm font-bold text-base-content/60 uppercase tracking-widest mb-3">Cohort Syncing</h3>
+          <div class="bg-base-100 border border-base-200 rounded-xl overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+              <table class="table w-full border-collapse">
+                <thead class="bg-base-200/40 text-base-content border-b border-base-200">
+                  <tr>
+                    <th class="font-bold pl-6">Intake</th>
+                    <th class="font-bold">Name</th>
+                    <th class="font-bold text-center">Status</th>
+                    <th class="font-bold text-right" colspan="2">Progress (Current Sem)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="intake in intakesData" :key="intake.id" class="hover:bg-primary/5 transition-colors border-b border-base-200/50 group">
+                    <td class="pl-6">
+                      <span class="inline-flex px-2 py-1 rounded bg-base-200 font-bold text-xs font-mono">{{ formatIntake(intake.intake_year) }}</span>
+                    </td>
+                    <td class="font-bold text-sm">{{ intake.intake_name }}</td>
+                    <td class="text-center">
+                      <span class="badge badge-sm font-bold uppercase tracking-wider text-[10px]" :class="intake.status === 'Active' ? 'badge-success badge-outline border-success/30' : 'badge-ghost'">{{ intake.status }}</span>
+                    </td>
+                    <td class="text-right">
+                      <div class="inline-flex items-center justify-end gap-2 w-full">
+                        <span class="text-[10px] font-bold text-base-content/40 tracking-wider">SEM</span>
+                        <input
+                          :value="intakeEdits[intake.id] ?? intake.current_semester"
+                          type="number"
+                          min="1"
+                          class="input input-sm bg-base-100 hover:bg-base-200 w-16 text-center font-bold border-base-300 focus:border-primary shadow-sm transition-colors duration-200 rounded-lg"
+                          @input="intakeEdits[intake.id] = Number(($event.target as HTMLInputElement).value)"
+                        />
+                      </div>
+                    </td>
+                    <td class="pr-6 w-16 text-right">
+                      <button class="btn btn-sm btn-circle btn-ghost text-primary opacity-50 group-hover:opacity-100 transition-opacity" :disabled="intakeSaving[intake.id]" @click="saveIntakeSemester(intake)" title="Sync Semester">
+                        <span v-if="intakeSaving[intake.id]" class="loading loading-spinner loading-xs"></span>
+                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <div>
-              <h3 class="font-semibold text-sm">Program Structure</h3>
-              <p class="text-xs text-base-content/60 mt-1">
-                Create sessions and assign courses per semester
-              </p>
-            </div>
-            <NuxtLink
-              to="/dashboard/hop/program-structure"
-              class="btn btn-primary btn-sm btn-block mt-auto"
-            >
-              Go <span class="ml-1">&rarr;</span>
-            </NuxtLink>
           </div>
         </div>
 
-        <!-- Step 3: Set Current Session -->
-        <div
-          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-all duration-300 relative"
-        >
-          <div class="card-body p-4 gap-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-primary badge-sm font-bold">3</span>
-              <span class="badge badge-ghost badge-xs">Per Cohort</span>
-            </div>
-            <div>
-              <h3 class="font-semibold text-sm">Set Current Session</h3>
-              <p class="text-xs text-base-content/60 mt-1">
-                Activate the current intake period and semester type
-              </p>
-            </div>
-            <a
-              href="#session-config"
-              class="btn btn-secondary btn-sm btn-block mt-auto"
-            >
-              Configure below <span class="ml-1">&darr;</span>
-            </a>
-          </div>
-        </div>
-
-        <!-- Step 4: Intake Assessment -->
-        <div
-          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-all duration-300 relative"
-        >
-          <div class="card-body p-4 gap-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-primary badge-sm font-bold">4</span>
-              <span class="badge badge-ghost badge-xs">Per Cohort</span>
-            </div>
-            <div>
-              <h3 class="font-semibold text-sm">Intake Assessment</h3>
-              <p class="text-xs text-base-content/60 mt-1">
-                Upload student data and process credit transfers
-              </p>
-            </div>
-            <NuxtLink
-              to="/dashboard/hop/intake-assessment"
-              class="btn btn-primary btn-sm btn-block mt-auto"
-            >
-              Go <span class="ml-1">&rarr;</span>
-            </NuxtLink>
-          </div>
-        </div>
-
-        <!-- Step 5: Academic Planning -->
-        <div
-          class="card bg-base-100 border border-base-200 shadow-sm hover:shadow-md transition-all duration-300 relative"
-        >
-          <div class="card-body p-4 gap-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-primary badge-sm font-bold">5</span>
-              <span class="badge badge-ghost badge-xs">Per Cohort</span>
-            </div>
-            <div>
-              <h3 class="font-semibold text-sm">Academic Planning</h3>
-              <p class="text-xs text-base-content/60 mt-1">
-                Generate and approve student academic plans
-              </p>
-            </div>
-            <NuxtLink
-              to="/dashboard/hop/academic-planning"
-              class="btn btn-primary btn-sm btn-block mt-auto"
-            >
-              Go <span class="ml-1">&rarr;</span>
-            </NuxtLink>
-          </div>
-        </div>
       </div>
     </div>
   </div>

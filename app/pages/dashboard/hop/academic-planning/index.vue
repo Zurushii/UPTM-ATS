@@ -728,15 +728,19 @@ const viewIntake = (intake: IntakeData) => {
 
           <!-- File Upload Area -->
           <div
-            class="border-2 border-dashed rounded-lg p-8 text-center transition-colors"
+            class="border-3 border-dashed rounded-xl p-6 md:p-8 transition-colors flex items-center justify-center cursor-pointer overflow-hidden relative group"
             :class="{
-              'border-primary bg-primary/5': isDragging,
-              'border-base-300 hover:border-primary/50': !isDragging,
+              'border-primary bg-primary/5 shadow-sm': isDragging,
+              'border-base-300 hover:border-primary/50 hover:bg-base-200/30': !isDragging,
             }"
             @drop="handleDrop"
             @dragover="handleDragOver"
             @dragleave="handleDragLeave"
+            @click="triggerFileInput"
           >
+            <!-- Ambient upload glow on hover -->
+            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-base-content/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+
             <input
               ref="fileInput"
               type="file"
@@ -745,34 +749,56 @@ const viewIntake = (intake: IntakeData) => {
               @change="handleFileSelect"
             />
 
-            <div v-if="!selectedFile" class="space-y-4">
-              <div class="text-4xl">📄</div>
-              <div>
-                <p class="font-medium">Drop your Excel file here</p>
-                <p class="text-sm text-base-content/60">or</p>
+            <div v-if="!selectedFile" class="flex flex-col sm:flex-row items-center gap-6 w-full max-w-2xl mx-auto relative z-10 pointer-events-none">
+              <div class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center shrink-0 shadow-sm border border-base-300 group-hover:border-primary/30 group-hover:text-primary transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 text-base-content/50 group-hover:text-primary transition-colors">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                </svg>
               </div>
-              <button class="btn btn-outline btn-sm" @click="triggerFileInput">
-                Browse Files
-              </button>
-              <p class="text-xs text-base-content/50">
-                Supported formats: .xlsx, .xls
-              </p>
+              <div class="text-center sm:text-left flex-1">
+                <p class="text-xl font-bold text-base-content">Drag & Drop Excel File</p>
+                <p class="text-sm font-medium text-base-content/60 mt-0.5">
+                  or click anywhere to browse from your computer
+                </p>
+                <div class="mt-2 text-[10px] font-bold tracking-wider text-base-content/40 uppercase bg-base-200/50 inline-block px-2 py-0.5 rounded border border-base-200">
+                  Supported formats: .xlsx, .xls
+                </div>
+              </div>
+              <div class="shrink-0 mt-4 sm:mt-0 pointer-events-auto">
+                <button
+                  class="btn btn-outline btn-sm rounded-lg shadow-sm font-bold border-base-300 hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors"
+                  @click.stop="triggerFileInput"
+                >
+                  Choose File
+                </button>
+              </div>
             </div>
 
-            <div v-else class="space-y-4">
-              <div class="text-4xl">✅</div>
-              <div>
-                <p class="font-medium">{{ selectedFile.name }}</p>
-                <p class="text-sm text-base-content/60">
+            <div v-else class="flex flex-col sm:flex-row items-center gap-6 w-full max-w-2xl mx-auto relative z-10 pointer-events-none">
+              <div class="w-16 h-16 bg-success/10 rounded-full flex items-center justify-center shrink-0 border border-success/20 text-success shadow-sm shadow-success/10">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                </svg>
+              </div>
+              <div class="text-center sm:text-left flex-1 truncate">
+                <p class="font-extrabold text-xl text-base-content truncate" :title="selectedFile.name">
+                  {{ selectedFile.name }}
+                </p>
+                <p class="text-sm font-medium text-base-content/60 mt-0.5">
                   {{ (selectedFile.size / 1024).toFixed(2) }} KB
                 </p>
               </div>
-              <button
-                class="btn btn-ghost btn-sm text-error"
-                @click="removeFile"
-              >
-                Remove File
-              </button>
+              <div class="shrink-0 mt-4 sm:mt-0 pointer-events-auto">
+                <button
+                  class="btn btn-ghost btn-sm text-error font-bold hover:bg-error/10 border border-transparent hover:border-error/20 transition-colors"
+                  @click.stop="removeFile"
+                >
+                  Remove File
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 ml-1 inline">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
 
