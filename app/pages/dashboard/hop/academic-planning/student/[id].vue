@@ -70,6 +70,30 @@ const { data: planData, pending: loading } = await useFetch<PlanData>(
   `/api/hop/academic-planning/plan/${planId}`,
 );
 
+// Fetch current session
+const { data: currentSessionData } = await useFetch<{
+  current_session: { active_intake_period: string; semester_type: string } | null;
+}>("/api/hop/current-session");
+
+// Check if a semester is the current session
+const isCurrentSession = (semesterNum: number): boolean => {
+  const session = getSemesterSession(semesterNum);
+  const activeSession = currentSessionData.value?.current_session?.active_intake_period;
+  if (!session || !activeSession) return false;
+  return session === activeSession;
+};
+
+// Compute the current absolute semester index to determine past vs upcoming
+const currentSemesterNum = computed(() => {
+  const sems = scheduledSemesters.value;
+  for (const sem of sems) {
+    if (isCurrentSession(sem.semester)) return sem.semester;
+  }
+  // Fallback: first semester without result
+  const sequential = sems.find((s) => !s.has_result);
+  return sequential?.semester ?? null;
+});
+
 // Check if plan exists
 if (!loading.value && !planData.value) {
   await navigateTo("/dashboard/hop/academic-planning");
@@ -98,10 +122,45 @@ const formatIntake = (intake: string | null) => {
   return `${monthNames[month - 1]} ${fullYear}`;
 };
 
+// Fixed semester month cycle: May (Short), Aug (Long), Dec (Long)
+const SEMESTER_MONTH_CYCLE = [5, 8, 12];
+
+// Get the session MMYY string for a given semester number
+const getSemesterSession = (semesterNum: number): string | null => {
+  const intakeYear = planData.value?.plan.intake_year;
+  const startSem = planData.value?.plan.start_semester || 1;
+  if (!intakeYear || intakeYear.length !== 4) return null;
+
+  const intakeMonth = parseInt(intakeYear.substring(0, 2));
+  const intakeYY = parseInt(intakeYear.substring(2, 4));
+
+  // Find the intake's position in the cycle
+  const cycleIndex = SEMESTER_MONTH_CYCLE.indexOf(intakeMonth);
+  if (cycleIndex === -1) return null;
+
+  // intake_year corresponds to start_semester, so offset accordingly
+  const offset = semesterNum - startSem;
+  const targetIndex = cycleIndex + offset;
+  if (targetIndex < 0) return null; // semester before intake
+  const targetMonth = SEMESTER_MONTH_CYCLE[targetIndex % 3];
+
+  // Calculate year offset: each full cycle of 3 = +1 year
+  const fullCycles = Math.floor(targetIndex / 3);
+  const targetYY = intakeYY + fullCycles;
+
+  const mm = String(targetMonth).padStart(2, "0");
+  const yy = String(targetYY % 100).padStart(2, "0");
+  return `${mm}${yy}`;
+};
+
+// Format session MMYY to display label (e.g. "0524")
+const formatSession = (mmyy: string): string => {
+  return mmyy;
+};
+
 // Format semester label
 const formatSemester = (semesterNum: number) => {
   const year = Math.ceil(semesterNum / 3);
-  const semInYear = ((semesterNum - 1) % 3) + 1;
   return `Semester ${semesterNum} / Year ${year}`;
 };
 
@@ -239,7 +298,13 @@ const scheduledSemesters = computed(() => {
         gpa,
       };
     })
-    .filter((sem) => sem.courses.length > 0);
+    .filter((sem) => sem.courses.length > 0)
+    .sort((a, b) => a.semester - b.semester);
+});
+
+// Check if student has uploaded any results yet
+const hasAnyResult = computed(() => {
+  return scheduledSemesters.value.some((s) => s.has_result);
 });
 
 // Overall CGPA (grade replacement: latest entry per course)
@@ -261,7 +326,8 @@ const cgpa = computed(() => {
   let totalWeighted = 0;
   let totalCredits = 0;
   for (const c of latestByCourse.values()) {
-    totalWeighted += gradePointMap[c.grade!] * c.credit_hour;
+    if (!c.grade || gradePointMap[c.grade] === undefined) continue;
+    totalWeighted += gradePointMap[c.grade] * c.credit_hour;
     totalCredits += c.credit_hour;
   }
   return (totalWeighted / totalCredits).toFixed(2);
@@ -640,32 +706,100 @@ const goBack = () => {
         <div
           v-for="semester in scheduledSemesters"
           :key="semester.semester"
-          class="card bg-base-100 border shadow-sm"
-          :class="
-            semester.has_result
-              ? semester.failed > 0
-                ? 'border-warning/40'
-                : 'border-success/40'
-              : 'border-base-300'
-          "
+          class="card bg-base-100 border shadow-sm transition-all"
+          :class="[
+            isCurrentSession(semester.semester)
+              ? 'border-success ring-2 ring-success/30 shadow-lg shadow-success/10'
+              : semester.has_result
+                ? semester.failed > 0
+                  ? 'border-warning/40' // Warning if has failures
+                  : 'border-base-200'   // Neutral if complete
+                : currentSemesterNum !== null && semester.semester < currentSemesterNum
+                  ? 'ring-1 ring-error border-error/40' // Error if missing result and is in the past
+                  : 'border-base-200'   // Neutral if upcoming
+          ]"
         >
           <div class="card-body">
             <div
-              class="flex items-center justify-between mb-2 cursor-pointer hover:bg-base-200/50 p-2 -mx-2 rounded-lg transition-colors select-none"
+              class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-base-200/50 transition-colors select-none -mx-2 rounded-lg"
               @click="toggleSemester(semester.semester)"
             >
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-8 h-8 rounded-full flex shrink-0 items-center justify-center text-sm font-bold"
+                  :class="
+                    semester.has_result
+                      ? semester.failed > 0
+                        ? 'bg-warning/10 text-warning'
+                        : 'bg-success/10 text-success'
+                      : 'bg-primary/10 text-primary'
+                  "
+                >
+                  {{ semester.semester }}
+                </div>
+                <div>
+                  <div class="font-bold flex flex-wrap items-center gap-2">
+                    {{ formatSemester(semester.semester) }}
+                    <span v-if="isCurrentSession(semester.semester)" class="badge badge-success badge-sm font-mono gap-1">
+                      <span class="w-1.5 h-1.5 rounded-full bg-success-content animate-pulse"></span>
+                      Current Session: {{ formatSession(getSemesterSession(semester.semester)!) }}
+                    </span>
+                    <span v-else-if="getSemesterSession(semester.semester)" 
+                      class="badge badge-sm font-mono"
+                      :class="currentSemesterNum !== null && semester.semester < currentSemesterNum ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
+                      >
+                      {{ formatSession(getSemesterSession(semester.semester)!) }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-base-content/60 mt-0.5">
+                    {{ semester.courses ? semester.courses.length : 0 }} courses
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 pl-11 sm:pl-0">
+                <!-- Result badges -->
+                <template v-if="semester.has_result">
+                  <span class="badge badge-success badge-sm gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                    {{ semester.passed }} Passed
+                  </span>
+                  <span
+                    v-if="semester.failed > 0"
+                    class="badge badge-error badge-sm gap-1"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+                    {{ semester.failed }} Failed
+                  </span>
+                </template>
+                <span
+                  v-if="
+                    hasAnyResult &&
+                    currentSemesterNum !== null &&
+                    semester.semester < currentSemesterNum &&
+                    !semester.has_result
+                  "
+                  class="badge badge-error badge-sm gap-1"
+                >
+                  ⚠ Missing Result
+                </span>
+                <span
+                  v-if="semester.gpa"
+                  class="badge badge-accent badge-sm font-mono"
+                >
+                  GPA {{ semester.gpa }}
+                </span>
+                <span class="badge badge-lg variant-soft font-mono">
+                  {{ semester.total_credits }} Credits
+                </span>
+                
                 <!-- Chevron Icon -->
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 20 20"
                   fill="currentColor"
-                  class="w-5 h-5 transition-transform duration-200"
-                  :class="
-                    collapsedSemesters.has(semester.semester)
-                      ? '-rotate-90'
-                      : 'rotate-0'
-                  "
+                  class="w-5 h-5 transition-transform duration-200 text-base-content/40 hidden sm:block"
+                  :class="collapsedSemesters.has(semester.semester) ? 'rotate-0' : 'rotate-180'"
                 >
                   <path
                     fill-rule="evenodd"
@@ -673,32 +807,6 @@ const goBack = () => {
                     clip-rule="evenodd"
                   />
                 </svg>
-                <h3 class="font-medium">
-                  {{ formatSemester(semester.semester) }}
-                </h3>
-              </div>
-              <div class="flex items-center gap-2">
-                <!-- Result badges -->
-                <template v-if="semester.has_result">
-                  <span class="badge badge-success badge-sm gap-1">
-                    ✓ {{ semester.passed }} Passed
-                  </span>
-                  <span
-                    v-if="semester.failed > 0"
-                    class="badge badge-error badge-sm gap-1"
-                  >
-                    ✗ {{ semester.failed }} Failed
-                  </span>
-                </template>
-                <span
-                  v-if="semester.gpa"
-                  class="badge badge-accent badge-sm font-mono"
-                >
-                  GPA {{ semester.gpa }}
-                </span>
-                <span class="badge badge-outline">
-                  {{ semester.total_credits }} credits
-                </span>
               </div>
             </div>
 

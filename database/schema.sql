@@ -302,6 +302,19 @@ CREATE TABLE program_current_session (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+-- Tracks every session period that has been activated (used for semester counting)
+CREATE TABLE program_session_timeline (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  program_id INT NOT NULL,
+  period VARCHAR(4) NOT NULL,                  -- MMYY (e.g., "0524", "0824", "1224")
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  UNIQUE KEY uq_pst_program_period (program_id, period),
+  CONSTRAINT fk_pst_program
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 -- ======================================================
 -- SEMESTER RESULTS (student uploads result slip per semester)
 -- ======================================================

@@ -128,6 +128,7 @@ const saveCurrentSession = async () => {
       },
     });
     await refreshCurrentSession();
+    await refreshIntakes();
     // Notify CurrentSessionBadge to refresh
     const sessionUpdated = useState<number>("currentSessionUpdated", () => 0);
     sessionUpdated.value++;
@@ -158,11 +159,7 @@ const { data: intakesData, refresh: refreshIntakes } = await useFetch<
   IntakeData[]
 >("/api/hop/academic-planning");
 
-// Editable state per intake row
-const intakeEdits = reactive<Record<number, number>>({});
-const intakeSaving = reactive<Record<number, boolean>>({});
-
-// Format MMYY â†’ "Mon 'YY"
+// Format MMYY → "Mon 'YY"
 const formatIntake = (mmyy: string) => {
   const months = [
     "Jan",
@@ -181,25 +178,6 @@ const formatIntake = (mmyy: string) => {
   const mm = parseInt(mmyy.substring(0, 2), 10);
   const yy = mmyy.substring(2);
   return `${months[mm - 1] ?? "?"} '${yy}`;
-};
-
-const saveIntakeSemester = async (intake: IntakeData) => {
-  const sem = intakeEdits[intake.id] ?? intake.current_semester;
-  intakeSaving[intake.id] = true;
-  try {
-    await $fetch(`/api/hop/academic-planning/${intake.id}`, {
-      method: "PATCH",
-      body: { current_semester: sem },
-    });
-    await refreshIntakes();
-  } catch (error: any) {
-    showToast(
-      error?.data?.statusMessage || "Failed to update intake semester",
-      "error",
-    );
-  } finally {
-    intakeSaving[intake.id] = false;
-  }
 };
 
 interface StudentData {
@@ -247,7 +225,7 @@ const approvedPlans = computed(() => {
     </div>
 
     <!-- Header Section -->
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 flex-none relative">
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 flex-none relative mb-2">
       <div class="space-y-2 z-10">
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
           HoP <span class="text-primary">Dashboard</span>
@@ -258,6 +236,112 @@ const approvedPlans = computed(() => {
       </div>
       <!-- Ambient glow -->
       <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    </div>
+
+    <!-- Current Session Setting (Moved to Top) -->
+    <div id="session-config" class="card bg-base-100 border border-base-200 shadow-sm overflow-visible relative z-20">
+      <div class="absolute inset-0 bg-gradient-to-r from-secondary/5 via-transparent to-transparent pointer-events-none rounded-2xl"></div>
+      <div class="card-body p-6 md:p-8 relative">
+        <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+          <!-- Left: Title & Descriptions -->
+          <div class="flex items-start gap-4 flex-1">
+            <div class="p-3 bg-secondary/10 text-secondary rounded-2xl shadow-sm flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" /></svg>
+            </div>
+            <div class="space-y-3 w-full">
+              <div>
+                <h2 class="text-xl font-bold flex items-center gap-3">
+                  Global Academic Session
+                  <div v-if="sessionSaved" class="badge badge-success badge-sm font-bold gap-1 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg> Saved</div>
+                </h2>
+                <p class="text-sm text-base-content/60 mt-1 max-w-sm">
+                  Control the currently active semester across the entire application.
+                </p>
+              </div>
+
+              <!-- Cohort Progress Dropdown -->
+              <div v-if="intakesData?.length" class="mt-4 max-w-2xl w-full">
+                <details class="collapse collapse-arrow bg-base-100 border border-base-200 shadow-sm">
+                  <summary class="collapse-title text-sm font-bold text-base-content/80 group">
+                    <span class="flex items-center gap-2">
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-primary"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z" /></svg>
+                       View Cohort Semester Progress
+                    </span>
+                  </summary>
+                  <div class="collapse-content px-0 pb-0">
+                    <div class="bg-base-50/50 border-t border-base-200 text-xs p-3 text-base-content/60 flex items-center gap-2">
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                       Semesters are automatically calculated from the active session.
+                    </div>
+                    <div class="overflow-y-auto max-h-[300px] custom-scrollbar">
+                      <table class="table table-xs w-full relative">
+                        <thead class="bg-base-200/90 backdrop-blur-sm text-base-content sticky top-0 z-10 shadow-sm">
+                          <tr>
+                            <th class="font-bold pl-4 py-3">Intake</th>
+                            <th class="font-bold py-3">Name</th>
+                            <th class="font-bold text-center py-3">Status</th>
+                            <th class="font-bold text-right pr-4 py-3">Current Semester</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="intake in intakesData" :key="intake.id" class="hover:bg-primary/5 transition-colors border-t border-base-200/50" :class="{ 'opacity-60': intake.current_semester === 0 }">
+                            <td class="pl-4 py-3">
+                              <span class="inline-flex px-1.5 py-0.5 rounded bg-base-200 font-bold text-xs font-mono">{{ formatIntake(intake.intake_year) }}</span>
+                            </td>
+                            <td class="font-bold text-xs py-3 truncate max-w-[120px]">{{ intake.intake_name }}</td>
+                            <td class="text-center py-3">
+                              <span class="badge badge-xs font-bold uppercase tracking-wider text-[9px]" :class="intake.status === 'Active' ? 'badge-success badge-outline border-success/30' : 'badge-ghost'">{{ intake.status }}</span>
+                            </td>
+                            <td class="text-right pr-4 py-3">
+                              <span v-if="intake.current_semester > 0" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary font-bold text-xs">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342" /></svg>
+                                Sem {{ intake.current_semester }}
+                              </span>
+                              <span v-else class="inline-flex items-center gap-1 px-2 py-1 rounded bg-base-200 text-base-content/40 font-bold text-[10px] uppercase tracking-wider">
+                                Not Started
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Right: Forms -->
+          <div class="flex-shrink-0 flex flex-col items-center lg:items-end gap-2 w-full lg:w-auto mt-4 lg:mt-0">
+             <div class="flex flex-wrap sm:flex-nowrap items-center justify-end gap-2 w-full">
+                 <div class="form-control w-1/2 sm:w-28">
+                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Period (MMYY)</span></label>
+                     <input v-model="sessionForm.active_intake_period" type="text" placeholder="0525" maxlength="4" class="input input-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-mono font-bold text-center w-full" />
+                 </div>
+                 <div class="form-control w-1/2 sm:w-44">
+                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Type</span></label>
+                     <select v-model="sessionForm.semester_type" class="select select-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-bold w-full">
+                       <option value="L">Long Semester</option>
+                       <option value="S">Short Semester</option>
+                     </select>
+                 </div>
+                 <div class="form-control w-full sm:w-auto flex justify-end">
+                     <button class="btn btn-secondary btn-sm rounded-lg px-6 mt-1 sm:mt-[28px] shadow-sm shadow-secondary/20 w-full sm:w-auto" :class="{ loading: sessionSaving }" :disabled="sessionSaving || !sessionForm.active_intake_period" @click="saveCurrentSession">
+                       {{ sessionSaving ? "Saving" : "Update" }}
+                     </button>
+                 </div>
+              </div>
+            <div v-if="currentSessionData?.current_session" class="flex items-center justify-center lg:justify-end gap-2 text-xs text-base-content/50 w-full mt-2">
+              <div class="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+              <span>Currently Active:</span>
+              <span class="font-bold text-base-content">{{ formatIntake(currentSessionData.current_session.active_intake_period) }}</span>
+              <span class="px-1.5 py-0.5 rounded bg-base-100 border border-base-300">{{ currentSessionData.current_session.semester_type === "L" ? "Long" : "Short" }}</span>
+              <span>· {{ timeAgo(currentSessionData.current_session.updated_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Top Grid: Notifications & Stats -->
@@ -470,106 +554,5 @@ const approvedPlans = computed(() => {
       </div>
     </div>
 
-
-    <!-- Current Session Setting (Full Width) -->
-    <div id="session-config" class="card bg-base-100 border border-base-200 shadow-sm mt-4 scroll-mt-24 overflow-hidden relative">
-      <div class="absolute inset-0 bg-gradient-to-r from-secondary/5 via-transparent to-transparent pointer-events-none"></div>
-      <div class="card-body p-6 md:p-8 relative z-10">
-        
-        <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
-          <div class="flex items-start gap-4">
-            <div class="p-3 bg-secondary/10 text-secondary rounded-2xl shadow-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" /></svg>
-            </div>
-            <div>
-              <h2 class="text-xl font-bold flex items-center gap-3">
-                Global Academic Session
-                <div v-if="sessionSaved" class="badge badge-success badge-sm font-bold gap-1 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg> Saved</div>
-              </h2>
-              <p class="text-sm text-base-content/60 mt-1 max-w-sm">
-                Control the currently active semester across the entire application.
-              </p>
-            </div>
-          </div>
-
-          <div class="flex-shrink-0 flex flex-col items-center gap-2">
-             <div class="flex items-center gap-2">
-                 <div class="form-control w-full sm:w-28">
-                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Period (MMYY)</span></label>
-                     <input v-model="sessionForm.active_intake_period" type="text" placeholder="0525" maxlength="4" class="input input-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-mono font-bold text-center" />
-                 </div>
-                 <div class="form-control w-full sm:w-44">
-                     <label class="label pb-1"><span class="label-text text-xs font-bold uppercase tracking-wider text-base-content/60">Type</span></label>
-                     <select v-model="sessionForm.semester_type" class="select select-sm bg-base-100 border-base-300 focus:border-secondary shadow-sm font-bold">
-                       <option value="L">Long Semester</option>
-                       <option value="S">Short Semester</option>
-                     </select>
-                 </div>
-                 <div class="form-control flex justify-end">
-                     <button class="btn btn-secondary btn-sm rounded-lg px-6 mt-[28px] shadow-sm shadow-secondary/20" :class="{ loading: sessionSaving }" :disabled="sessionSaving || !sessionForm.active_intake_period" @click="saveCurrentSession">
-                       {{ sessionSaving ? "Saving" : "Update" }}
-                     </button>
-                 </div>
-              </div>
-            <div v-if="currentSessionData?.current_session" class="flex items-center justify-center md:justify-end gap-2 text-xs text-base-content/50 w-full mt-2">
-              <div class="w-2 h-2 rounded-full bg-success animate-pulse"></div>
-              <span>Currently Active:</span>
-              <span class="font-bold text-base-content">{{ formatIntake(currentSessionData.current_session.active_intake_period) }}</span>
-              <span class="px-1.5 py-0.5 rounded bg-base-100 border border-base-300">{{ currentSessionData.current_session.semester_type === "L" ? "Long" : "Short" }}</span>
-              <span>· {{ timeAgo(currentSessionData.current_session.updated_at) }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Per-Intake Current Semester Table -->
-        <div v-if="intakesData?.length" class="mt-6">
-          <h3 class="text-sm font-bold text-base-content/60 uppercase tracking-widest mb-3">Cohort Syncing</h3>
-          <div class="bg-base-100 border border-base-200 rounded-xl overflow-hidden shadow-sm">
-            <div class="overflow-x-auto">
-              <table class="table w-full border-collapse">
-                <thead class="bg-base-200/40 text-base-content border-b border-base-200">
-                  <tr>
-                    <th class="font-bold pl-6">Intake</th>
-                    <th class="font-bold">Name</th>
-                    <th class="font-bold text-center">Status</th>
-                    <th class="font-bold text-right" colspan="2">Progress (Current Sem)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="intake in intakesData" :key="intake.id" class="hover:bg-primary/5 transition-colors border-b border-base-200/50 group">
-                    <td class="pl-6">
-                      <span class="inline-flex px-2 py-1 rounded bg-base-200 font-bold text-xs font-mono">{{ formatIntake(intake.intake_year) }}</span>
-                    </td>
-                    <td class="font-bold text-sm">{{ intake.intake_name }}</td>
-                    <td class="text-center">
-                      <span class="badge badge-sm font-bold uppercase tracking-wider text-[10px]" :class="intake.status === 'Active' ? 'badge-success badge-outline border-success/30' : 'badge-ghost'">{{ intake.status }}</span>
-                    </td>
-                    <td class="text-right">
-                      <div class="inline-flex items-center justify-end gap-2 w-full">
-                        <span class="text-[10px] font-bold text-base-content/40 tracking-wider">SEM</span>
-                        <input
-                          :value="intakeEdits[intake.id] ?? intake.current_semester"
-                          type="number"
-                          min="1"
-                          class="input input-sm bg-base-100 hover:bg-base-200 w-16 text-center font-bold border-base-300 focus:border-primary shadow-sm transition-colors duration-200 rounded-lg"
-                          @input="intakeEdits[intake.id] = Number(($event.target as HTMLInputElement).value)"
-                        />
-                      </div>
-                    </td>
-                    <td class="pr-6 w-16 text-right">
-                      <button class="btn btn-sm btn-circle btn-ghost text-primary opacity-50 group-hover:opacity-100 transition-opacity" :disabled="intakeSaving[intake.id]" @click="saveIntakeSemester(intake)" title="Sync Semester">
-                        <span v-if="intakeSaving[intake.id]" class="loading loading-spinner loading-xs"></span>
-                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
   </div>
 </template>

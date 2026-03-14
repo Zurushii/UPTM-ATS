@@ -207,17 +207,16 @@ const scheduledSemesters = computed(() => {
     });
 });
 
-// Initialize all semesters as expanded
-watchEffect(() => {
-  if (
-    scheduledSemesters.value.length > 0 &&
-    expandedSemesters.value.size === 0
-  ) {
-    scheduledSemesters.value.forEach((s) =>
-      expandedSemesters.value.add(s.semester),
-    );
-  }
-});
+// Initialize all semesters as expanded on initial load only
+watch(
+  () => scheduledSemesters.value,
+  (newSemesters) => {
+    if (newSemesters.length > 0 && expandedSemesters.value.size === 0) {
+      newSemesters.forEach((s) => expandedSemesters.value.add(s.semester));
+    }
+  },
+  { immediate: true, once: true }
+);
 
 const toggleSemester = (semester: number) => {
   if (expandedSemesters.value.has(semester)) {
@@ -329,6 +328,45 @@ const cgpa = computed(() => {
 const formatSemester = (semesterNum: number) => {
   const year = Math.ceil(semesterNum / 3);
   return `Semester ${semesterNum} / Year ${year}`;
+};
+
+// Fixed semester month cycle: May (Short), Aug (Long), Dec (Long)
+const SEMESTER_MONTH_CYCLE = [5, 8, 12];
+
+// Get the session MMYY string for a given semester number
+const getSemesterSession = (semesterNum: number): string | null => {
+  const intakeYear = profile.value?.intake_year as string | undefined;
+  const startSem = data.value?.plan?.start_semester || 1;
+  if (!intakeYear || intakeYear.length !== 4) return null;
+
+  const intakeMonth = parseInt(intakeYear.substring(0, 2));
+  const intakeYY = parseInt(intakeYear.substring(2, 4));
+
+  const cycleIndex = SEMESTER_MONTH_CYCLE.indexOf(intakeMonth);
+  if (cycleIndex === -1) return null;
+
+  const offset = semesterNum - startSem;
+  const targetIndex = cycleIndex + offset;
+  if (targetIndex < 0) return null;
+  const targetMonth = SEMESTER_MONTH_CYCLE[targetIndex % 3];
+
+  const fullCycles = Math.floor(targetIndex / 3);
+  const targetYY = intakeYY + fullCycles;
+
+  const mm = String(targetMonth).padStart(2, "0");
+  const yy = String(targetYY % 100).padStart(2, "0");
+  return `${mm}${yy}`;
+};
+
+// Format session MMYY to display label
+const formatSession = (mmyy: string): string => mmyy;
+
+// Check if a semester is the current session
+const isCurrentSession = (semesterNum: number): boolean => {
+  const session = getSemesterSession(semesterNum);
+  const activeSession = sessionData.value?.current_session?.active_intake_period;
+  if (!session || !activeSession) return false;
+  return session === activeSession;
 };
 
 // ── Upload Result Modal ──
@@ -846,28 +884,25 @@ const revokeResult = async () => {
             expandedSemesters.has(sem.semester)
               ? 'ring-2 ring-base-200 shadow-md'
               : 'hover:border-base-300',
-            sem.semester === currentSemester
-              ? 'ring-2 ring-primary border-primary/40'
-              : hasAnyResult &&
-                  currentSemester !== null &&
-                  sem.semester < currentSemester &&
-                  !sem.has_result
-                ? 'ring-1 ring-warning border-warning/40'
-                : sem.has_result
-                  ? sem.failed > 0
-                    ? 'border-warning/40'
-                    : 'border-success/40'
-                  : 'border-base-200',
+            isCurrentSession(sem.semester)
+              ? 'ring-2 ring-success/30 border-success shadow-lg shadow-success/10'
+              : sem.has_result
+                ? sem.failed > 0
+                  ? 'border-warning/40' // Warning if has failures
+                  : 'border-base-200'   // Neutral if complete
+                : hasAnyResult && currentSemester !== null && sem.semester < currentSemester && !sem.has_result
+                  ? 'ring-1 ring-error border-error/40' // Error if missing result and is in the past
+                  : 'border-base-200'   // Neutral if upcoming
           ]"
         >
           <!-- Header Trigger -->
           <div
-            class="p-4 flex items-center justify-between cursor-pointer select-none"
+            class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-base-200/50 transition-colors select-none"
             @click="toggleSemester(sem.semester)"
           >
             <div class="flex items-center gap-3">
               <div
-                class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                class="w-8 h-8 rounded-full flex shrink-0 items-center justify-center text-sm font-bold"
                 :class="
                   sem.has_result
                     ? sem.failed > 0
@@ -882,7 +917,19 @@ const revokeResult = async () => {
                 <div class="font-bold flex items-center gap-2">
                   {{ formatSemester(sem.semester) }}
                   <span
-                    v-if="sem.semester === currentSemester"
+                    v-if="isCurrentSession(sem.semester)"
+                    class="badge badge-success badge-sm font-mono gap-1"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-success-content animate-pulse"></span>
+                    Current Session: {{ formatSession(getSemesterSession(sem.semester)!) }}
+                  </span>
+                  <span
+                    v-else-if="getSemesterSession(sem.semester)"
+                    class="badge badge-sm font-mono"
+                    :class="currentSemester !== null && sem.semester < currentSemester ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
+                  >{{ formatSession(getSemesterSession(sem.semester)!) }}</span>
+                  <span
+                    v-if="sem.semester === currentSemester && !isCurrentSession(sem.semester)"
                     class="badge badge-primary badge-sm"
                     >Current</span
                   >
@@ -893,7 +940,7 @@ const revokeResult = async () => {
                       sem.semester < currentSemester &&
                       !sem.has_result
                     "
-                    class="badge badge-warning badge-sm gap-1"
+                    class="badge badge-error badge-sm gap-1"
                   >
                     ⚠ Missing Result
                   </span>
@@ -904,7 +951,7 @@ const revokeResult = async () => {
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2 pl-11 sm:pl-0">
               <!-- Result badges -->
               <template v-if="sem.has_result">
                 <span class="badge badge-success badge-sm gap-1">
@@ -955,7 +1002,7 @@ const revokeResult = async () => {
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
                 fill="currentColor"
-                class="w-5 h-5 transition-transform duration-200 text-base-content/40"
+                class="w-5 h-5 transition-transform duration-200 text-base-content/40 hidden sm:block"
                 :class="expandedSemesters.has(sem.semester) ? 'rotate-180' : ''"
               >
                 <path
