@@ -268,6 +268,14 @@ const availableSemesters = computed(() => {
       }
     }
   }
+  // Include semesters from existing plan data (auto-extended during generation)
+  if (planData.value) {
+    for (const semester of planData.value.semesters) {
+      if (semester.semester >= startSem) {
+        semesters.add(semester.semester);
+      }
+    }
+  }
   // Include user-added extra semesters
   for (const s of extraSemesters.value) semesters.add(s);
   return Array.from(semesters).sort((a, b) => a - b);

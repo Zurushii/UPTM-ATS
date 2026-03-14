@@ -293,6 +293,75 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // Auto-extend semester rules for semesters that exist in the plan's course
+  // assignments but are beyond the configured rules (from auto-extend during generation).
+  // Also detect if an IT course landed in an extra semester (mark it as LI).
+  const [planDetailSems] = await pool.query(
+    `SELECT apd.semester,
+            MAX(CASE WHEN pc.course_type = 'Industrial Training' THEN 1 ELSE 0 END) AS has_it
+     FROM academic_plan_details apd
+     LEFT JOIN program_courses pc ON pc.course_id = apd.course_id AND pc.session_id = ?
+     WHERE apd.academic_plan_id = ?
+     GROUP BY apd.semester
+     ORDER BY apd.semester ASC`,
+    [sessionId, planId],
+  );
+
+  const existingRuleSems = new Set(
+    semesterRules.map((r: any) => r.semester_number),
+  );
+
+  // Build a map of semester → has_it from plan details
+  const semHasIt = new Map<number, boolean>();
+  for (const row of planDetailSems as any[]) {
+    semHasIt.set(Number(row.semester), row.has_it === 1);
+  }
+
+  // If a configured LI semester now has NO IT courses assigned (e.g., IT moved to
+  // an auto-extended later semester), flip it back to a regular Long semester.
+  for (const rule of semesterRules) {
+    if (rule.is_li) {
+      const hasIt = semHasIt.get(rule.semester_number);
+      // hasIt === false means semester exists in plan but has no IT courses
+      // hasIt === undefined means semester has no courses at all
+      // In both cases, revert to regular Long semester (auto-extend may have
+      // moved the IT course to a later semester)
+      if (hasIt !== true) {
+        rule.is_li = false;
+        rule.semester_type = "L";
+      }
+    }
+  }
+
+  // Detect cycle pattern from existing non-LI rules for new semester type inference
+  const posLongExt = [0, 0, 0];
+  const posTotalExt = [0, 0, 0];
+  for (const r of semesterRules) {
+    if (!r.is_li) {
+      const pos = (r.semester_number - 1) % 3;
+      posTotalExt[pos]++;
+      if (r.semester_type === "L") posLongExt[pos]++;
+    }
+  }
+  const cycleExt = posTotalExt.map((total, i) =>
+    total === 0 ? "L" : posLongExt[i] >= total / 2 ? "L" : "S",
+  );
+
+  for (const row of planDetailSems as any[]) {
+    const semNum = Number(row.semester);
+    if (!existingRuleSems.has(semNum) && semNum >= startSemester) {
+      const hasIt = row.has_it === 1;
+      const semType = hasIt ? "L" : (cycleExt[(semNum - 1) % 3] as "L" | "S");
+      semesterRules.push({
+        semester_number: semNum,
+        semester_type: semType,
+        is_li: hasIt,
+        target_credits: 0,
+      });
+      existingRuleSems.add(semNum);
+    }
+  }
+
   return {
     courses: courseRows,
     semester_rules: semesterRules,
