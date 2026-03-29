@@ -262,7 +262,7 @@ export default defineEventHandler(async (event) => {
   // Auto-extend semester rules if retake courses exist beyond max program semester
   // FIX Bug #2: use intake-derived baseCyclePattern with relative offset (startSemester),
   // matching the same formula used in generate.post.ts and HOP courses.get.ts.
-  if ((failedRows as any[]).length > 0) {
+  if ((failedRows as any[]).length > 0 || onProbation) {
     const lastSem = maxProgramSemester;
     // Add 3 extra semesters for retake scheduling room
     for (let i = 1; i <= 3; i++) {

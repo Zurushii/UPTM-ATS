@@ -454,6 +454,21 @@ const isCurrentSession = (semesterNum: number): boolean => {
   return session === activeSession;
 };
 
+// Check if a session string is strictly before the system's global active session
+const isSessionInPast = (sessionStr: string | null): boolean => {
+  const activeSessionStr = sessionData.value?.current_session?.active_intake_period;
+  if (!sessionStr || !activeSessionStr) return false;
+
+  const parseSession = (s: string) => {
+    if (s.length !== 4) return 0;
+    const m = parseInt(s.substring(0, 2), 10);
+    const y = parseInt(s.substring(2, 4), 10);
+    return y * 100 + m;
+  };
+
+  return parseSession(sessionStr) < parseSession(activeSessionStr);
+};
+
 // ── Upload Result Modal ──
 const showUploadModal = ref(false);
 const selectedSemester = ref<(typeof scheduledSemesters.value)[number] | null>(
@@ -975,7 +990,7 @@ const revokeResult = async () => {
                 ? sem.failed > 0
                   ? 'border-warning/40' // Warning if has failures
                   : 'border-base-200'   // Neutral if complete
-                : hasAnyResult && currentSemester !== null && sem.semester < currentSemester && !sem.has_result
+                : isSessionInPast(getSemesterSession(sem.semester)) && !sem.has_result
                   ? 'ring-1 ring-error border-error/40' // Error if missing result and is in the past
                   : 'border-base-200'   // Neutral if upcoming
           ]"
@@ -1011,7 +1026,7 @@ const revokeResult = async () => {
                   <span
                     v-else-if="getSemesterSession(sem.semester)"
                     class="badge badge-sm font-mono"
-                    :class="currentSemester !== null && sem.semester < currentSemester ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
+                    :class="isSessionInPast(getSemesterSession(sem.semester)) ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
                   >Session: {{ formatSession(getSemesterSession(sem.semester)!) }}</span>
                   <span
                     v-if="sem.semester === currentSemester && !isCurrentSession(sem.semester)"
@@ -1020,10 +1035,8 @@ const revokeResult = async () => {
                   >
                   <span
                     v-if="
-                      hasAnyResult &&
-                      currentSemester !== null &&
-                      sem.semester < currentSemester &&
-                      !sem.has_result
+                      !sem.has_result &&
+                      isSessionInPast(getSemesterSession(sem.semester))
                     "
                     class="badge badge-error badge-sm gap-1"
                   >

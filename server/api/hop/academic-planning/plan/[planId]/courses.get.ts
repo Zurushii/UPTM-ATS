@@ -271,7 +271,7 @@ export default defineEventHandler(async (event) => {
 
   // Auto-extend semester rules if retake courses exist beyond max program semester
   // Extend using the intake's physical pattern
-  if ((failedRows as any[]).length > 0) {
+  if ((failedRows as any[]).length > 0 || onProbation) {
     const lastSem = maxProgramSemester;
     for (let i = 1; i <= 3; i++) {
       const semNum = lastSem + i;

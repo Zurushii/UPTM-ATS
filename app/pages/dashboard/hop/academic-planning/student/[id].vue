@@ -83,6 +83,21 @@ const isCurrentSession = (semesterNum: number): boolean => {
   return session === activeSession;
 };
 
+// Check if a session string is strictly before the system's global active session
+const isSessionInPast = (sessionStr: string | null): boolean => {
+  const activeSessionStr = currentSessionData.value?.current_session?.active_intake_period;
+  if (!sessionStr || !activeSessionStr) return false;
+
+  const parseSession = (s: string) => {
+    if (s.length !== 4) return 0;
+    const m = parseInt(s.substring(0, 2), 10);
+    const y = parseInt(s.substring(2, 4), 10);
+    return y * 100 + m;
+  };
+
+  return parseSession(sessionStr) < parseSession(activeSessionStr);
+};
+
 // Compute the current absolute semester index to determine past vs upcoming
 const currentSemesterNum = computed(() => {
   const sems = scheduledSemesters.value;
@@ -722,7 +737,7 @@ const goBack = () => {
                 ? semester.failed > 0
                   ? 'border-warning/40' // Warning if has failures
                   : 'border-base-200'   // Neutral if complete
-                : currentSemesterNum !== null && semester.semester < currentSemesterNum
+                : isSessionInPast(getSemesterSession(semester.semester)) && !semester.has_result
                   ? 'ring-1 ring-error border-error/40' // Error if missing result and is in the past
                   : 'border-base-200'   // Neutral if upcoming
           ]"
@@ -754,7 +769,7 @@ const goBack = () => {
                     </span>
                     <span v-else-if="getSemesterSession(semester.semester)" 
                       class="badge badge-sm font-mono"
-                      :class="currentSemesterNum !== null && semester.semester < currentSemesterNum ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
+                      :class="isSessionInPast(getSemesterSession(semester.semester)) ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
                       >
                       Session: {{ formatSession(getSemesterSession(semester.semester)!) }}
                     </span>
@@ -782,10 +797,8 @@ const goBack = () => {
                 </template>
                 <span
                   v-if="
-                    hasAnyResult &&
-                    currentSemesterNum !== null &&
-                    semester.semester < currentSemesterNum &&
-                    !semester.has_result
+                    !semester.has_result &&
+                    isSessionInPast(getSemesterSession(semester.semester))
                   "
                   class="badge badge-error badge-sm gap-1"
                 >
