@@ -56,9 +56,10 @@ export default defineEventHandler(async (event) => {
 
   // Verify the plan exists and belongs to a student in this program
   const [planRows] = await pool.query(
-    `SELECT ap.id, ap.status, ap.intake_id
+    `SELECT ap.id, ap.status, ap.intake_id, api.status AS intake_status
      FROM academic_plans ap
      JOIN students s ON ap.student_id = s.id
+     LEFT JOIN academic_planning_intakes api ON ap.intake_id = api.id
      WHERE ap.id = ? AND s.program_id = ?`,
     [plan_id, programId],
   );
@@ -71,6 +72,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const plan = (planRows as any[])[0];
+
+  if (plan.intake_status === "completed") {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Cannot modify schedule for an intake that has been marked as completed",
+    });
+  }
 
   // Only allow scheduling for draft plans
   if (plan.status !== "draft") {

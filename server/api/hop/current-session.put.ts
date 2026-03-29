@@ -80,7 +80,7 @@ export default defineEventHandler(async (event) => {
   const [intakeRows] = await pool.query(
     `SELECT id, intake_year
      FROM academic_planning_intakes
-     WHERE program_id = ?`,
+     WHERE program_id = ? AND status != 'completed'`,
     [programId],
   );
 

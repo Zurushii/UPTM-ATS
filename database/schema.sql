@@ -221,7 +221,7 @@ CREATE TABLE academic_planning_intakes (
   intake_name VARCHAR(100) NOT NULL,         -- e.g., "August 2024 Intake"
   session_id INT NOT NULL,                   -- Program structure to apply
   intake_type VARCHAR(50) NOT NULL,          -- Semester rules intake type
-  status ENUM('draft', 'generated', 'finalized') DEFAULT 'draft',
+  status ENUM('draft', 'generated', 'completed') DEFAULT 'draft',
   current_semester INT NOT NULL DEFAULT 1,   -- Per-intake current semester set by HOP
   total_students INT DEFAULT 0,
   successful_plans INT DEFAULT 0,

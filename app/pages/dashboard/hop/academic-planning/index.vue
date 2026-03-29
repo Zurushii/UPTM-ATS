@@ -34,7 +34,7 @@ interface IntakeData {
   session_id: number;
   session_name: string;
   intake_type: string;
-  status: "draft" | "generated" | "finalized";
+  status: "draft" | "generated" | "completed";
   total_students: number;
   successful_plans: number;
   failed_plans: number;
@@ -203,8 +203,8 @@ const getStatusBadgeClass = (status: string) => {
       return "badge-warning";
     case "generated":
       return "badge-success";
-    case "finalized":
-      return "badge-info";
+    case "completed":
+      return "badge-primary badge-outline border-primary/30 bg-primary/10 text-primary";
     default:
       return "badge-ghost";
   }

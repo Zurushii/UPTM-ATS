@@ -91,7 +91,7 @@ export default defineEventHandler(async (event) => {
 
   // Verify intake belongs to this program and get intake details
   const [intakeRows] = await pool.query(
-    `SELECT id, intake_year, intake_type, session_id 
+    `SELECT id, intake_year, intake_type, session_id, status 
      FROM academic_planning_intakes 
      WHERE id = ? AND program_id = ?`,
     [intakeId, programId],
@@ -105,6 +105,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const intake = (intakeRows as any[])[0];
+
+  if (intake.status === "completed") {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Cannot regenerate plans for an intake that has been marked as completed",
+    });
+  }
 
   // Get all students in this program with the matching intake year
   const [studentRows] = await pool.query(

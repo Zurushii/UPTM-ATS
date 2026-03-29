@@ -1,5 +1,6 @@
 import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
+import { getRouterParam, readBody } from "h3";
 
 export default defineEventHandler(async (event) => {
   const session = await auth.api.getSession({ headers: event.headers });
@@ -15,15 +16,6 @@ export default defineEventHandler(async (event) => {
   const intakeId = Number(getRouterParam(event, "id"));
   if (!intakeId || !Number.isInteger(intakeId)) {
     throw createError({ statusCode: 400, statusMessage: "Invalid intake ID" });
-  }
-
-  const body = await readBody(event);
-  const sem = Number(body.current_semester);
-  if (!Number.isInteger(sem) || sem < 1) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: "current_semester must be a positive integer",
-    });
   }
 
   // Get the HoP's assigned program
@@ -44,28 +36,50 @@ export default defineEventHandler(async (event) => {
 
   // Ensure the intake belongs to this HOP's program
   const [intakeRows] = await pool.query(
-    `SELECT id, status FROM academic_planning_intakes WHERE id = ? AND program_id = ?`,
+    `SELECT id, status, intake_year FROM academic_planning_intakes WHERE id = ? AND program_id = ?`,
     [intakeId, programId],
   );
 
-  const intakes = intakeRows as any[];
-  if (intakes.length === 0) {
+  if ((intakeRows as any[]).length === 0) {
     throw createError({
       statusCode: 404,
       statusMessage: "Intake not found for your program",
     });
   }
 
-  if (intakes[0].status === "completed") {
+  const intake = (intakeRows as any[])[0];
+
+  if (intake.status !== "generated") {
     throw createError({
       statusCode: 400,
-      statusMessage: "Cannot modify properties of an intake that has been marked as completed",
+      statusMessage: "Only generated intakes can be marked as completed.",
+    });
+  }
+
+  // Check if all students in this intake have plan_status = 'completed'
+  const [studentRows] = await pool.query(
+    `SELECT ap.status AS plan_status
+    FROM students s
+    LEFT JOIN academic_plans ap ON ap.student_id = s.id AND ap.intake_id = ?
+    WHERE s.program_id = ? AND s.intake_year = ?`,
+    [intakeId, programId, intake.intake_year],
+  );
+
+  const students = studentRows as any[];
+  const incompleteStudents = students.filter(
+    (s) => s.plan_status !== "completed"
+  );
+
+  if (incompleteStudents.length > 0) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "All students in this intake must have their academic plan status marked as 'completed' before the intake can be completed.",
     });
   }
 
   await pool.query(
-    `UPDATE academic_planning_intakes SET current_semester = ? WHERE id = ?`,
-    [sem, intakeId],
+    `UPDATE academic_planning_intakes SET status = 'completed' WHERE id = ?`,
+    [intakeId]
   );
 
   return { success: true };

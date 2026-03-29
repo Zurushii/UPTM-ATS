@@ -46,9 +46,10 @@ export default defineEventHandler(async (event) => {
 
   // Verify the plan exists and belongs to a student in this program
   const [planRows] = await pool.query(
-    `SELECT ap.id, ap.status AS current_status
+    `SELECT ap.id, ap.status AS current_status, api.status AS intake_status
      FROM academic_plans ap
      JOIN students s ON ap.student_id = s.id
+     LEFT JOIN academic_planning_intakes api ON ap.intake_id = api.id
      WHERE ap.id = ? AND s.program_id = ?`,
     [plan_id, programId],
   );
@@ -60,7 +61,16 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const currentStatus = (planRows as any[])[0].current_status;
+  const planData = (planRows as any[])[0];
+  const currentStatus = planData.current_status;
+  const intakeStatus = planData.intake_status;
+
+  if (intakeStatus === "completed") {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Cannot update plan status for an intake that has been marked as completed",
+    });
+  }
 
   // Validate status transitions
   if (status === "draft" && currentStatus !== "approved") {

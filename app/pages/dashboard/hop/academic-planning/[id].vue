@@ -33,7 +33,7 @@ interface IntakeDetail {
   session_id: number;
   session_name: string;
   intake_type: string;
-  status: "draft" | "generated" | "finalized";
+  status: "draft" | "generated" | "completed";
   total_students: number;
   successful_plans: number;
   failed_plans: number;
@@ -74,6 +74,7 @@ const showToast = (
 // State
 const searchQuery = ref("");
 const filterStatus = ref<string>("all");
+const markAsCompletedLoading = ref(false);
 
 // Regenerate modal state
 const isRegenerateModalOpen = ref(false);
@@ -161,7 +162,14 @@ const stats = computed(() => {
     noPlan: students.filter((s) => !s.academic_plan_id).length,
     draftPlanned: students.filter((s) => s.plan_status === "draft").length,
     approved: students.filter((s) => s.plan_status === "approved").length,
+    completed: students.filter((s) => s.plan_status === "completed").length,
   };
+});
+
+// Check if all students are marked as completed to show the Mark as Completed button
+const canMarkAsCompleted = computed(() => {
+  if (!intakeData.value || !intakeData.value.students || intakeData.value.students.length === 0) return false;
+  return stats.value.total > 0 && stats.value.completed === stats.value.total;
 });
 
 // Check if there are students without plans (for showing regenerate button)
@@ -226,6 +234,32 @@ const viewStudentSchedule = (student: StudentData) => {
 // Go back
 const goBack = () => {
   navigateTo("/dashboard/hop/academic-planning");
+};
+
+const isCompleteModalOpen = ref(false);
+
+const openCompleteModal = () => {
+  isCompleteModalOpen.value = true;
+};
+
+const closeCompleteModal = () => {
+  isCompleteModalOpen.value = false;
+};
+
+const confirmMarkAsCompleted = async () => {
+  isCompleteModalOpen.value = false;
+  markAsCompletedLoading.value = true;
+  try {
+    await ($fetch as any)(`/api/hop/academic-planning/${intakeId}/complete`, {
+      method: "PUT" as any
+    });
+    showToast("Intake marked as completed successfully", "success");
+    await refresh();
+  } catch (error: any) {
+    showToast(error.data?.message || error.message || "Failed to mark as completed", "error");
+  } finally {
+    markAsCompletedLoading.value = false;
+  }
 };
 
 // ── Regenerate Logic ──
@@ -371,7 +405,7 @@ const regenGenerate = async () => {
     <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
 
     <!-- Toast Notification -->
-    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+    <div v-if="toast.show" class="toast toast-bottom toast-center z-50 mb-6">
       <div
         class="alert shadow-lg"
         :class="{
@@ -406,7 +440,7 @@ const regenGenerate = async () => {
       <div class="flex items-center gap-3">
         <!-- Regenerate Button -->
         <button
-          v-if="intakeData && hasStudentsWithoutPlans"
+          v-if="intakeData && hasStudentsWithoutPlans && intakeData.status !== 'completed'"
           class="btn btn-primary shadow-lg shadow-primary/20 gap-2 hover:-translate-y-0.5 transition-transform rounded-xl"
           @click="openRegenerateModal"
         >
@@ -415,13 +449,27 @@ const regenGenerate = async () => {
           </svg>
           Regenerate Plans
         </button>
+        
+        <!-- Mark as Completed Button -->
+        <button
+          v-if="intakeData?.status === 'generated' && canMarkAsCompleted"
+          class="btn btn-info shadow-lg shadow-info/20 gap-2 hover:-translate-y-0.5 transition-transform rounded-xl text-white"
+          :disabled="markAsCompletedLoading"
+          @click="openCompleteModal"
+        >
+          <span v-if="markAsCompletedLoading" class="loading loading-spinner loading-sm"></span>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          Mark as Completed
+        </button>
         <span
           v-if="intakeData"
           class="badge badge-lg shadow-sm font-bold"
           :class="{
             'badge-warning badge-outline border-warning/30 bg-warning/10': intakeData.status === 'draft',
             'badge-success badge-outline border-success/30 bg-success/10': intakeData.status === 'generated',
-            'badge-info badge-outline border-info/30 bg-info/10': intakeData.status === 'finalized',
+            'badge-primary badge-outline border-primary/30 bg-primary/10 text-primary': intakeData.status === 'completed',
           }"
         >
           {{ intakeData.status }}
@@ -602,6 +650,35 @@ const regenGenerate = async () => {
         </div>
       </div>
     </template>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- Complete Intake Modal -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <dialog :class="{ 'modal modal-open': isCompleteModalOpen }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg text-primary flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          Complete Intake?
+        </h3>
+        <p class="py-4 text-base-content/80">
+          Are you sure you want to mark this intake as completed?
+          <br><br>
+          <strong class="text-error">Warning:</strong> This is a permanent action that will lock the intake and all of its associated academic plans. You will no longer be able to regenerate plans, modify student plan status, or change courses once it is finalized.
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="closeCompleteModal" :disabled="markAsCompletedLoading">Cancel</button>
+          <button class="btn btn-info text-white" @click="confirmMarkAsCompleted" :disabled="markAsCompletedLoading">
+            <span v-if="markAsCompletedLoading" class="loading loading-spinner loading-sm"></span>
+            Confirm Completion
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button @click="closeCompleteModal" :disabled="markAsCompletedLoading">close</button>
+      </form>
+    </dialog>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- Regenerate Plans Modal -->
