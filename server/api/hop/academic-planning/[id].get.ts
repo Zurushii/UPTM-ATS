@@ -65,17 +65,18 @@ export default defineEventHandler(async (event) => {
   const intake = (intakeRows as any[])[0];
 
   // Get all students for this intake with their academic plan status
+  // Use LEFT JOIN on user to include reserved students (user_id = NULL)
   const [studentRows] = await pool.query(
     `SELECT 
       s.id AS student_id,
       s.matric_no,
-      u.name AS student_name,
+      COALESCE(u.name, s.matric_no) AS student_name,
       s.starting_semester AS entry_semester,
       s.total_credit_transferred,
       ap.id AS academic_plan_id,
       ap.status AS plan_status
     FROM students s
-    JOIN user u ON s.user_id = u.id
+    LEFT JOIN user u ON s.user_id = u.id
     LEFT JOIN academic_plans ap ON ap.student_id = s.id AND ap.intake_id = ?
     WHERE s.program_id = ? AND s.intake_year = ?
     ORDER BY s.matric_no ASC`,

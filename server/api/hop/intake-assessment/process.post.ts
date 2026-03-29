@@ -442,14 +442,42 @@ export default defineEventHandler(async (event) => {
         .filter((code) => code.length > 0);
 
       for (const code of courseCodes) {
-        const courseId = courseCodeToId.get(code);
-        if (courseId) {
-          transferredCourseIds.push(courseId);
-          // Add credit hour to total
-          const creditHour = courseIdToCreditHour.get(courseId) || 0;
-          transferredCoursesCredits += creditHour;
+        // Check if this is a slash-separated course group (e.g., "UCS3153/UCS3143/UCS3163")
+        if (code.includes("/")) {
+          const groupCodes = code
+            .split("/")
+            .map((c) => c.trim().toUpperCase())
+            .filter((c) => c.length > 0);
+
+          // Find the first matching course from the group
+          let matchedCourseId: number | undefined;
+          let matchedCreditHour = 0;
+          for (const groupCode of groupCodes) {
+            const id = courseCodeToId.get(groupCode);
+            if (id) {
+              matchedCourseId = id;
+              matchedCreditHour = courseIdToCreditHour.get(id) || 0;
+              break;
+            }
+          }
+
+          if (matchedCourseId) {
+            transferredCourseIds.push(matchedCourseId);
+            transferredCoursesCredits += matchedCreditHour;
+          } else {
+            // None of the codes in the group were found
+            invalidCoursesList.push(code);
+          }
         } else {
-          invalidCoursesList.push(code);
+          const courseId = courseCodeToId.get(code);
+          if (courseId) {
+            transferredCourseIds.push(courseId);
+            // Add credit hour to total
+            const creditHour = courseIdToCreditHour.get(courseId) || 0;
+            transferredCoursesCredits += creditHour;
+          } else {
+            invalidCoursesList.push(code);
+          }
         }
       }
 

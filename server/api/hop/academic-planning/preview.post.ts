@@ -96,15 +96,16 @@ export default defineEventHandler(async (event) => {
   const intake = (intakeRows as any[])[0];
 
   // Get all students in this program with the matching intake year
+  // Use LEFT JOIN to include reserved students (user_id = NULL)
   const [studentRows] = await pool.query(
     `SELECT 
       s.id,
       s.matric_no,
-      u.name as student_name,
+      COALESCE(u.name, s.matric_no) as student_name,
       s.starting_semester,
       s.total_credit_transferred
     FROM students s
-    JOIN user u ON s.user_id = u.id
+    LEFT JOIN user u ON s.user_id = u.id
     WHERE s.program_id = ? AND s.intake_year = ?`,
     [programId, intake.intake_year],
   );
