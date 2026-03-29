@@ -431,6 +431,18 @@ export default defineEventHandler(async (event) => {
             }
           }
 
+          // ── INTAKE-BASED DYNAMIC SEMESTER CYCLES ──
+          const rawIntake = intake.intake_type ? intake.intake_type.toLowerCase() : "";
+          let baseCyclePattern: ("L" | "S")[] = ["L", "L", "S"]; // Default
+
+          if (rawIntake.includes("may")) {
+            baseCyclePattern = ["S", "L", "L"];
+          } else if (rawIntake.includes("aug")) {
+            baseCyclePattern = ["L", "L", "S"];
+          } else if (rawIntake.includes("dec")) {
+            baseCyclePattern = ["L", "S", "L"];
+          }
+
           // 2. Dynamically determine semester credit plans from program structure
           let creditPlans: Array<{
             semester_number: number;
@@ -460,8 +472,8 @@ export default defineEventHandler(async (event) => {
             
             if (is_li) {
               semType = "L"; 
-            } else if (mappedStat) {
-              semType = mappedStat.credits > creditLimits.short_max ? "L" : "S";
+            } else {
+              semType = baseCyclePattern[(relativeSem - 1) % 3];
             }
 
             creditPlans.push({
@@ -565,32 +577,15 @@ export default defineEventHandler(async (event) => {
             // LI semesters are excluded — only non-LI semesters for regular courses
             const nonLiPlans = creditPlans.filter((p) => !p.is_li);
 
-            // Auto-extend: add a new non-LI semester following the L/S cycle
+            // Auto-extend: add a new non-LI semester following the physical intake pattern
             function addExtraSemester(
               afterSem: number,
               longOnly: boolean = false,
             ): (typeof creditPlans)[0] {
               const nextNum = afterSem + 1;
-              // Detect global cycle strictly from program courses
-              const posLong = [0, 0, 0];
-              const posTotal = [0, 0, 0];
-              for (let sem = 1; sem <= maxProgramSemester; sem++) {
-                const stat = semesterStats.get(sem);
-                if (stat && !stat.has_li) {
-                  const pos = (sem - 1) % 3;
-                  posTotal[pos]++;
-                  if (stat.credits > creditLimits.short_max) posLong[pos]++;
-                }
-              }
-              const cycle = posTotal.map((total, i) =>
-                total === 0
-                  ? "L"
-                  : posLong[i] >= total / 2
-                    ? "L"
-                    : "S",
-              ) as ("L" | "S")[];
-
-              let semType = cycle[(nextNum - student.starting_semester) % 3];
+              const relativeSem = nextNum - student.starting_semester + 1;
+              
+              let semType = baseCyclePattern[(relativeSem - 1) % 3];
               // If we need a Long semester but the cycle gives Short, force Long
               if (longOnly && semType === "S") semType = "L";
 
@@ -759,13 +754,17 @@ export default defineEventHandler(async (event) => {
             const nextNaturalSem = lastRegularSem + 1;
             let nextPlan = getOrCreatePlanForSemester(nextNaturalSem, false);
             
-            // We want to smooth both the nextNaturalSem (if it's a Short semester before LI) AND the lastRegularSem
+            // We want to smooth both the nextNaturalSem (if it's a Short semester before LI) AND all generated regular semesters
             const semestersToSmooth = [];
             
             if (nextPlan.semester_type === "S") {
                semestersToSmooth.push(nextNaturalSem);
             }
-            semestersToSmooth.push(lastRegularSem);
+            
+            // Add all assigned regular semesters in backwards order so the backfill ripples all the way up the plan
+            for (let s = lastRegularSem; s > student.starting_semester; s--) {
+               semestersToSmooth.push(s);
+            }
 
             for (const targetSem of semestersToSmooth) {
                const targetPlan = getOrCreatePlanForSemester(targetSem, false);

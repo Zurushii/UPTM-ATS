@@ -208,14 +208,17 @@ export default defineEventHandler(async (event) => {
       if (!isLi && semType) {
         const onProbation = cgpa !== null && cgpa < 2.5;
         let maxCredits: number;
+        let minCredits: number;
         if (semType === "L") {
           maxCredits = onProbation
             ? prog.long_sem_min_credit
             : prog.long_sem_max_credit;
+          minCredits = prog.long_sem_min_credit;
         } else {
           maxCredits = onProbation
             ? prog.short_sem_min_credit
             : prog.short_sem_max_credit;
+          minCredits = prog.short_sem_min_credit;
         }
 
         if (totalSemCredits > maxCredits) {
@@ -224,6 +227,14 @@ export default defineEventHandler(async (event) => {
             statusMessage: onProbation
               ? `CGPA below 2.5: maximum ${maxCredits} credit hours allowed for this semester`
               : `Maximum ${maxCredits} credit hours allowed for this semester`,
+          });
+        }
+
+        // FIX Bug #4: also enforce minimum credit requirement
+        if (totalSemCredits > 0 && totalSemCredits < minCredits) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: `Minimum ${minCredits} credit hours required for this semester type (${semType === "L" ? "Long" : "Short"})`,
           });
         }
       }

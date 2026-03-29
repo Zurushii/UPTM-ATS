@@ -439,10 +439,23 @@ const deleteIntake = async () => {
 const viewIntake = (intake: IntakeData) => {
   navigateTo(`/dashboard/hop/academic-planning/${intake.id}`);
 };
+
+const manualSteps = [
+  { text: 'Click "Create Academic Planning" to start a new planning batch for a student intake.' },
+  { text: 'Step 1: Fill in the intake name, select the intake year, session, and semester rule set.' },
+  { text: 'Step 2: Upload the Excel file containing student matric numbers and credit transfer data.' },
+  { text: 'Step 3: Preview the matched students and verify the data before generating plans.' },
+  { text: 'Step 4: Review the generation results \u2014 successful and failed plan counts.' },
+  { text: 'Click "View" on any intake row to see individual student plans and manage their schedules.' },
+  { text: 'Use "Delete" to remove an intake and all associated plans if needed.', note: 'This action is irreversible.' },
+];
 </script>
 
 <template>
-  <div class="p-6 max-w-7xl mx-auto w-full space-y-6">
+  <div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8 relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
     <!-- Toast Notification -->
     <div v-if="toast.show" class="toast toast-top toast-end z-50">
       <div
@@ -458,17 +471,45 @@ const viewIntake = (intake: IntakeData) => {
       </div>
     </div>
     <!-- Page Header -->
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <div class="space-y-1">
-        <h1 class="text-2xl font-semibold">Academic Planning</h1>
-        <p class="text-sm text-base-content/60">
+    <div
+      class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
+    >
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+            Academic <span class="text-primary">Planning</span>
+          </h1>
+          <UserManualButton
+            title="Academic Planning"
+            :steps="manualSteps"
+          />
+        </div>
+        <p class="text-base-content/60 font-medium max-w-xl">
           Create and manage academic plans for student intakes.
         </p>
       </div>
-      <button class="btn btn-primary gap-2" @click="openCreateModal">
-        <span>➕</span>
-        Create Academic Planning
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          class="btn btn-primary shadow-lg shadow-primary/20 gap-2 hover:-translate-y-0.5 transition-transform rounded-xl"
+          @click="openCreateModal"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 4.5v15m7.5-7.5h-15"
+            />
+          </svg>
+          Create Academic Planning
+        </button>
+      </div>
     </div>
 
     <!-- Search Bar -->
@@ -505,85 +546,79 @@ const viewIntake = (intake: IntakeData) => {
     <!-- Intakes Table -->
     <div
       v-else
-      class="card bg-base-100 border border-base-300 shadow-sm overflow-hidden"
+      class="overflow-x-auto rounded-xl border border-base-200 mt-4 bg-base-100 shadow-sm"
     >
-      <div class="overflow-x-auto">
-        <table class="table w-full">
-          <thead>
-            <tr>
-              <th>Intake</th>
-              <th>Session</th>
-              <th>Rule Set</th>
-              <th>Status</th>
-              <th>Students</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="intake in filteredIntakes"
-              :key="intake.id"
-              class="hover"
-            >
-              <td>
-                <div>
-                  <div class="font-medium">{{ intake.intake_name }}</div>
-                  <div class="text-sm text-base-content/60">
-                    {{ formatIntake(intake.intake_year) }}
-                  </div>
+      <table class="table w-full">
+        <thead class="bg-base-200/50 text-base-content/70 uppercase text-xs tracking-wider">
+          <tr>
+            <th class="pl-6 rounded-tl-lg text-center">Intake</th>
+            <th class="text-center">Session</th>
+            <th class="text-center">Rule Set</th>
+            <th class="text-center">Status</th>
+            <th class="text-center">Students</th>
+            <th class="text-center">Created</th>
+            <th class="pr-6 text-center rounded-tr-lg">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-base-200">
+          <tr
+            v-for="intake in filteredIntakes"
+            :key="intake.id"
+            class="hover:bg-base-200/30 transition-colors"
+          >
+            <td class="pl-6 text-center">
+              <div>
+                <div class="font-medium text-base-content">{{ intake.intake_name }}</div>
+                <div class="text-xs text-base-content/60 font-mono mt-0.5">
+                  {{ formatIntake(intake.intake_year) }}
                 </div>
-              </td>
-              <td>{{ intake.session_name }}</td>
-              <td>{{ intake.intake_type }}</td>
-              <td>
+              </div>
+            </td>
+            <td class="text-base-content/80 text-center">{{ intake.session_name }}</td>
+            <td class="font-mono text-sm text-base-content/80 text-center">{{ intake.intake_type }}</td>
+            <td class="text-center">
+              <span
+                class="badge badge-sm font-medium shadow-sm"
+                :class="getStatusBadgeClass(intake.status)"
+              >
+                {{ intake.status }}
+              </span>
+            </td>
+            <td class="text-center">
+              <div class="flex items-center justify-center gap-1">
+                <span class="text-success font-semibold px-1">{{ intake.successful_plans }}</span>
+                <span class="text-base-content/30">/</span>
+                <span class="text-base-content/60 px-1">{{ intake.total_students }}</span>
                 <span
-                  class="badge badge-sm"
-                  :class="getStatusBadgeClass(intake.status)"
+                  v-if="intake.failed_plans > 0"
+                  class="text-error text-xs font-medium ml-1 bg-error/10 px-1.5 py-0.5 rounded"
                 >
-                  {{ intake.status }}
+                  {{ intake.failed_plans }} failed
                 </span>
-              </td>
-              <td>
-                <div class="flex items-center gap-2">
-                  <span class="text-success">{{
-                    intake.successful_plans
-                  }}</span>
-                  <span class="text-base-content/30">/</span>
-                  <span class="text-base-content/60">{{
-                    intake.total_students
-                  }}</span>
-                  <span
-                    v-if="intake.failed_plans > 0"
-                    class="text-error text-xs"
-                  >
-                    ({{ intake.failed_plans }} failed)
-                  </span>
-                </div>
-              </td>
-              <td class="text-sm text-base-content/60">
-                {{ formatDate(intake.created_at) }}
-              </td>
-              <td>
-                <div class="flex gap-2">
-                  <button
-                    class="btn btn-ghost btn-xs"
-                    @click="viewIntake(intake)"
-                  >
-                    View
-                  </button>
-                  <button
-                    class="btn btn-ghost btn-xs text-error"
-                    @click="openDeleteModal(intake)"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </div>
+            </td>
+            <td class="text-sm text-base-content/50 font-mono text-center">
+              {{ formatDate(intake.created_at) }}
+            </td>
+            <td class="pr-6 text-center">
+              <div class="flex justify-center gap-2">
+                <button
+                  class="btn btn-primary btn-outline border-base-300 hover:border-primary text-base-content/80 hover:text-primary btn-xs shadow-sm transition-colors"
+                  @click="viewIntake(intake)"
+                >
+                  View
+                </button>
+                <button
+                  class="btn btn-error btn-outline border-base-300 hover:border-error text-base-content/60 hover:text-error btn-xs shadow-sm transition-colors"
+                  @click="openDeleteModal(intake)"
+                >
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- Create Modal -->

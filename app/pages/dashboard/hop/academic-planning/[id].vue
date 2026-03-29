@@ -144,6 +144,15 @@ const viewStudentPlan = (student: StudentData) => {
   }
 };
 
+// View student schedule
+const viewStudentSchedule = (student: StudentData) => {
+  if (student.academic_plan_id) {
+    navigateTo(
+      `/dashboard/hop/academic-planning/schedule/${student.academic_plan_id}`
+    );
+  }
+};
+
 // Go back
 const goBack = () => {
   navigateTo("/dashboard/hop/academic-planning");
@@ -151,35 +160,41 @@ const goBack = () => {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-6">
-    <!-- Back Button & Header -->
-    <div class="flex items-start gap-4">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">
-        &larr; Back
-      </button>
-      <div class="flex-1">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">
+  <div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8 relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-start justify-between gap-4 relative z-10">
+      <div class="flex items-start gap-4">
+        <button class="btn btn-ghost btn-sm mt-2 border border-base-200 shadow-sm" @click="goBack">
+          &larr; Back
+        </button>
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
               {{ intakeData?.intake_name || "Loading..." }}
             </h1>
-            <p class="text-sm text-base-content/60">
-              {{ formatIntake(intakeData?.intake_year || "") }} &bull;
-              {{ intakeData?.session_name }}
-            </p>
           </div>
-          <span
-            v-if="intakeData"
-            class="badge"
-            :class="{
-              'badge-warning': intakeData.status === 'draft',
-              'badge-success': intakeData.status === 'generated',
-              'badge-info': intakeData.status === 'finalized',
-            }"
-          >
-            {{ intakeData.status }}
-          </span>
+          <p class="text-base-content/60 font-medium max-w-xl">
+            {{ formatIntake(intakeData?.intake_year || "") }} &bull;
+            {{ intakeData?.session_name }}
+          </p>
         </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span
+          v-if="intakeData"
+          class="badge badge-lg shadow-sm font-bold"
+          :class="{
+            'badge-warning badge-outline border-warning/30 bg-warning/10': intakeData.status === 'draft',
+            'badge-success badge-outline border-success/30 bg-success/10': intakeData.status === 'generated',
+            'badge-info badge-outline border-info/30 bg-info/10': intakeData.status === 'finalized',
+          }"
+        >
+          {{ intakeData.status }}
+        </span>
       </div>
     </div>
 
@@ -274,51 +289,58 @@ const goBack = () => {
           </div>
 
           <!-- Students Table -->
-          <div v-else class="overflow-x-auto">
-            <table class="table table-sm">
-              <thead>
+          <div v-else class="overflow-x-auto rounded-lg border border-base-200 mt-2">
+            <table class="table w-full">
+              <thead class="bg-base-200/50 text-base-content/70 uppercase text-xs tracking-wider">
                 <tr>
-                  <th>Matric No</th>
-                  <th>Student Name</th>
-                  <th>Entry Semester</th>
-                  <th>Credits Transferred</th>
-                  <th>Plan Status</th>
-                  <th>Actions</th>
+                  <th class="pl-6 rounded-tl-lg text-center">Matric No</th>
+                  <th class="text-center">Student Name</th>
+                  <th class="text-center">Entry Semester</th>
+                  <th class="text-center">Credits Transferred</th>
+                  <th class="text-center">Plan Status</th>
+                  <th class="pr-6 text-center rounded-tr-lg">Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody class="divide-y divide-base-200">
                 <tr
                   v-for="student in filteredStudents"
                   :key="student.student_id"
-                  class="hover"
+                  class="hover:bg-base-200/30 transition-colors"
                 >
-                  <td class="font-mono">{{ student.matric_no }}</td>
-                  <td>{{ student.student_name }}</td>
-                  <td>
-                    <span v-if="student.entry_semester" class="badge badge-sm badge-info">
+                  <td class="font-mono text-sm pl-6 text-base-content/70 text-center">{{ student.matric_no }}</td>
+                  <td class="font-medium text-base-content text-center">{{ student.student_name }}</td>
+                  <td class="text-center">
+                    <span v-if="student.entry_semester" class="badge badge-sm badge-info badge-outline bg-info/10 shadow-sm border-info/30">
                       Semester {{ student.entry_semester }}
                     </span>
                     <span v-else class="text-base-content/40">-</span>
                   </td>
-                  <td>{{ student.total_credit_transferred ?? "-" }}</td>
-                  <td>
+                  <td class="font-mono text-base-content/80 text-center">{{ student.total_credit_transferred ?? "-" }}</td>
+                  <td class="text-center">
                     <span
                       v-if="student.academic_plan_id"
-                      class="badge badge-sm"
+                      class="badge badge-sm shadow-sm"
                       :class="getStatusBadgeClass(student.plan_status)"
                     >
                       {{ student.plan_status }}
                     </span>
-                    <span v-else class="text-base-content/40">No plan</span>
+                    <span v-else class="text-base-content/40 text-sm">No plan</span>
                   </td>
-                  <td>
-                    <button
-                      v-if="student.academic_plan_id"
-                      class="btn btn-ghost btn-xs"
-                      @click="viewStudentPlan(student)"
-                    >
-                      View Plan
-                    </button>
+                  <td class="pr-6 text-center">
+                    <div v-if="student.academic_plan_id" class="flex justify-center gap-2">
+                      <button
+                        class="btn btn-primary btn-outline border-base-300 hover:border-primary text-base-content/80 hover:text-primary btn-xs shadow-sm transition-colors"
+                        @click="viewStudentPlan(student)"
+                      >
+                        View Plan
+                      </button>
+                      <button
+                        class="btn btn-secondary btn-outline border-base-300 hover:border-secondary text-base-content/80 hover:text-secondary btn-xs shadow-sm transition-colors"
+                        @click="viewStudentSchedule(student)"
+                      >
+                        View Schedule
+                      </button>
+                    </div>
                     <span v-else class="text-xs text-base-content/40">-</span>
                   </td>
                 </tr>

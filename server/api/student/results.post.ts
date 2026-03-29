@@ -173,36 +173,50 @@ export default defineEventHandler(async (event) => {
       );
     }
 
-    // Prerequisite cascade: remove planned dependents of failed courses
+    // Prerequisite cascade: recursively remove planned dependents of failed courses
     const failedCourseIds = courseResults
       .filter((r) => r.status === "Failed")
       .map((r) => r.course_id);
 
     const cascadedCourses: number[] = [];
     if (failedCourseIds.length > 0) {
-      // Find planned courses that depend on any failed course
-      const [dependentRows] = await connection.query(
-        `SELECT apd.id, apd.course_id, c.course_code
-         FROM academic_plan_details apd
-         JOIN program_courses pc ON apd.course_id = pc.course_id
-         JOIN courses c ON apd.course_id = c.id
-         WHERE apd.academic_plan_id = ?
-           AND apd.status = 'Planned'
-           AND pc.prerequisite_course_id IN (?)
-           AND pc.session_id = (
-             SELECT pc2.session_id FROM program_courses pc2
-             WHERE pc2.course_id = apd.course_id LIMIT 1
-           )`,
-        [plan.id, failedCourseIds],
-      );
+      let currentFailedIds = [...failedCourseIds];
+      const allIdsToDelete: number[] = [];
 
-      const dependents = dependentRows as any[];
-      if (dependents.length > 0) {
+      while (currentFailedIds.length > 0) {
+        // Find planned courses that depend directly on the current batch of failed/removed courses
+        const [dependentRows] = await connection.query(
+          `SELECT apd.id, apd.course_id, c.course_code
+           FROM academic_plan_details apd
+           JOIN program_courses pc ON apd.course_id = pc.course_id
+           JOIN courses c ON apd.course_id = c.id
+           WHERE apd.academic_plan_id = ?
+             AND apd.status = 'Planned'
+             AND pc.prerequisite_course_id IN (?)
+             AND pc.session_id = (
+               SELECT pc2.session_id FROM program_courses pc2
+               WHERE pc2.course_id = apd.course_id LIMIT 1
+             )`,
+          [plan.id, currentFailedIds],
+        );
+
+        const dependents = dependentRows as any[];
+        if (dependents.length === 0) break;
+
         const idsToDelete = dependents.map((d) => d.id);
-        cascadedCourses.push(...dependents.map((d) => d.course_id));
+        const nextFailedIds = dependents.map((d) => d.course_id);
+
+        allIdsToDelete.push(...idsToDelete);
+        cascadedCourses.push(...nextFailedIds);
+
+        // the newly removed courses become the "failed" courses for the next iteration of the cascade
+        currentFailedIds = nextFailedIds;
+      }
+
+      if (allIdsToDelete.length > 0) {
         await connection.query(
           `DELETE FROM academic_plan_details WHERE id IN (?)`,
-          [idsToDelete],
+          [allIdsToDelete],
         );
       }
 

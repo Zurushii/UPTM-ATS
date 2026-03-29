@@ -644,6 +644,16 @@ async function handleImport() {
     importLoading.value = false;
   }
 }
+
+const manualSteps = [
+  { text: 'Create a Session by clicking "New Session" to define a program intake period.' },
+  { text: 'Select a session tab to view its course structure grouped by semester.' },
+  { text: 'Click "Add Course" to assign a course to a specific semester within the session.' },
+  { text: 'For each course, specify the semester, course type, group, and prerequisite.' },
+  { text: 'Use the Clone feature to duplicate an existing session structure for a new intake.' },
+  { text: 'Import program structure from an Excel file using the Import button.', note: 'The Excel file should follow the required format for courses and semesters.' },
+  { text: 'Monitor the credit summary card to ensure total credits match program requirements.' },
+];
 </script>
 
 <template>
@@ -672,9 +682,15 @@ async function handleImport() {
       class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
     >
       <div class="space-y-2">
-        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
-          Program <span class="text-primary">Structure</span>
-        </h1>
+        <div class="flex items-center gap-2">
+          <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+            Program <span class="text-primary">Structure</span>
+          </h1>
+          <UserManualButton
+            title="Program Structure"
+            :steps="manualSteps"
+          />
+        </div>
         <p class="text-base-content/60 font-medium max-w-xl">
           Create overarching sessions and assign core courses to your established semesters.
         </p>

@@ -277,7 +277,7 @@ const scheduledSemesters = computed(() => {
       );
       if (gradedCourses.length > 0) {
         const totalWeighted = gradedCourses.reduce(
-          (sum, c) => sum + gradePointMap[c.grade!] * c.credit_hour,
+          (sum, c) => sum + (gradePointMap[c.grade!] || 0) * c.credit_hour,
           0,
         );
         const totalCredits = gradedCourses.reduce(
@@ -327,7 +327,7 @@ const cgpa = computed(() => {
   let totalCredits = 0;
   for (const c of latestByCourse.values()) {
     if (!c.grade || gradePointMap[c.grade] === undefined) continue;
-    totalWeighted += gradePointMap[c.grade] * c.credit_hour;
+    totalWeighted += (gradePointMap[c.grade] || 0) * c.credit_hour;
     totalCredits += c.credit_hour;
   }
   return (totalWeighted / totalCredits).toFixed(2);
@@ -438,36 +438,44 @@ const goBack = () => {
 </script>
 
 <template>
-  <div class="p-6 w-full space-y-6">
-    <!-- Back Button & Header -->
-    <div class="flex items-start gap-4">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
-      <div class="flex-1">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Student Academic Plan</h1>
-            <p class="text-sm text-base-content/60">
-              View the generated academic plan for this student.
-            </p>
+  <div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8 relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-start justify-between gap-4 relative z-10">
+      <div class="flex items-start gap-4">
+        <button class="btn btn-ghost btn-sm mt-2 border border-base-200 shadow-sm" @click="goBack">
+          &larr; Back
+        </button>
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+              Student Academic <span class="text-primary">Plan</span>
+            </h1>
           </div>
-          <!-- Action Buttons at top right -->
-          <div v-if="planData" class="flex items-center gap-2">
-            <button
-              v-if="planData.plan.status === 'draft'"
-              class="btn btn-success btn-sm"
-              @click="openApproveModal"
-            >
-              ✓ Approve Plan
-            </button>
-            <button
-              v-if="planData.plan.status === 'approved'"
-              class="btn btn-info btn-sm"
-              @click="openCompleteModal"
-            >
-              ✓ Mark Complete
-            </button>
-          </div>
+          <p class="text-base-content/60 font-medium max-w-xl">
+            View the generated academic plan for this student.
+          </p>
         </div>
+      </div>
+      <!-- Action Buttons at top right -->
+      <div v-if="planData" class="flex items-center gap-3">
+        <button
+          v-if="planData.plan.status === 'draft'"
+          class="btn btn-success shadow-sm btn-sm"
+          @click="openApproveModal"
+        >
+          &check; Approve Plan
+        </button>
+        <button
+          v-if="planData.plan.status === 'approved'"
+          class="btn btn-info shadow-sm btn-sm"
+          @click="openCompleteModal"
+        >
+          &check; Mark Complete
+        </button>
       </div>
     </div>
 
@@ -645,31 +653,31 @@ const goBack = () => {
 
           <div
             v-show="!transferredCollapsed"
-            class="overflow-x-auto transition-colors origin-top mt-2"
+            class="overflow-x-auto transition-colors origin-top mt-4 border-t border-success/20 rounded-xl"
           >
-            <table class="table table-sm">
-              <thead>
+            <table class="table w-full">
+              <thead class="bg-success/20 text-success-content/80 uppercase text-xs tracking-wider">
                 <tr>
-                  <th>Course Code</th>
+                  <th class="rounded-tl-lg pl-6">Course Code</th>
                   <th>Course Name</th>
-                  <th class="text-right">Credits</th>
+                  <th class="text-right rounded-tr-lg pr-6">Credits</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody class="divide-y divide-success/10">
                 <tr
                   v-for="course in allTransferredCourses"
                   :key="course.course_id"
-                  class="bg-success/5"
+                  class="hover:bg-success/10 transition-colors bg-success/5"
                 >
-                  <td class="font-mono text-sm">{{ course.course_code }}</td>
-                  <td>{{ course.course_name }}</td>
-                  <td class="text-right">{{ course.credit_hour }}</td>
+                  <td class="font-mono text-sm tracking-wide text-success-content/70 pl-6">{{ course.course_code }}</td>
+                  <td class="font-medium text-success-content">{{ course.course_name }}</td>
+                  <td class="text-right font-mono text-success-content/80 pr-6">{{ course.credit_hour }}</td>
                 </tr>
               </tbody>
-              <tfoot>
-                <tr class="font-medium">
-                  <td colspan="2" class="text-right">Total:</td>
-                  <td class="text-right">
+              <tfoot class="bg-success/10 border-t border-success/20">
+                <tr class="font-bold text-success-content">
+                  <td colspan="2" class="text-right uppercase tracking-wide text-xs">Total:</td>
+                  <td class="text-right font-mono text-lg pr-6">
                     {{ planData.summary.transferred_credits }}
                   </td>
                 </tr>
@@ -748,7 +756,7 @@ const goBack = () => {
                       class="badge badge-sm font-mono"
                       :class="currentSemesterNum !== null && semester.semester < currentSemesterNum ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
                       >
-                      {{ formatSession(getSemesterSession(semester.semester)!) }}
+                      Session: {{ formatSession(getSemesterSession(semester.semester)!) }}
                     </span>
                   </div>
                   <div class="text-xs text-base-content/60 mt-0.5">
@@ -812,28 +820,29 @@ const goBack = () => {
 
             <div
               v-show="!collapsedSemesters.has(semester.semester)"
-              class="overflow-x-auto transition-colors origin-top"
+              class="overflow-x-auto transition-all origin-top rounded-b-lg border-t border-base-200 mt-2"
             >
-              <table class="table table-sm">
-                <thead>
+              <table class="table w-full">
+                <thead class="bg-base-200/50 text-base-content/70 uppercase text-xs tracking-wider">
                   <tr>
-                    <th>Course Code</th>
+                    <th class="w-24 pl-6">Code</th>
                     <th>Course Name</th>
-                    <th class="text-right">Credits</th>
-                    <th class="text-center">Status</th>
+                    <th class="text-right w-20">Credits</th>
+                    <th class="text-center w-28 pr-6">Status</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y divide-base-200">
                   <tr
                     v-for="course in semester.courses"
                     :key="course.course_id"
+                    class="hover:bg-base-200/30 transition-colors"
                   >
-                    <td class="font-mono text-sm">{{ course.course_code }}</td>
-                    <td>{{ course.course_name }}</td>
-                    <td class="text-right">{{ course.credit_hour }}</td>
-                    <td class="text-center">
+                    <td class="font-mono text-sm text-base-content/70 pl-6">{{ course.course_code }}</td>
+                    <td class="font-medium text-base-content">{{ course.course_name }}</td>
+                    <td class="text-right font-mono text-base-content/80">{{ course.credit_hour }}</td>
+                    <td class="text-center pr-6">
                       <span
-                        class="badge badge-xs"
+                        class="badge badge-sm font-medium shadow-sm border border-base-200/50"
                         :class="getCourseStatusClass(course.status)"
                       >
                         {{ course.status }}
@@ -841,10 +850,10 @@ const goBack = () => {
                     </td>
                   </tr>
                 </tbody>
-                <tfoot>
-                  <tr class="font-medium">
-                    <td colspan="3" class="text-right">Total:</td>
-                    <td class="text-right">{{ semester.total_credits }}</td>
+                <tfoot class="bg-base-200/30 border-t border-base-200">
+                  <tr class="font-bold text-base-content">
+                    <td colspan="3" class="text-right uppercase tracking-wide text-xs">Total Credits:</td>
+                    <td class="text-center font-mono text-lg pr-6">{{ semester.total_credits }}</td>
                   </tr>
                 </tfoot>
               </table>

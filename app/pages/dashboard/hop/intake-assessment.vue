@@ -367,6 +367,15 @@ const filteredProcessedStudents = computed(() => {
 
   return result;
 });
+
+const manualSteps = [
+  { text: 'Step 1: Configure the assessment by selecting the intake code and semester entry rule set.' },
+  { text: 'Step 2: Upload the Excel file containing student credit transfer records.', note: 'The file should include matric numbers and transferred course details.' },
+  { text: 'Step 3: Click "Process" to run the assessment. The system will match credits and determine each student\'s entry semester.' },
+  { text: 'Step 4: Review the results showing successful and failed records.' },
+  { text: 'Export the results to Excel for record-keeping or further analysis.' },
+  { text: 'Ensure the current session is configured before processing.', note: 'Set the current session in the Settings (Dashboard) page if not already done.' },
+];
 </script>
 
 <template>
@@ -386,13 +395,26 @@ const filteredProcessedStudents = computed(() => {
       </div>
     </div>
     <!-- Page Header -->
-    <div class="space-y-1">
-      <h1 class="text-2xl font-semibold">Intake Assessment</h1>
-      <p class="text-sm text-base-content/60">
-        Process credit transfer data and determine entry semesters for students
-        in a specific intake.
-      </p>
+    <div
+      class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
+    >
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+            Intake <span class="text-primary">Assessment</span>
+          </h1>
+          <UserManualButton
+            title="Intake Assessment"
+            :steps="manualSteps"
+          />
+        </div>
+        <p class="text-base-content/60 font-medium max-w-xl">
+          Process credit transfer data and determine entry semesters for students
+          in a specific intake.
+        </p>
+      </div>
     </div>
+
 
     <!-- Progress Steps -->
     <div class="w-full max-w-4xl mx-auto">
@@ -496,7 +518,7 @@ const filteredProcessedStudents = computed(() => {
             </svg>
             <div>
               <span class="font-semibold">Current Session:</span>
-              {{ formatIntake(sessionData.current_session.intake_period) }} ·
+              {{ formatIntake(sessionData.current_session.active_intake_period) }} ·
               {{ sessionLabel }}
             </div>
           </div>

@@ -1043,26 +1043,34 @@ const getSemesterColumnClasses = (sem: number) => {
 
 <template>
   <div class="p-4 w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
     <!-- Header -->
-    <div class="flex items-start gap-4 mb-3 flex-shrink-0">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
-      <div class="flex-1">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Schedule Semester</h1>
-            <p v-if="planData" class="text-sm text-base-content/60">
-              {{ planData.student.name }} ({{ planData.student.matric_no }})
-            </p>
-          </div>
+    <div class="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-3 flex-shrink-0 relative z-10">
+      <div class="flex items-start gap-4">
+        <button class="btn btn-ghost btn-sm mt-2 border border-base-200 shadow-sm" @click="goBack">
+          &larr; Back
+        </button>
+        <div class="space-y-2">
           <div class="flex items-center gap-2">
-            <button class="btn btn-outline btn-sm" @click="openConfigModal">⚙️ Configure</button>
-            <button v-if="courseAssignments.size > 0" class="btn btn-ghost btn-sm text-error" @click="clearAllCourses">🗑️ Clear</button>
-            <button class="btn btn-primary" :disabled="saveLoading" @click="saveChanges">
-              <span v-if="saveLoading" class="loading loading-spinner loading-xs"></span>
-              💾 Save
-            </button>
+            <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+              Schedule <span class="text-primary">Semester</span>
+            </h1>
           </div>
+          <p v-if="planData" class="text-base-content/60 font-medium max-w-xl">
+            {{ planData.student.name }} ({{ planData.student.matric_no }})
+          </p>
         </div>
+      </div>
+      <div class="flex items-center gap-2 mt-2 md:mt-0">
+        <button class="btn btn-outline border-base-300 shadow-sm hover:border-primary/50 btn-sm transition-colors" @click="openConfigModal">⚙️ Configure</button>
+        <button v-if="courseAssignments.size > 0" class="btn btn-ghost btn-sm text-error border border-error/20 hover:bg-error/10" @click="clearAllCourses">🗑️ Clear</button>
+        <button class="btn btn-primary shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-transform btn-sm" :disabled="saveLoading" @click="saveChanges">
+          <span v-if="saveLoading" class="loading loading-spinner loading-xs"></span>
+          💾 Save
+        </button>
       </div>
     </div>
 

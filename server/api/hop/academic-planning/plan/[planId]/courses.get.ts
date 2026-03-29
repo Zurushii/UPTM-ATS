@@ -174,13 +174,21 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // If no matching rule found AND student starts at semester 1,
-  // infer semester types from program structure credits.
-  // Students with entry_semester > 1 must rely on HOP-configured rules.
-  if (semesterRules.length === 0 && program && startSemester === 1) {
-    const shortMin = program.short_sem_min_credit ?? 6;
-    const shortMax = program.short_sem_max_credit ?? 10;
+  // ── INTAKE-BASED DYNAMIC SEMESTER CYCLES ──
+  const rawIntake = intakeType ? intakeType.toLowerCase() : "";
+  let baseCyclePattern: ("L" | "S")[] = ["L", "L", "S"]; // Default
 
+  if (rawIntake.includes("may")) {
+    baseCyclePattern = ["S", "L", "L"];
+  } else if (rawIntake.includes("aug")) {
+    baseCyclePattern = ["L", "L", "S"];
+  } else if (rawIntake.includes("dec")) {
+    baseCyclePattern = ["L", "S", "L"];
+  }
+
+  // If no matching rule found AND student starts at semester 1,
+  // generate default semester sequence using the intake's physical cycle.
+  if (semesterRules.length === 0 && program && startSemester === 1) {
     // Detect which semesters contain Industrial Training courses
     const [liSemRows] = await pool.query(
       `SELECT DISTINCT pc.semester
@@ -215,12 +223,11 @@ export default defineEventHandler(async (event) => {
     for (const row of semCredits as any[]) {
       const credits = Number(row.total_credits);
       const isLi = liSemesters.has(row.semester);
-      // LI semesters are always Long type; otherwise infer from credits
+      
+      // LI semesters are always Long type; otherwise map directly from the Intake's cycle
       const semType = isLi
         ? "L"
-        : credits >= shortMin && credits <= shortMax
-          ? "S"
-          : "L";
+        : baseCyclePattern[(row.semester - 1) % 3];
 
       semesterRules.push({
         semester_number: row.semester,
@@ -263,26 +270,13 @@ export default defineEventHandler(async (event) => {
       : 12;
 
   // Auto-extend semester rules if retake courses exist beyond max program semester
-  // Detect the program's cycle pattern (L/L/S or S/L/L) from existing non-LI rules
+  // Extend using the intake's physical pattern
   if ((failedRows as any[]).length > 0) {
     const lastSem = maxProgramSemester;
-    // Detect cycle: count L vs S at each modulo-3 position from non-LI semesters
-    const posLong = [0, 0, 0];
-    const posTotal = [0, 0, 0];
-    for (const r of semesterRules) {
-      if (!r.is_li) {
-        const pos = (r.semester_number - 1) % 3;
-        posTotal[pos]++;
-        if (r.semester_type === "L") posLong[pos]++;
-      }
-    }
-    const cycle = posTotal.map((total, i) =>
-      total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
-    );
     for (let i = 1; i <= 3; i++) {
       const semNum = lastSem + i;
       if (!semesterRules.find((r: any) => r.semester_number === semNum)) {
-        const semType = cycle[(semNum - 1) % 3];
+        const semType = baseCyclePattern[(semNum - startSemester) % 3];
         semesterRules.push({
           semester_number: semNum,
           semester_type: semType,
@@ -333,25 +327,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Detect cycle pattern from existing non-LI rules for new semester type inference
-  const posLongExt = [0, 0, 0];
-  const posTotalExt = [0, 0, 0];
-  for (const r of semesterRules) {
-    if (!r.is_li) {
-      const pos = (r.semester_number - 1) % 3;
-      posTotalExt[pos]++;
-      if (r.semester_type === "L") posLongExt[pos]++;
-    }
-  }
-  const cycleExt = posTotalExt.map((total, i) =>
-    total === 0 ? "L" : posLongExt[i] >= total / 2 ? "L" : "S",
-  );
-
+  // Apply the intake's physical cycle to any newly discovered trailing semesters
   for (const row of planDetailSems as any[]) {
     const semNum = Number(row.semester);
     if (!existingRuleSems.has(semNum) && semNum >= startSemester) {
       const hasIt = row.has_it === 1;
-      const semType = hasIt ? "L" : (cycleExt[(semNum - 1) % 3] as "L" | "S");
+      const semType = hasIt ? "L" : baseCyclePattern[(semNum - startSemester) % 3];
       semesterRules.push({
         semester_number: semNum,
         semester_type: semType,

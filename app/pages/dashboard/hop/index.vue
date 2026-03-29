@@ -205,6 +205,46 @@ const approvedPlans = computed(() => {
   return allStudents.value.filter((s) => s.academic_plan_status === "approved")
     .length;
 });
+
+// Workflow manual steps
+const workflowManuals = {
+  semesterRules: [
+    { text: "Navigate to the Semester Rules page." },
+    { text: "Define credit transfer ranges and their corresponding entry semesters.", note: "e.g. 0\u201320 credits \u2192 Semester 1, 21\u201340 credits \u2192 Semester 2" },
+    { text: "Add or edit rules by specifying the minimum and maximum credit hours." },
+    { text: "Save your changes. These rules are used during Intake Assessment to auto-calculate each student's starting semester." },
+  ],
+  programStructure: [
+    { text: "Navigate to the Program Structure page." },
+    { text: "Create a new session (e.g. 'Session 2024') or clone an existing one." },
+    { text: "Select a session tab to view its semester structure." },
+    { text: 'Add courses to each semester by clicking "Add Course".', note: "You can also create new courses or import from Excel." },
+    { text: "Assign course types, prerequisites, and groups for each course." },
+    { text: "Verify total credits match the program's required credits." },
+  ],
+  activeSession: [
+    { text: "Scroll to the Global Academic Session card above." },
+    { text: "Enter the active intake period in MMYY format.", note: "e.g. 0525 for May 2025" },
+    { text: "Select the semester type (Long or Short)." },
+    { text: 'Click "Update" to save. This sets the current session globally across the system.' },
+    { text: "View the Cohort Semester Progress to see how each intake is tracking.", note: "Semesters are automatically calculated from the active session." },
+  ],
+  intakeAssessment: [
+    { text: "Navigate to the Intake Assessment page." },
+    { text: "Select a session and upload the student Excel sheet.", note: "The sheet should contain student matric numbers and credit transfer data." },
+    { text: "The system will automatically match students and process credit transfers." },
+    { text: "Review the assessment results \u2014 students will be assigned entry semesters based on semester rules." },
+    { text: "Finalize the assessment to lock in the results." },
+  ],
+  academicPlanning: [
+    { text: "Navigate to the Academic Planning page." },
+    { text: "Select an intake to view its students and their plan statuses." },
+    { text: 'Click "Generate Plans" to auto-generate academic plans for all students in the intake.', note: "Plans are generated based on the program structure, credit transfers, and semester rules." },
+    { text: 'Review each student\'s plan by clicking "View Plan" or edit via "View Schedule".' },
+    { text: "Approve plans when they look correct. Students can then see their approved plans." },
+    { text: 'Use "Re-schedule" to revert an approved plan back to draft if changes are needed.' },
+  ],
+};
 </script>
 
 <template>
@@ -415,7 +455,13 @@ const approvedPlans = computed(() => {
               <div class="card-body p-5">
                 <div class="flex items-center justify-between mb-3">
                   <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">1</div>
-                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                  <div class="flex items-center gap-1">
+                    <UserManualButton
+                      title="Semester Rules"
+                      :steps="workflowManuals.semesterRules"
+                    />
+                    <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                  </div>
                 </div>
                 <h3 class="font-bold text-base-content mb-1">Semester Rules</h3>
                 <p class="text-xs text-base-content/60 leading-relaxed max-w-[200px] mb-4 flex-grow">Define credit transfer rules for entry semester calculations.</p>
@@ -429,7 +475,13 @@ const approvedPlans = computed(() => {
               <div class="card-body p-5">
                 <div class="flex items-center justify-between mb-3">
                   <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">2</div>
-                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                  <div class="flex items-center gap-1">
+                    <UserManualButton
+                      title="Program Structure"
+                      :steps="workflowManuals.programStructure"
+                    />
+                    <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Setup</span>
+                  </div>
                 </div>
                 <h3 class="font-bold text-base-content mb-1">Program Structure</h3>
                 <p class="text-xs text-base-content/60 leading-relaxed max-w-[200px] mb-4 flex-grow">Create overarching sessions and assign core courses.</p>
@@ -443,7 +495,13 @@ const approvedPlans = computed(() => {
               <div class="card-body p-5">
                 <div class="flex items-center justify-between mb-3">
                   <div class="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center text-secondary font-bold text-lg">3</div>
-                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                  <div class="flex items-center gap-1">
+                    <UserManualButton
+                      title="Active Session"
+                      :steps="workflowManuals.activeSession"
+                    />
+                    <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                  </div>
                 </div>
                 <h3 class="font-bold text-base-content mb-1">Active Session</h3>
                 <p class="text-xs text-base-content/60 leading-relaxed mb-4 flex-grow">Assign the current active period globally.</p>
@@ -458,7 +516,13 @@ const approvedPlans = computed(() => {
               <div class="card-body p-5">
                 <div class="flex items-center justify-between mb-3">
                   <div class="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent font-bold text-lg">4</div>
-                  <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                  <div class="flex items-center gap-1">
+                    <UserManualButton
+                      title="Intake Assessment"
+                      :steps="workflowManuals.intakeAssessment"
+                    />
+                    <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
+                  </div>
                 </div>
                 <h3 class="font-bold text-base-content mb-1">Intake Assessment</h3>
                 <p class="text-xs text-base-content/60 leading-relaxed mb-4 flex-grow">Inject student sheets & process credit transfers automatically.</p>
@@ -476,6 +540,10 @@ const approvedPlans = computed(() => {
                 <div>
                   <div class="flex items-center gap-2 mb-2">
                     <span class="inline-flex w-7 h-7 rounded bg-white text-accent items-center justify-center font-bold text-sm shadow-sm">5</span>
+                    <UserManualButton
+                      title="Academic Planning"
+                      :steps="workflowManuals.academicPlanning"
+                    />
                     <span class="badge border-white/30 bg-white/10 text-white badge-sm text-[10px] uppercase font-bold tracking-wider backdrop-blur-md">Final Phase</span>
                   </div>
                   <h3 class="font-extrabold text-2xl mb-1">Academic Planning</h3>

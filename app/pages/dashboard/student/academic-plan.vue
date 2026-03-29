@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { authClient } from "@@/utils/auth-client";
+import ExcelJS from "exceljs";
 
 definePageMeta({ layout: "dashboard" });
 
@@ -230,6 +231,90 @@ const toggleSemester = (semester: number) => {
 const goToSchedule = async () => {
   if (data.value?.plan) {
     await navigateTo(`/dashboard/student/schedule/${data.value.plan.id}`);
+  }
+};
+
+// Export to Excel function
+const exportToExcelLoading = ref<number | null>(null);
+
+const exportSemesterToExcel = async (sem: (typeof scheduledSemesters.value)[number]) => {
+  if (exportToExcelLoading.value !== null) return;
+  exportToExcelLoading.value = sem.semester;
+  
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "UTPM ATS";
+    workbook.created = new Date();
+    
+    const safeFormatString = sem.semester ? `Semester_${sem.semester}` : 'Semester_Export';
+    const sheet = workbook.addWorksheet(safeFormatString);
+    
+    sheet.addRow([`Academic Plan - ${formatSemester(sem.semester)}`]);
+    sheet.getRow(1).font = { bold: true, size: 14 };
+    
+    sheet.addRow([`Student: ${profile.value?.full_name || 'N/A'}`]);
+    sheet.addRow([`Matric No: ${profile.value?.matric_no || 'N/A'}`]);
+    sheet.addRow([`Program: ${profile.value?.program_code || 'N/A'}`]);
+    sheet.addRow([]);
+    
+    const headers = ["Course Code", "Course Name", "Credits", "Status", "Grade"];
+    sheet.addRow(headers);
+    const headerRow = sheet.lastRow!;
+    headerRow.font = { bold: true };
+    headerRow.eachCell(cell => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFEFEFEF' }
+      };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    });
+    
+    for (const course of sem.courses) {
+      sheet.addRow([
+        course.course_code,
+        course.course_name,
+        course.credit_hour,
+        course.status,
+        course.grade || "-"
+      ]);
+    }
+    
+    sheet.addRow([]);
+    sheet.addRow(["", "Total Credits:", sem.total_credits]);
+    sheet.lastRow!.font = { bold: true };
+    
+    if (sem.gpa) {
+      sheet.addRow(["", "GPA:", sem.gpa]);
+      sheet.lastRow!.font = { bold: true };
+    }
+    
+    sheet.getColumn(1).width = 15;
+    sheet.getColumn(2).width = 45;
+    sheet.getColumn(3).width = 10;
+    sheet.getColumn(4).width = 15;
+    sheet.getColumn(5).width = 10;
+    
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Academic_Plan_${safeFormatString}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Failed to export Excel", error);
+    alert("Failed to export Excel document.");
+  } finally {
+    exportToExcelLoading.value = null;
   }
 };
 
@@ -927,7 +1012,7 @@ const revokeResult = async () => {
                     v-else-if="getSemesterSession(sem.semester)"
                     class="badge badge-sm font-mono"
                     :class="currentSemester !== null && sem.semester < currentSemester ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
-                  >{{ formatSession(getSemesterSession(sem.semester)!) }}</span>
+                  >Session: {{ formatSession(getSemesterSession(sem.semester)!) }}</span>
                   <span
                     v-if="sem.semester === currentSemester && !isCurrentSession(sem.semester)"
                     class="badge badge-primary badge-sm"
@@ -1079,6 +1164,15 @@ const revokeResult = async () => {
                 <template v-else> No result slip uploaded </template>
               </div>
               <div class="flex items-center gap-2">
+                <button
+                  class="btn btn-ghost btn-xs text-primary"
+                  @click.stop="exportSemesterToExcel(sem)"
+                  :disabled="exportToExcelLoading === sem.semester"
+                >
+                  <span v-if="exportToExcelLoading === sem.semester" class="loading loading-spinner w-3 h-3"></span>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                  Export to Excel
+                </button>
                 <button
                   v-if="sem.has_result"
                   class="btn btn-error btn-outline btn-xs"

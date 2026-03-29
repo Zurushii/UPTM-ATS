@@ -167,13 +167,21 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── INTAKE-BASED DYNAMIC SEMESTER CYCLES (mirrors generate.post.ts & HOP courses.get.ts) ──
+  const rawIntake = intakeType ? intakeType.toLowerCase() : "";
+  let baseCyclePattern: ("L" | "S")[] = ["L", "L", "S"]; // Default (August)
+  if (rawIntake.includes("may")) {
+    baseCyclePattern = ["S", "L", "L"];
+  } else if (rawIntake.includes("aug")) {
+    baseCyclePattern = ["L", "L", "S"];
+  } else if (rawIntake.includes("dec")) {
+    baseCyclePattern = ["L", "S", "L"];
+  }
+
   // If no matching rule found AND student starts at semester 1,
-  // infer semester types from program structure credits.
+  // infer semester types from the intake's physical cycle (same approach as HOP API).
   // Students with entry_semester > 1 must rely on HOP-configured rules.
   if (semesterRules.length === 0 && program && startSemester === 1) {
-    const shortMin = program.short_sem_min_credit ?? 6;
-    const shortMax = program.short_sem_max_credit ?? 10;
-
     // Detect which semesters contain Industrial Training courses
     const [liSemRows] = await pool.query(
       `SELECT DISTINCT pc.semester
@@ -208,11 +216,8 @@ export default defineEventHandler(async (event) => {
     for (const row of semCredits as any[]) {
       const credits = Number(row.total_credits);
       const isLi = liSemesters.has(row.semester);
-      const semType = isLi
-        ? "L"
-        : credits >= shortMin && credits <= shortMax
-          ? "S"
-          : "L";
+      // FIX Bug #3: use intake cycle pattern, not a credit-range heuristic
+      const semType = isLi ? "L" : baseCyclePattern[(row.semester - 1) % 3];
 
       semesterRules.push({
         semester_number: row.semester,
@@ -255,27 +260,15 @@ export default defineEventHandler(async (event) => {
       : 12;
 
   // Auto-extend semester rules if retake courses exist beyond max program semester
-  // Detect the program's cycle pattern (L/L/S or S/L/L) from existing non-LI rules
+  // FIX Bug #2: use intake-derived baseCyclePattern with relative offset (startSemester),
+  // matching the same formula used in generate.post.ts and HOP courses.get.ts.
   if ((failedRows as any[]).length > 0) {
     const lastSem = maxProgramSemester;
-    // Detect cycle: count L vs S at each modulo-3 position from non-LI semesters
-    const posLong = [0, 0, 0];
-    const posTotal = [0, 0, 0];
-    for (const r of semesterRules) {
-      if (!r.is_li) {
-        const pos = (r.semester_number - 1) % 3;
-        posTotal[pos]++;
-        if (r.semester_type === "L") posLong[pos]++;
-      }
-    }
-    const cycle = posTotal.map((total, i) =>
-      total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
-    );
     // Add 3 extra semesters for retake scheduling room
     for (let i = 1; i <= 3; i++) {
       const semNum = lastSem + i;
       if (!semesterRules.find((r: any) => r.semester_number === semNum)) {
-        const semType = cycle[(semNum - 1) % 3];
+        const semType = baseCyclePattern[(semNum - startSemester) % 3];
         semesterRules.push({
           semester_number: semNum,
           semester_type: semType,

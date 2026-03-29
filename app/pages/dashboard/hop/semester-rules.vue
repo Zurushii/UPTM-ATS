@@ -568,6 +568,15 @@ const closeImportModal = () => {
     importFileInput.value.value = "";
   }
 };
+
+const manualSteps = [
+  { text: 'Click "Add New Rule" to create a semester entry rule for an intake type.' },
+  { text: 'Specify the intake type (e.g., Aug, May, Dec), credit transfer threshold, and entry semester.' },
+  { text: 'Use "Credit Plan" to define how many credits each semester should carry.', note: 'Credit plans determine the workload distribution across semesters.' },
+  { text: 'Adjust Credit Hour Limits at the top to set min/max credits for Long and Short semesters.' },
+  { text: 'Use the Import feature to bulk-upload rules from an Excel file.' },
+  { text: 'Rules are grouped by intake type. Click the chevron to collapse/expand each group.' },
+];
 </script>
 
 <template>
@@ -596,9 +605,15 @@ const closeImportModal = () => {
       class="flex flex-col md:flex-row md:items-end justify-between gap-4 relative z-10"
     >
       <div class="space-y-2">
-        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
-          Semester Entry <span class="text-primary">Rules</span>
-        </h1>
+        <div class="flex items-center gap-2">
+          <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+            Semester Entry <span class="text-primary">Rules</span>
+          </h1>
+          <UserManualButton
+            title="Semester Entry Rules"
+            :steps="manualSteps"
+          />
+        </div>
         <p class="text-base-content/60 font-medium max-w-xl">
           Define how transferred credits determine a student's starting semester and manage overarching program limits.
         </p>

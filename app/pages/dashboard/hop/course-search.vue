@@ -128,6 +128,92 @@ const closeModal = () => {
   selectedCourseId.value = null;
 };
 
+const exportToPDF = () => {
+  if (!courseDetail.value) return;
+  
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert("Please allow popups to export to PDF.");
+    return;
+  }
+
+  const course = courseDetail.value.course;
+  const students = courseDetail.value.students;
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Student List - ${course.course_code}</title>
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #333; }
+          h1, h2, h3 { margin: 0 0 10px 0; color: #111; }
+          .header { border-bottom: 2px solid #eaeaea; padding-bottom: 20px; margin-bottom: 30px; }
+          .meta-info { display: flex; gap: 20px; font-size: 14px; color: #555; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+          th, td { border: 1px solid #eaeaea; padding: 12px; text-align: left; }
+          th { background-color: #f9f9f9; font-weight: 600; }
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          @media print {
+            body { padding: 0; }
+            button { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h2>${course.course_code} - ${course.course_name}</h2>
+          <div class="meta-info">
+            <span><strong>Credit Hours:</strong> ${course.credit_hour}</span>
+            <span><strong>Total Enrolled:</strong> ${courseDetail.value.total_students}</span>
+          </div>
+        </div>
+        
+        <h3>Enrolled Students (${students.length})</h3>
+        
+        ${students.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th class="text-center w-12">#</th>
+                <th>Student Name</th>
+                <th class="text-center">Matric No</th>
+                <th class="text-center">Semester</th>
+                <th class="text-right">Intake</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${students.map((student, idx) => `
+                <tr>
+                  <td class="text-center">${idx + 1}</td>
+                  <td>${student.student_name || "—"}</td>
+                  <td class="text-center">${student.matric_no}</td>
+                  <td class="text-center">${student.planned_semester}</td>
+                  <td class="text-right">${formatIntake(student.intake_year)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : '<p>No students enrolled.</p>'}
+        
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 250);
+          }
+        <\/script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+};
+
 // Group courses by semester for display
 const groupedCourses = computed(() => {
   if (!data.value?.courses) return {};
@@ -301,11 +387,11 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
                 {{ courseDetail.course.course_name }}
               </h2>
 
-              <div v-if="courseDetail.sessions.length > 0" class="mt-6 flex flex-wrap gap-2 items-center">
-                <span class="text-xs font-bold text-base-content/40 uppercase tracking-wider mr-2">Sessions</span>
-                <div v-for="s in courseDetail.sessions" :key="s.session_id" class="badge badge-ghost font-medium border-base-300 shadow-sm bg-base-100">
-                  {{ s.session_name }} (Sem {{ s.semester }})
-                </div>
+              <div class="mt-6 border-t border-base-200/60 pt-6">
+                <button @click="exportToPDF" class="btn btn-primary btn-sm gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                  Export to PDF
+                </button>
               </div>
             </div>
           </div>
