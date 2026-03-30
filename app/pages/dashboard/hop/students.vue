@@ -293,7 +293,7 @@ watch(
                     <span v-else class="text-base-content/40 italic text-xs font-medium">Pending</span>
                   </td>
                   <td class="text-center">
-                    <span class="badge badge-sm font-bold uppercase tracking-wider text-[10px]" :class="getStatusBadge(student.academic_plan_status)">
+                    <span class="badge badge-sm font-bold capitalize tracking-wider text-[10px]" :class="getStatusBadge(student.academic_plan_status)">
                       {{ student.academic_plan_status === "none" ? "No Plan" : student.academic_plan_status }}
                     </span>
                   </td>

@@ -330,7 +330,7 @@ const workflowManuals = {
                             </td>
                             <td class="font-bold text-xs py-3 truncate max-w-[120px]">{{ intake.intake_name }}</td>
                             <td class="text-center py-3">
-                              <span class="badge badge-xs font-bold uppercase tracking-wider text-[9px]" :class="intake.status === 'Active' ? 'badge-success badge-outline border-success/30' : 'badge-ghost'">{{ intake.status }}</span>
+                              <span class="badge badge-xs font-bold capitalize tracking-wider text-[9px]" :class="intake.status === 'completed' ? 'badge-success badge-outline border-success/30' : 'badge-ghost'">{{ intake.status }}</span>
                             </td>
                             <td class="text-right pr-4 py-3">
                               <span v-if="intake.current_semester > 0" class="inline-flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary font-bold text-xs">

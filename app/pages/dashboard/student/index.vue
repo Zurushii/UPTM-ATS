@@ -224,7 +224,7 @@ const creditProgress = computed(() => {
                 <div class="grid grid-cols-2 gap-4">
                      <div class="bg-base-200/50 p-4 rounded-xl text-center hover:bg-base-200 transition-colors">
                         <div class="text-xs uppercase tracking-wide text-base-content/60 mb-1">Status</div>
-                         <div :class="['badge badge-md uppercase font-bold',
+                         <div :class="['badge badge-md capitalize font-bold',
                             academicPlan.plan.status === 'approved' ? 'badge-success' :
                             academicPlan.plan.status === 'completed' ? 'badge-info' : 'badge-warning']">
                             {{ academicPlan.plan.status }}

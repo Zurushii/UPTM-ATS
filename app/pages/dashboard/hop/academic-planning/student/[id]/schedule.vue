@@ -630,8 +630,7 @@ const totalAssignedCredits = computed(() => {
   for (const [courseId] of courseAssignments.value) {
     const course =
       plannedCourses.value.find((c) => c.course_id === courseId) ||
-      passedCourses.value.find((c) => c.course_id === courseId) ||
-      coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
+      passedCourses.value.find((c) => c.course_id === courseId);
     if (course) total += course.credit_hour;
   }
   return total;

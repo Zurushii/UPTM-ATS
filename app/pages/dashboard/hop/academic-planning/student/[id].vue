@@ -193,8 +193,34 @@ const getStatusBadgeClass = (status: string) => {
   }
 };
 
+// Retake course IDs: courses with status "Planned" that previously had "Failed"
+const retakeCourseIds = computed(() => {
+  if (!planData.value) return new Set<number>();
+  const failedIds = new Set<number>();
+  const retakeIds = new Set<number>();
+  // Walk semesters in order to find courses that failed then appear again as Planned
+  const sorted = [...planData.value.semesters].sort((a, b) => a.semester - b.semester);
+  for (const sem of sorted) {
+    for (const course of sem.courses) {
+      if (course.status === "Failed") {
+        failedIds.add(course.course_id);
+      } else if (course.status === "Passed") {
+        // If they passed, no longer a retake
+        failedIds.delete(course.course_id);
+        retakeIds.delete(course.course_id);
+      } else if (course.status === "Planned" && failedIds.has(course.course_id)) {
+        retakeIds.add(course.course_id);
+      }
+    }
+  }
+  return retakeIds;
+});
+
 // Get status badge class for course status
-const getCourseStatusClass = (status: string) => {
+const getCourseStatusClass = (status: string, courseId?: number) => {
+  if (status === "Planned" && courseId !== undefined && retakeCourseIds.value.has(courseId)) {
+    return "badge-warning";
+  }
   switch (status) {
     case "Transferred":
       return "badge-success";
@@ -511,7 +537,7 @@ const goBack = () => {
               </p>
             </div>
             <span
-              class="badge"
+              class="badge capitalize"
               :class="getStatusBadgeClass(planData.plan.status)"
             >
               {{ planData.plan.status }}
@@ -618,6 +644,10 @@ const goBack = () => {
         <div class="flex items-center gap-2">
           <span class="badge badge-primary badge-sm">Planned</span>
           <span class="text-base-content/60">To be taken</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="badge badge-warning badge-sm">Retake</span>
+          <span class="text-base-content/60">Re-enrolling after fail</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="badge badge-success badge-sm">Passed</span>
@@ -856,9 +886,9 @@ const goBack = () => {
                     <td class="text-center pr-6">
                       <span
                         class="badge badge-sm font-medium shadow-sm border border-base-200/50"
-                        :class="getCourseStatusClass(course.status)"
+                        :class="getCourseStatusClass(course.status, course.course_id)"
                       >
-                        {{ course.status }}
+                        {{ retakeCourseIds.has(course.course_id) && course.status === 'Planned' ? 'Retake' : course.status }}
                       </span>
                     </td>
                   </tr>

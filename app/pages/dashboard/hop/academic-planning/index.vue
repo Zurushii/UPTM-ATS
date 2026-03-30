@@ -578,7 +578,7 @@ const manualSteps = [
             <td class="font-mono text-sm text-base-content/80 text-center">{{ intake.intake_type }}</td>
             <td class="text-center">
               <span
-                class="badge badge-sm font-medium shadow-sm"
+                class="badge badge-sm font-medium shadow-sm capitalize"
                 :class="getStatusBadgeClass(intake.status)"
               >
                 {{ intake.status }}
@@ -603,13 +603,13 @@ const manualSteps = [
             <td class="pr-6 text-center">
               <div class="flex justify-center gap-2">
                 <button
-                  class="btn btn-primary btn-outline border-base-300 hover:border-primary text-base-content/80 hover:text-primary btn-xs shadow-sm transition-colors"
+                  class="btn btn-xs bg-primary/10 text-primary hover:bg-primary hover:text-white border-0 shadow-sm transition-all rounded-lg"
                   @click="viewIntake(intake)"
                 >
                   View
                 </button>
                 <button
-                  class="btn btn-error btn-outline border-base-300 hover:border-error text-base-content/60 hover:text-error btn-xs shadow-sm transition-colors"
+                  class="btn btn-xs bg-error/10 text-error hover:bg-error hover:text-white border-0 shadow-sm transition-all rounded-lg"
                   @click="openDeleteModal(intake)"
                 >
                   Delete

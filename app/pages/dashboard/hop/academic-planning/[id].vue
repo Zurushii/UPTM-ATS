@@ -463,17 +463,17 @@ const regenGenerate = async () => {
           </svg>
           Mark as Completed
         </button>
-        <span
-          v-if="intakeData"
-          class="badge badge-lg shadow-sm font-bold"
-          :class="{
-            'badge-warning badge-outline border-warning/30 bg-warning/10': intakeData.status === 'draft',
-            'badge-success badge-outline border-success/30 bg-success/10': intakeData.status === 'generated',
-            'badge-primary badge-outline border-primary/30 bg-primary/10 text-primary': intakeData.status === 'completed',
-          }"
-        >
-          {{ intakeData.status }}
-        </span>
+          <span
+            v-if="intakeData"
+            class="badge badge-lg shadow-sm font-bold capitalize"
+            :class="{
+              'badge-warning badge-outline border-warning/30 bg-warning/10': intakeData.status === 'draft',
+              'badge-success badge-outline border-success/30 bg-success/10': intakeData.status === 'generated',
+              'badge-primary badge-outline border-primary/30 bg-primary/10 text-primary': intakeData.status === 'completed',
+            }"
+          >
+            {{ intakeData.status }}
+          </span>
       </div>
     </div>
 
@@ -498,11 +498,11 @@ const regenGenerate = async () => {
           <div class="stat-value text-2xl" :class="stats.noPlan > 0 ? 'text-error' : 'text-base-content/30'">{{ stats.noPlan }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
-          <div class="stat-title">Draft Planned</div>
+          <div class="stat-title">Draft</div>
           <div class="stat-value text-2xl text-warning">{{ stats.draftPlanned }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
-          <div class="stat-title">Approve Planned</div>
+          <div class="stat-title">Approved</div>
           <div class="stat-value text-2xl text-info">{{ stats.approved }}</div>
         </div>
       </div>
@@ -568,8 +568,8 @@ const regenGenerate = async () => {
               >
                 <option value="all">All Status</option>
                 <option value="no_plan">No Plan</option>
-                <option value="draft">Draft Planned</option>
-                <option value="approved">Approve Planned</option>
+                <option value="draft">Draft</option>
+                <option value="approved">Approved</option>
                 <option value="completed">Completed</option>
               </select>
             </div>
@@ -614,7 +614,7 @@ const regenGenerate = async () => {
                   <td class="text-center">
                     <span
                       v-if="student.academic_plan_id"
-                      class="badge badge-sm shadow-sm"
+                      class="badge badge-sm shadow-sm capitalize"
                       :class="getStatusBadgeClass(student.plan_status)"
                     >
                       {{ student.plan_status }}
@@ -624,13 +624,13 @@ const regenGenerate = async () => {
                   <td class="pr-6 text-center">
                     <div v-if="student.academic_plan_id" class="flex justify-center gap-2">
                       <button
-                        class="btn btn-primary btn-outline border-base-300 hover:border-primary text-base-content/80 hover:text-primary btn-xs shadow-sm transition-colors"
+                        class="btn btn-xs bg-primary/10 text-primary hover:bg-primary hover:text-white border-0 shadow-sm transition-all rounded-lg"
                         @click="viewStudentPlan(student)"
                       >
                         View Plan
                       </button>
                       <button
-                        class="btn btn-secondary btn-outline border-base-300 hover:border-secondary text-base-content/80 hover:text-secondary btn-xs shadow-sm transition-colors"
+                        class="btn btn-xs bg-secondary/10 text-secondary hover:bg-secondary hover:text-white border-0 shadow-sm transition-all rounded-lg"
                         @click="viewStudentSchedule(student)"
                       >
                         View Schedule

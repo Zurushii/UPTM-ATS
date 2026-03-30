@@ -352,7 +352,11 @@ const reSchedule = async () => {
 const plannedCredits = computed(() => {
   return (
     data.value?.courses
-      ?.filter((c) => c.status !== "Transferred")
+      ?.filter(
+        (c) =>
+          c.status !== "Transferred" &&
+          !(c.status === "Planned" && retakeCourseIds.value.has(c.course_id))
+      )
       .reduce((sum: number, c: Course) => sum + c.credit_hour, 0) || 0
   );
 });
@@ -407,6 +411,26 @@ const cgpa = computed(() => {
   }
   if (totalCredits === 0) return null;
   return (totalPoints / totalCredits).toFixed(2);
+});
+
+// Retake course IDs: courses with status "Planned" that previously had "Failed"
+const retakeCourseIds = computed(() => {
+  if (!data.value?.courses) return new Set<number>();
+  const failedIds = new Set<number>();
+  const retakeIds = new Set<number>();
+  // Group by semester ascending to walk in order
+  const sorted = [...data.value.courses].sort((a, b) => a.semester - b.semester);
+  for (const course of sorted) {
+    if (course.status === "Failed") {
+      failedIds.add(course.course_id);
+    } else if (course.status === "Passed") {
+      failedIds.delete(course.course_id);
+      retakeIds.delete(course.course_id);
+    } else if (course.status === "Planned" && failedIds.has(course.course_id)) {
+      retakeIds.add(course.course_id);
+    }
+  }
+  return retakeIds;
 });
 
 // Format semester label
@@ -1148,10 +1172,11 @@ const revokeResult = async () => {
                         :class="{
                           'badge-success': course.status === 'Passed',
                           'badge-error': course.status === 'Failed',
-                          'badge-ghost': course.status === 'Planned',
+                          'badge-warning': course.status === 'Planned' && retakeCourseIds.has(course.course_id),
+                          'badge-ghost': course.status === 'Planned' && !retakeCourseIds.has(course.course_id),
                         }"
                       >
-                        {{ course.status }}
+                        {{ course.status === 'Planned' && retakeCourseIds.has(course.course_id) ? 'Retake' : course.status }}
                       </span>
                     </td>
                   </tr>

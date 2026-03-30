@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ExcelJS from "exceljs";
 definePageMeta({
   layout: "dashboard",
   middleware: ["hop"],
@@ -167,6 +168,7 @@ const exportToPDF = () => {
           <div class="meta-info">
             <span><strong>Credit Hours:</strong> ${course.credit_hour}</span>
             <span><strong>Total Enrolled:</strong> ${courseDetail.value.total_students}</span>
+            ${sessionLabel.value ? `<span><strong>Session:</strong> ${sessionLabel.value}</span>` : ''}
           </div>
         </div>
         
@@ -190,7 +192,7 @@ const exportToPDF = () => {
                   <td>${student.student_name || "—"}</td>
                   <td class="text-center">${student.matric_no}</td>
                   <td class="text-center">${student.planned_semester}</td>
-                  <td class="text-right">${formatIntake(student.intake_year)}</td>
+                  <td class="text-right">${student.intake_year}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -212,6 +214,88 @@ const exportToPDF = () => {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
+};
+
+const exportToExcelLoading = ref(false);
+
+const exportToExcel = async () => {
+  if (!courseDetail.value || exportToExcelLoading.value) return;
+  exportToExcelLoading.value = true;
+
+  try {
+    const course = courseDetail.value.course;
+    const students = courseDetail.value.students;
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "UTPM ATS";
+    workbook.created = new Date();
+    
+    const safeFormatString = course.course_code.replace(/[^\w\s-]/gi, '') || "Course_Export";
+    const sheet = workbook.addWorksheet(safeFormatString);
+
+    sheet.addRow([`Student List - ${course.course_code}`]);
+    sheet.getRow(1).font = { bold: true, size: 14 };
+
+    sheet.addRow(["Course Name:", course.course_name]);
+    sheet.addRow(["Credit Hours:", course.credit_hour]);
+    sheet.addRow(["Total Enrolled:", courseDetail.value.total_students]);
+    if (sessionLabel.value) {
+      sheet.addRow(["Session:", sessionLabel.value]);
+    }
+    
+    sheet.addRow([]);
+
+    const headers = ["#", "Student Name", "Matric No", "Semester", "Intake"];
+    sheet.addRow(headers);
+    const headerRow = sheet.lastRow!;
+    headerRow.font = { bold: true };
+    headerRow.eachCell(cell => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFEFEFEF' }
+      };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    });
+
+    for (const [idx, student] of students.entries()) {
+      sheet.addRow([
+        idx + 1,
+        student.student_name || "—",
+        student.matric_no,
+        student.planned_semester,
+        student.intake_year
+      ]);
+    }
+
+    // Set appropriate column widths
+    sheet.getColumn(1).width = 16;
+    sheet.getColumn(2).width = 45;
+    sheet.getColumn(3).width = 15;
+    sheet.getColumn(4).width = 12;
+    sheet.getColumn(5).width = 20;
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${course.course_code}_students.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Failed to export Excel", error);
+    alert("Failed to export Excel document.");
+  } finally {
+    exportToExcelLoading.value = false;
+  }
 };
 
 // Group courses by semester for display
@@ -387,10 +471,15 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
                 {{ courseDetail.course.course_name }}
               </h2>
 
-              <div class="mt-6 border-t border-base-200/60 pt-6">
+              <div class="mt-6 border-t border-base-200/60 pt-6 flex flex-wrap gap-2">
                 <button @click="exportToPDF" class="btn btn-primary btn-sm gap-2">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
                   Export to PDF
+                </button>
+                <button @click="exportToExcel" :disabled="exportToExcelLoading" class="btn btn-success btn-sm gap-2">
+                  <span v-if="exportToExcelLoading" class="loading loading-spinner w-4 h-4"></span>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6M9 8h6M9 16h4" /></svg>
+                  Export to Excel
                 </button>
               </div>
             </div>
@@ -433,7 +522,7 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
                         <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-base-200 font-bold text-sm">{{ student.planned_semester }}</span>
                       </td>
                       <td class="text-right">
-                        <span class="text-sm font-medium text-base-content/60">{{ formatIntake(student.intake_year) }}</span>
+                        <span class="text-sm font-medium text-base-content/60">{{ student.intake_year }}</span>
                       </td>
                     </tr>
                   </tbody>
