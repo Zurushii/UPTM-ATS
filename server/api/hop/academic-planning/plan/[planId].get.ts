@@ -84,12 +84,29 @@ export default defineEventHandler(async (event) => {
     [planId],
   );
 
-  // Group courses by semester
+  // Group courses by semester and calculate credit totals
+  // Retake courses (same course_id appearing as Planned after a Failed entry) are excluded
+  // from credit totals since they don't add to the programme's required credit count.
   const coursesBySemester: Record<number, any[]> = {};
   let totalCredits = 0;
   let transferredCredits = 0;
   let plannedCredits = 0;
   let totalCourses = 0;
+
+  // Pre-compute retake course IDs: course_ids that appear as Failed AND later as Planned
+  const failedCourseIds = new Set<number>();
+  const retakeCourseIds = new Set<number>();
+  const sortedDetails = (detailRows as any[]).slice().sort((a: any, b: any) => a.semester - b.semester);
+  for (const detail of sortedDetails) {
+    if (detail.status === "Failed") {
+      failedCourseIds.add(detail.course_id);
+    } else if (detail.status === "Passed") {
+      failedCourseIds.delete(detail.course_id);
+      retakeCourseIds.delete(detail.course_id);
+    } else if ((detail.status === "Planned" || !detail.status) && failedCourseIds.has(detail.course_id)) {
+      retakeCourseIds.add(detail.course_id);
+    }
+  }
 
   for (const detail of detailRows as any[]) {
     if (!coursesBySemester[detail.semester]) {
@@ -103,13 +120,15 @@ export default defineEventHandler(async (event) => {
       status: detail.status || "Planned",
       grade: detail.grade || null,
     });
-    totalCredits += detail.credit_hour;
     totalCourses++;
 
+    // Retake entries don't contribute to programme credit totals
+    const isRetake = retakeCourseIds.has(detail.course_id) && (detail.status === "Planned" || !detail.status);
+    if (isRetake) continue;
+
+    totalCredits += detail.credit_hour;
     if (detail.status === "Transferred") {
       transferredCredits += detail.credit_hour;
-    } else if (detail.status === "Passed" || detail.status === "Failed") {
-      plannedCredits += detail.credit_hour;
     } else {
       plannedCredits += detail.credit_hour;
     }

@@ -76,6 +76,21 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  // Pre-compute retake course IDs: course_ids that appear as Failed AND later as Planned
+  const failedCourseIds = new Set<number>();
+  const retakeCourseIds = new Set<number>();
+  const sortedDetails = (detailRows as any[]).slice().sort((a: any, b: any) => a.semester - b.semester);
+  for (const detail of sortedDetails) {
+    if (detail.status === "Failed") {
+      failedCourseIds.add(detail.course_id);
+    } else if (detail.status === "Passed") {
+      failedCourseIds.delete(detail.course_id);
+      retakeCourseIds.delete(detail.course_id);
+    } else if ((detail.status === "Planned" || !detail.status) && failedCourseIds.has(detail.course_id)) {
+      retakeCourseIds.add(detail.course_id);
+    }
+  }
+
   // Build semesters array
   const semesters = [];
   let transferredCredits = 0;
@@ -89,9 +104,15 @@ export default defineEventHandler(async (event) => {
       courses,
       total_credits: semCredits,
     });
-    totalCourses += courses.length;
     
     for (const course of courses) {
+      // All course appearances count towards totalCourses (it's measuring number of entries)
+      totalCourses++;
+
+      // Retake entries don't contribute to programme credit totals
+      const isRetake = retakeCourseIds.has(course.course_id) && (course.status === "Planned" || !course.status);
+      if (isRetake) continue;
+
       if (course.status === "Transferred") {
         transferredCredits += course.credit_hour;
       } else {
