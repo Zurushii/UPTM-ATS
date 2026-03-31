@@ -149,6 +149,8 @@ const showCloneSessionModal = ref(false);
 const showImportModal = ref(false);
 const showDeleteSessionModal = ref(false);
 const deletingSession = ref<ProgramSessionRow | null>(null);
+const showDeleteCourseModal = ref(false);
+const deletingCourseId = ref<number | null>(null);
 const reopenAddAfterCreate = ref(false);
 
 // Form state for adding course
@@ -407,11 +409,13 @@ async function handleCloneSession() {
 }
 
 // Delete session modal handlers
-function openDeleteSessionModal(sessionId: number) {
-  const sessionToDelete = sessions.value?.find((s: any) => s.id === sessionId);
-  if (sessionToDelete) {
-    deletingSession.value = sessionToDelete;
+function openDeleteSessionModal(session: any) {
+  console.log("Delete session clicked with data:", session);
+  if (session) {
+    deletingSession.value = session;
     showDeleteSessionModal.value = true;
+  } else {
+    console.error("Session is null!");
   }
 }
 
@@ -566,22 +570,27 @@ async function handleUpdateCourse() {
 }
 
 // Delete course handler
-async function handleDeleteCourse(courseId: number) {
-  if (
-    !confirm(
-      "Are you sure you want to remove this course from the session structure?",
-    )
-  ) {
-    return;
-  }
+function openDeleteCourseModal(courseId: number) {
+  deletingCourseId.value = courseId;
+  showDeleteCourseModal.value = true;
+}
 
-  deleteLoading.value = courseId;
+function closeDeleteCourseModal() {
+  showDeleteCourseModal.value = false;
+  deletingCourseId.value = null;
+}
+
+async function confirmDeleteCourse() {
+  if (deletingCourseId.value === null) return;
+
+  deleteLoading.value = deletingCourseId.value;
   try {
-    await $fetch(`/api/hop/program-structure/${courseId}`, {
+    await $fetch(`/api/hop/program-structure/${deletingCourseId.value}`, {
       method: "DELETE",
     });
     await refreshStructure();
     await refreshSessions();
+    closeDeleteCourseModal();
   } catch (error: any) {
     showToast(error?.data?.statusMessage || "Failed to delete course", "error");
   } finally {
@@ -767,38 +776,19 @@ const manualSteps = [
           </a>
         </div>
 
-        <div v-if="selectedSession" class="dropdown dropdown-end md:ml-auto">
-          <label tabindex="0" class="btn btn-ghost border border-base-200 shadow-sm bg-base-100 hover:bg-base-200 transition-colors btn-sm btn-square rounded-xl">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-5 h-5"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 1 1 0-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 0 1-1.44-4.282m3.102.069a18.03 18.03 0 0 1-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 0 1 8.835 2.535M10.34 6.66a23.847 23.847 0 0 0 8.835-2.535m0 0A23.74 23.74 0 0 0 18.795 3m.38 1.125a23.91 23.91 0 0 1 1.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 0 0 1.014-5.395m0-3.46c.495.43.816 1.035.79 1.735a2.332 2.332 0 0 1-.199 1.376c-.14.288-.236.6-.282.923"
-              />
-            </svg>
-          </label>
-          <ul
-            tabindex="0"
-            class="dropdown-content z-[20] menu p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-200"
+        <div v-if="selectedSession" class="flex items-center gap-2 md:ml-auto">
+          <button
+            class="btn btn-ghost border border-base-200 shadow-sm bg-base-100 hover:bg-base-200 transition-colors btn-sm"
+            @click="openCloneModal(selectedSession)"
           >
-            <li>
-              <a @click="openCloneModal(selectedSession)">📋 Clone Session</a>
-            </li>
-            <li>
-              <a
-                class="text-error"
-                @click="openDeleteSessionModal(selectedSession.id)"
-                >🗑️ Delete Session</a
-              >
-            </li>
-          </ul>
+            📋 Clone
+          </button>
+          <button
+            class="btn btn-ghost border border-error/20 shadow-sm bg-error/10 hover:bg-error/20 text-error transition-colors btn-sm"
+            @click="openDeleteSessionModal(selectedSession)"
+          >
+            🗑️ Delete
+          </button>
         </div>
       </div>
 
@@ -1148,7 +1138,7 @@ const manualSteps = [
                         </button>
                         <button
                           class="btn btn-ghost btn-xs text-error"
-                          @click="handleDeleteCourse(course.id)"
+                          @click="openDeleteCourseModal(course.id)"
                           title="Remove Course"
                         >
                           <span
@@ -1986,6 +1976,64 @@ const manualSteps = [
       </div>
       <form method="dialog" class="modal-backdrop">
         <button @click="showImportModal = false">close</button>
+      </form>
+    </dialog>
+
+    <!-- Delete Course Confirmation Modal -->
+    <dialog
+      class="modal modal-bottom sm:modal-middle"
+      :class="{ 'modal-open': showDeleteCourseModal }"
+    >
+      <div class="modal-box">
+        <h3 class="font-bold text-lg text-error flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-6 h-6"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+            />
+          </svg>
+          Remove Course
+        </h3>
+
+        <div class="py-4 space-y-3">
+          <p>Are you sure you want to remove this course from the session structure?</p>
+
+          <p class="text-sm text-error font-medium">
+            This action cannot be undone.
+          </p>
+        </div>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="closeDeleteCourseModal">
+            Cancel
+          </button>
+          <button
+            class="btn btn-error"
+            :disabled="deleteLoading !== null"
+            @click="confirmDeleteCourse"
+          >
+            <span
+              v-if="deleteLoading !== null"
+              class="loading loading-spinner loading-sm"
+            ></span>
+            {{ deleteLoading !== null ? "Removing..." : "Yes, Remove Course" }}
+          </button>
+        </div>
+      </div>
+      <form
+        method="dialog"
+        class="modal-backdrop"
+        @click="closeDeleteCourseModal"
+      >
+        <button>close</button>
       </form>
     </dialog>
 

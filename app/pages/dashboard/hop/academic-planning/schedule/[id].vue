@@ -127,6 +127,7 @@ const searchQuery = ref('');
 const toastMessage = ref('');
 const toastType = ref<'error' | 'success' | 'warning'>('error');
 let toastTimeout: ReturnType<typeof setTimeout> | null = null;
+const showClearConfirmModal = ref(false);
 
 // Initialize course assignments from plan data (only from start_semester onwards)
 watchEffect(() => {
@@ -830,17 +831,16 @@ const quickAssign = (course: AvailableCourse) => {
 
 // Clear all course assignments (keep locked courses)
 const clearAllCourses = () => {
-  if (
-    confirm(
-      "Are you sure you want to unassign all courses? This will clear all assignments except passed/failed courses.",
-    )
-  ) {
-    const locked = new Map<number, number>();
-    for (const [courseId, sem] of courseAssignments.value) {
-      if (isLocked(courseId)) locked.set(courseId, sem);
-    }
-    courseAssignments.value = locked;
+  showClearConfirmModal.value = true;
+};
+
+const confirmClearAllCourses = () => {
+  const locked = new Map<number, number>();
+  for (const [courseId, sem] of courseAssignments.value) {
+    if (isLocked(courseId)) locked.set(courseId, sem);
   }
+  courseAssignments.value = locked;
+  showClearConfirmModal.value = false;
 };
 
 // Save all changes
@@ -913,7 +913,7 @@ const saveChanges = async () => {
     await refreshPlan();
     navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
   } catch (error: any) {
-    alert(error.data?.message || "Failed to save schedule");
+    showToast(error.data?.message || "Failed to save schedule", 'error');
   } finally {
     saveLoading.value = false;
   }
@@ -1664,6 +1664,58 @@ const getSemesterColumnClasses = (sem: number) => {
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="isPreviewAllOpen = false">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- Clear All Courses Confirmation Modal -->
+    <dialog
+      class="modal modal-bottom sm:modal-middle"
+      :class="{ 'modal-open': showClearConfirmModal }"
+    >
+      <div class="modal-box">
+        <h3 class="font-bold text-lg text-warning flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-6 h-6"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+            />
+          </svg>
+          Clear All Assignments
+        </h3>
+
+        <div class="py-4 space-y-3">
+          <p>Are you sure you want to unassign all courses?</p>
+          <p class="text-sm text-base-content/70">
+            This will clear all course assignments except passed/failed courses which are locked.
+          </p>
+        </div>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="showClearConfirmModal = false">
+            Cancel
+          </button>
+          <button
+            class="btn btn-warning"
+            @click="confirmClearAllCourses"
+          >
+            Yes, Clear All
+          </button>
+        </div>
+      </div>
+      <form
+        method="dialog"
+        class="modal-backdrop"
+        @click="showClearConfirmModal = false"
+      >
         <button>close</button>
       </form>
     </dialog>

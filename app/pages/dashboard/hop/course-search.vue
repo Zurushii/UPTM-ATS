@@ -83,6 +83,20 @@ const searchQuery = ref("");
 const selectedCourseId = ref<number | null>(null);
 const showDetailModal = ref(false);
 
+// Toast state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "info",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
+
 // Fetch courses
 const { data, status, refresh } = await useFetch<{
   courses: CourseResult[];
@@ -134,7 +148,7 @@ const exportToPDF = () => {
   
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
-    alert("Please allow popups to export to PDF.");
+    showToast("Please allow popups to export to PDF.", "warning");
     return;
   }
 
@@ -292,7 +306,7 @@ const exportToExcel = async () => {
     window.URL.revokeObjectURL(url);
   } catch (error) {
     console.error("Failed to export Excel", error);
-    alert("Failed to export Excel document.");
+    showToast("Failed to export Excel document.", "error");
   } finally {
     exportToExcelLoading.value = false;
   }
@@ -314,6 +328,20 @@ const totalCourses = computed(() => data.value?.courses?.length || 0);
 
 <template>
   <div class="p-4 md:p-6 lg:p-8 w-full max-w-7xl mx-auto space-y-8">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-xl border backdrop-blur-md"
+        :class="{
+          'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
+          'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
+          'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
+          'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error',
+        }"
+      >
+        <span class="font-bold">{{ toast.message }}</span>
+      </div>
+    </div>
     <!-- Header Section -->
     <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
       <div class="space-y-2">

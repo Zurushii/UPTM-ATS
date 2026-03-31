@@ -111,6 +111,21 @@ const selectedSemester = ref<number | null>(null);
 const saveLoading = ref(false);
 const courseAssignments = ref<Map<number, number>>(new Map()); // course_id -> semester
 const showProgramStructure = ref(true);
+const showClearConfirmModal = ref(false);
+
+// Toast state
+const toast = reactive({ show: false, message: "", type: "info" });
+const showToast = (
+  message: string,
+  type: "info" | "success" | "warning" | "error" = "error",
+) => {
+  toast.message = message;
+  toast.type = type;
+  toast.show = true;
+  setTimeout(() => {
+    toast.show = false;
+  }, 3000);
+};
 
 // Initialize course assignments from plan data
 watchEffect(() => {
@@ -651,8 +666,9 @@ const formatSemester = (semesterNum: number) => {
 const assignCourse = (courseId: number, semester: number) => {
   if (isGroupAlreadyAssigned(courseId)) {
     const existingCourse = getAssignedFromGroup(courseId);
-    alert(
+    showToast(
       `Cannot add this course. Another course from the same group (${existingCourse}) is already assigned or transferred.`,
+      "error",
     );
     return;
   }
@@ -663,27 +679,30 @@ const assignCourse = (courseId: number, semester: number) => {
     coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
   if (rule && course) {
     if (rule.is_li && course.course_type !== "Industrial Training") {
-      alert(
+      showToast(
         "This is an Industrial Training (LI) semester. Only Industrial Training courses can be assigned here.",
+        "error",
       );
       return;
     }
     if (!rule.is_li && course.course_type === "Industrial Training") {
-      alert(
+      showToast(
         "Industrial Training courses can only be assigned to LI semesters.",
+        "error",
       );
       return;
     }
     if (rule.semester_type === "S" && isLongSemesterOnly(course)) {
-      alert(`${course.course_name} can only be taken in a Long semester.`);
+      showToast(`${course.course_name} can only be taken in a Long semester.`, "error");
       return;
     }
   }
 
   if (course && course.prerequisite_course_id) {
     if (!isPrereqSatisfied(course.prerequisite_course_id, semester)) {
-      alert(
+      showToast(
         `Cannot assign ${course.course_code}. Pre-requisite ${course.prerequisite_code} must be assigned to an earlier semester first.`,
+        "error",
       );
       return;
     }
@@ -716,17 +735,16 @@ const quickAssign = (course: AvailableCourse) => {
 
 // Clear all course assignments (keep locked courses)
 const clearAllCourses = () => {
-  if (
-    confirm(
-      "Are you sure you want to unassign all courses? This will clear all assignments except passed/failed courses.",
-    )
-  ) {
-    const locked = new Map<number, number>();
-    for (const [courseId, sem] of courseAssignments.value) {
-      if (isLocked(courseId)) locked.set(courseId, sem);
-    }
-    courseAssignments.value = locked;
+  showClearConfirmModal.value = true;
+};
+
+const confirmClearAllCourses = () => {
+  const locked = new Map<number, number>();
+  for (const [courseId, sem] of courseAssignments.value) {
+    if (isLocked(courseId)) locked.set(courseId, sem);
   }
+  courseAssignments.value = locked;
+  showClearConfirmModal.value = false;
 };
 
 // Save all changes
@@ -785,7 +803,7 @@ const saveChanges = async () => {
     await refreshPlan();
     navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
   } catch (error: any) {
-    alert(error.data?.message || "Failed to save schedule");
+    showToast(error.data?.message || "Failed to save schedule", "error");
   } finally {
     saveLoading.value = false;
   }
@@ -806,6 +824,20 @@ watchEffect(() => {
 
 <template>
   <div class="p-4 w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden">
+    <!-- Toast Notification -->
+    <div v-if="toast.show" class="toast toast-top toast-end z-50">
+      <div
+        class="alert shadow-xl border backdrop-blur-md"
+        :class="{
+          'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
+          'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
+          'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
+          'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error',
+        }"
+      >
+        <span class="font-bold">{{ toast.message }}</span>
+      </div>
+    </div>
     <!-- Header -->
     <div class="flex items-start gap-4 mb-4 flex-shrink-0">
       <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
@@ -1530,6 +1562,58 @@ watchEffect(() => {
         method="dialog"
         class="modal-backdrop"
         @click="isConfigModalOpen = false"
+      >
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- Clear All Courses Confirmation Modal -->
+    <dialog
+      class="modal modal-bottom sm:modal-middle"
+      :class="{ 'modal-open': showClearConfirmModal }"
+    >
+      <div class="modal-box">
+        <h3 class="font-bold text-lg text-warning flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-6 h-6"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+            />
+          </svg>
+          Clear All Assignments
+        </h3>
+
+        <div class="py-4 space-y-3">
+          <p>Are you sure you want to unassign all courses?</p>
+          <p class="text-sm text-base-content/70">
+            This will clear all course assignments except passed/failed courses which are locked.
+          </p>
+        </div>
+
+        <div class="modal-action">
+          <button class="btn btn-ghost" @click="showClearConfirmModal = false">
+            Cancel
+          </button>
+          <button
+            class="btn btn-warning"
+            @click="confirmClearAllCourses"
+          >
+            Yes, Clear All
+          </button>
+        </div>
+      </div>
+      <form
+        method="dialog"
+        class="modal-backdrop"
+        @click="showClearConfirmModal = false"
       >
         <button>close</button>
       </form>

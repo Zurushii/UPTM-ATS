@@ -4,6 +4,15 @@ import ExcelJS from "exceljs";
 
 definePageMeta({ layout: "dashboard" });
 
+// Toast notification
+const toast = ref<{ message: string; type: 'error' | 'success' | 'warning' } | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const showToast = (message: string, type: 'error' | 'success' | 'warning' = 'error') => {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.value = { message, type };
+  toastTimer = setTimeout(() => { toast.value = null; }, 4000);
+};
+
 // Session check
 const { data: session } = await authClient.useSession(useFetch);
 if (!session.value) {
@@ -312,7 +321,7 @@ const exportSemesterToExcel = async (sem: (typeof scheduledSemesters.value)[numb
     window.URL.revokeObjectURL(url);
   } catch (error) {
     console.error("Failed to export Excel", error);
-    alert("Failed to export Excel document.");
+    showToast("Failed to export Excel document.", 'error');
   } finally {
     exportToExcelLoading.value = null;
   }
@@ -320,16 +329,12 @@ const exportSemesterToExcel = async (sem: (typeof scheduledSemesters.value)[numb
 
 // Re-schedule: revert to draft and navigate to schedule page
 const reScheduleLoading = ref(false);
+const showReScheduleModal = ref(false);
+const openReScheduleModal = () => { showReScheduleModal.value = true; };
+const closeReScheduleModal = () => { showReScheduleModal.value = false; };
+
 const reSchedule = async () => {
   if (!data.value?.plan) return;
-
-  if (
-    !confirm(
-      "Are you sure you want to re-schedule this plan? This will revert the status to draft.",
-    )
-  ) {
-    return;
-  }
 
   reScheduleLoading.value = true;
   try {
@@ -342,7 +347,8 @@ const reSchedule = async () => {
     });
     navigateTo(`/dashboard/student/schedule/${data.value.plan.id}`);
   } catch (error: any) {
-    alert(error.data?.message || "Failed to revert plan status");
+    showToast(error.data?.message || "Failed to revert plan status", 'error');
+    closeReScheduleModal();
   } finally {
     reScheduleLoading.value = false;
   }
@@ -432,6 +438,29 @@ const retakeCourseIds = computed(() => {
   }
   return retakeIds;
 });
+
+// Format intake year
+const formatIntake = (intake: string | null | undefined) => {
+  if (!intake || intake.length !== 4) return intake || "-";
+  const month = parseInt(intake.substring(0, 2));
+  const year = parseInt(intake.substring(2, 4));
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const fullYear = year >= 50 ? 1900 + year : 2000 + year;
+  return `${monthNames[month - 1]} ${fullYear}`;
+};
 
 // Format semester label
 const formatSemester = (semesterNum: number) => {
@@ -633,6 +662,41 @@ const submitResults = async () => {
   }
 };
 
+// Get status badge class for course status
+const getCourseStatusClass = (status: string, courseId?: number, semesterNum?: number) => {
+  if (status === "Planned") {
+    if (courseId !== undefined && retakeCourseIds.value.has(courseId)) return "badge-warning";
+    if (semesterNum !== undefined) {
+      if (isCurrentSession(semesterNum)) return "badge-info text-info-content";
+      if (isSessionInPast(getSemesterSession(semesterNum))) return "badge-error badge-outline border-error/50 text-error";
+    }
+    return "badge-primary";
+  }
+  switch (status) {
+    case "Transferred":
+      return "badge-success";
+    case "Passed":
+      return "badge-success";
+    case "Failed":
+      return "badge-error";
+    default:
+      return "badge-ghost";
+  }
+};
+
+// Get display status string
+const getCourseDisplayStatus = (status: string, courseId?: number, semesterNum?: number) => {
+  if (status === "Planned") {
+    if (courseId !== undefined && retakeCourseIds.value.has(courseId)) return "Retake";
+    if (semesterNum !== undefined) {
+      if (isCurrentSession(semesterNum)) return "In Progress";
+      if (isSessionInPast(getSemesterSession(semesterNum))) return "Pending Result";
+    }
+    return "Planned";
+  }
+  return status;
+};
+
 // ── Revoke Result ──
 const revoking = ref(false);
 const showRevokeConfirm = ref(false);
@@ -659,7 +723,7 @@ const revokeResult = async () => {
     await refresh();
     closeRevokeConfirm();
   } catch (error: any) {
-    alert(error?.data?.statusMessage || "Failed to revoke results");
+    showToast(error?.data?.statusMessage || "Failed to revoke results", 'error');
   } finally {
     revoking.value = false;
   }
@@ -667,6 +731,43 @@ const revokeResult = async () => {
 </script>
 
 <template>
+  <!-- Toast Notification -->
+  <Transition
+    enter-active-class="transition duration-300 ease-out"
+    enter-from-class="translate-y-4 opacity-0"
+    enter-to-class="translate-y-0 opacity-100"
+    leave-active-class="transition duration-200 ease-in"
+    leave-from-class="translate-y-0 opacity-100"
+    leave-to-class="translate-y-4 opacity-0"
+  >
+    <div
+      v-if="toast"
+      class="fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl border text-sm font-medium max-w-sm"
+      :class="{
+        'bg-error/10 border-error/30 text-error': toast.type === 'error',
+        'bg-success/10 border-success/30 text-success': toast.type === 'success',
+        'bg-warning/10 border-warning/30 text-warning': toast.type === 'warning',
+      }"
+    >
+      <!-- Icon -->
+      <svg v-if="toast.type === 'error'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+      <svg v-else-if="toast.type === 'success'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+      </svg>
+      <span>{{ toast.message }}</span>
+      <button class="ml-auto opacity-60 hover:opacity-100 transition-opacity" @click="toast = null">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  </Transition>
+
   <!-- Loading Skeleton -->
   <div v-if="pending" class="space-y-6">
     <div class="skeleton h-12 w-80"></div>
@@ -761,129 +862,159 @@ const revokeResult = async () => {
 
     <!-- Has Plan -->
     <template v-else>
-      <!-- Stats Overview -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Status -->
-        <div class="card bg-base-100 shadow-sm border border-base-200">
-          <div class="card-body p-4 flex flex-row items-center gap-4">
-            <div
-              class="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold"
-              :class="
-                statusInfo.color
-                  .replace('badge-', 'bg-')
-                  .replace('success', 'success/10 text-success')
-                  .replace('warning', 'warning/10 text-warning')
-                  .replace('info', 'info/10 text-info')
-              "
-            >
-              {{ statusInfo.icon }}
-            </div>
-            <div>
-              <div class="text-xs uppercase tracking-wide text-base-content/60">
-                Plan Status
+      <div class="flex flex-col xl:flex-row gap-6 items-start">
+        
+        <!-- Left Sidebar: Legend -->
+        <details class="collapse collapse-arrow bg-base-100 border border-base-300 shadow-sm w-full xl:w-64 shrink-0 xl:sticky xl:top-24 z-10" open>
+          <summary class="collapse-title p-4 sm:p-5 font-bold text-sm text-base-content/70 uppercase tracking-wider min-h-0 select-none">
+            Status Guide
+          </summary>
+          <div class="collapse-content px-4 sm:px-5 pb-4 sm:pb-5">
+            <div class="flex flex-col gap-3 text-sm pt-1">
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-success badge-sm w-fit">Transferred</span>
+                <span class="text-base-content/60 text-xs">Credited from previous study</span>
               </div>
-              <div class="font-bold text-lg capitalize">
-                {{ data.plan.status }}
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-info badge-sm text-info-content w-fit">In Progress</span>
+                <span class="text-base-content/60 text-xs">Currently active</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-error badge-outline border-error/50 text-error badge-sm w-fit">Pending Result</span>
+                <span class="text-base-content/60 text-xs">Awaiting grades</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-primary badge-sm w-fit">Planned</span>
+                <span class="text-base-content/60 text-xs">Future semesters</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-warning badge-sm w-fit">Retake</span>
+                <span class="text-base-content/60 text-xs">Re-enrolling after fail</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-success badge-sm w-fit">Passed</span>
+                <span class="text-base-content/60 text-xs">Completed successfully</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-error badge-sm w-fit">Failed</span>
+                <span class="text-base-content/60 text-xs">Needs to retake</span>
               </div>
             </div>
           </div>
-        </div>
+        </details>
 
-        <!-- Start Sem -->
-        <div class="card bg-base-100 shadow-sm border border-base-200">
-          <div class="card-body p-4 flex flex-row items-center gap-4">
-            <div
-              class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary"
+        <!-- Main Content (Right) -->
+        <div class="flex-1 space-y-6 min-w-0 w-full">
+          <!-- Student Info Card -->
+          <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold">{{ profile?.full_name || 'Loading...' }}</h2>
+              <p class="text-sm text-base-content/60">
+                {{ profile?.matric_no || '—' }} • {{ profile?.email || '—' }}
+              </p>
+            </div>
+            <span
+              class="badge capitalize"
+              :class="statusInfo.color"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"
-                />
-              </svg>
+              {{ data.plan.status }}
+            </span>
+          </div>
+
+          <div class="divider my-2"></div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <span class="text-base-content/60">Intake:</span>
+              <div class="font-medium">
+                {{
+                  profile?.intake_name ||
+                  formatIntake(profile?.intake_year)
+                }}
+              </div>
             </div>
             <div>
-              <div class="text-xs uppercase tracking-wide text-base-content/60">
-                Starting
-              </div>
-              <div class="font-bold text-lg">
+              <span class="text-base-content/60">Starting Semester:</span>
+              <div class="font-medium">
                 Semester {{ data.plan.start_semester }}
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- CGPA -->
-        <div class="card bg-base-100 shadow-sm border border-base-200">
-          <div class="card-body p-4 flex flex-row items-center gap-4">
-            <div
-              class="w-12 h-12 rounded-xl flex items-center justify-center"
-              :class="
-                cgpa
-                  ? 'bg-accent/10 text-accent'
-                  : 'bg-base-200 text-base-content/40'
-              "
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-                class="w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
-                />
-              </svg>
+            <div>
+              <span class="text-base-content/60">Transferred Credits:</span>
+              <div class="font-medium text-success">
+                {{ transferredCredits }}
+              </div>
             </div>
             <div>
-              <div class="text-xs uppercase tracking-wide text-base-content/60">
-                CGPA
+              <span class="text-base-content/60">Planned Credits:</span>
+              <div class="font-medium text-primary">
+                {{ plannedCredits }}
               </div>
-              <div class="font-bold text-lg">
-                {{ cgpa ?? "—" }}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Progress -->
-        <div
-          class="card bg-base-100 shadow-sm border border-base-200 md:col-span-2"
-        >
-          <div class="card-body p-4">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs uppercase tracking-wide text-base-content/60"
-                >Total Progress</span
-              >
-              <span class="font-bold text-primary">{{ creditProgress }}%</span>
-            </div>
-            <progress
-              class="progress progress-primary w-full h-3 bg-base-200"
-              :value="totalCredits"
-              :max="profile?.total_credit_required"
-            ></progress>
-            <div class="flex justify-between mt-1 text-xs text-base-content/50">
-              <span
-                >{{ transferredCredits }} transferred +
-                {{ plannedCredits }} planned</span
-              >
-              <span>Target: {{ profile?.total_credit_required }}</span>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- Summary Stats -->
+      <div class="stats shadow w-full">
+        <div class="stat">
+          <div class="stat-title">Total Semesters</div>
+          <div class="stat-value text-2xl">
+            {{ scheduledSemesters.length }}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Total Credits</div>
+          <div class="stat-value text-2xl">
+            {{ totalCredits }}
+          </div>
+          <div class="stat-desc">
+            {{ transferredCredits }} transferred +
+            {{ plannedCredits }} planned
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Total Courses</div>
+          <div class="stat-value text-2xl">
+            {{ data?.courses?.length || 0 }}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">CGPA</div>
+          <div class="stat-value text-2xl">
+            {{ cgpa ?? "—" }}
+          </div>
+          <div v-if="cgpa" class="stat-desc">Cumulative GPA</div>
+        </div>
+      </div>
+
+      <!-- CGPA Probation Warning -->
+      <div v-if="cgpa && parseFloat(cgpa) < 2.5" class="alert alert-warning">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="stroke-current shrink-0 h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
+        </svg>
+        <div>
+          <h3 class="font-bold">Academic Probation</h3>
+          <div class="text-sm">
+            Your CGPA ({{ cgpa }}) is below 2.5. You are restricted
+            to minimum credit hours only when scheduling.
+          </div>
+        </div>
+      </div>
+
+
 
       <!-- Transferred Courses Section (Collapsible) -->
       <div
@@ -988,7 +1119,7 @@ const revokeResult = async () => {
           v-if="data.plan.status === 'approved'"
           class="btn btn-warning btn-sm"
           :disabled="reScheduleLoading"
-          @click="reSchedule"
+          @click="openReScheduleModal"
         >
           <span
             v-if="reScheduleLoading"
@@ -1019,212 +1150,222 @@ const revokeResult = async () => {
                   : 'border-base-200'   // Neutral if upcoming
           ]"
         >
-          <!-- Header Trigger -->
-          <div
-            class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-base-200/50 transition-colors select-none"
-            @click="toggleSemester(sem.semester)"
-          >
-            <div class="flex items-center gap-3">
-              <div
-                class="w-8 h-8 rounded-full flex shrink-0 items-center justify-center text-sm font-bold"
-                :class="
-                  sem.has_result
-                    ? sem.failed > 0
-                      ? 'bg-warning/10 text-warning'
-                      : 'bg-success/10 text-success'
-                    : 'bg-primary/10 text-primary'
-                "
-              >
-                {{ sem.semester }}
+          <div class="card-body">
+            <!-- Header Trigger -->
+            <div
+              class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-base-200/50 transition-colors select-none -mx-2 rounded-lg"
+              @click="toggleSemester(sem.semester)"
+            >
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-8 h-8 rounded-full flex shrink-0 items-center justify-center text-sm font-bold"
+                  :class="
+                    sem.has_result
+                      ? sem.failed > 0
+                        ? 'bg-warning/10 text-warning'
+                        : 'bg-success/10 text-success'
+                      : 'bg-primary/10 text-primary'
+                  "
+                >
+                  {{ sem.semester }}
+                </div>
+                <div>
+                  <div class="font-bold flex flex-wrap items-center gap-2">
+                    {{ formatSemester(sem.semester) }}
+                    <span
+                      v-if="isCurrentSession(sem.semester)"
+                      class="badge badge-success badge-sm font-mono gap-1"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full bg-success-content animate-pulse"></span>
+                      Current Session: {{ formatSession(getSemesterSession(sem.semester)!) }}
+                    </span>
+                    <span
+                      v-else-if="getSemesterSession(sem.semester)"
+                      class="badge badge-sm font-mono"
+                      :class="isSessionInPast(getSemesterSession(sem.semester)) ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
+                    >
+                      Session: {{ formatSession(getSemesterSession(sem.semester)!) }}
+                    </span>
+                    <span
+                      v-if="sem.semester === currentSemester && !isCurrentSession(sem.semester)"
+                      class="badge badge-primary badge-sm"
+                    >
+                      Current
+                    </span>
+                  </div>
+                  <div class="text-xs text-base-content/60 mt-0.5">
+                    {{ sem.courses ? sem.courses.length : 0 }} courses
+                  </div>
+                </div>
               </div>
-              <div>
-                <div class="font-bold flex items-center gap-2">
-                  {{ formatSemester(sem.semester) }}
-                  <span
-                    v-if="isCurrentSession(sem.semester)"
-                    class="badge badge-success badge-sm font-mono gap-1"
-                  >
-                    <span class="w-1.5 h-1.5 rounded-full bg-success-content animate-pulse"></span>
-                    Current Session: {{ formatSession(getSemesterSession(sem.semester)!) }}
+
+              <div class="flex flex-wrap items-center gap-2 pl-11 sm:pl-0">
+                <!-- Result badges -->
+                <template v-if="sem.has_result">
+                  <span class="badge badge-success badge-sm gap-1">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="2"
+                      stroke="currentColor"
+                      class="w-3 h-3"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="m4.5 12.75 6 6 9-13.5"
+                      />
+                    </svg>
+                    {{ sem.passed }} Passed
                   </span>
                   <span
-                    v-else-if="getSemesterSession(sem.semester)"
-                    class="badge badge-sm font-mono"
-                    :class="isSessionInPast(getSemesterSession(sem.semester)) ? 'badge-ghost text-base-content/60' : 'badge-info badge-outline border-info/30 text-info'"
-                  >Session: {{ formatSession(getSemesterSession(sem.semester)!) }}</span>
-                  <span
-                    v-if="sem.semester === currentSemester && !isCurrentSession(sem.semester)"
-                    class="badge badge-primary badge-sm"
-                    >Current</span
-                  >
-                  <span
-                    v-if="
-                      !sem.has_result &&
-                      isSessionInPast(getSemesterSession(sem.semester))
-                    "
+                    v-if="sem.failed > 0"
                     class="badge badge-error badge-sm gap-1"
                   >
-                    ⚠ Missing Result
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="2"
+                      stroke="currentColor"
+                      class="w-3 h-3"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M6 18 18 6M6 6l12 12"
+                      />
+                    </svg>
+                    {{ sem.failed }} Failed
                   </span>
-                </div>
-                <div class="text-xs text-base-content/60">
-                  {{ sem.courses.length }} courses
-                </div>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-2 pl-11 sm:pl-0">
-              <!-- Result badges -->
-              <template v-if="sem.has_result">
-                <span class="badge badge-success badge-sm gap-1">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke-width="2"
-                    stroke="currentColor"
-                    class="w-3 h-3"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="m4.5 12.75 6 6 9-13.5"
-                    />
-                  </svg>
-                  {{ sem.passed }} Passed
-                </span>
+                </template>
                 <span
-                  v-if="sem.failed > 0"
+                  v-if="!sem.has_result && isSessionInPast(getSemesterSession(sem.semester))"
                   class="badge badge-error badge-sm gap-1"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke-width="2"
-                    stroke="currentColor"
-                    class="w-3 h-3"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M6 18 18 6M6 6l12 12"
-                    />
-                  </svg>
-                  {{ sem.failed }} Failed
+                  ⚠ Missing Result
                 </span>
-              </template>
-              <span v-if="sem.gpa" class="badge badge-accent badge-sm font-mono"
-                >GPA {{ sem.gpa }}</span
-              >
-              <div class="badge badge-lg variant-soft font-mono">
-                {{ sem.total_credits }} Credits
+                <span
+                  v-if="sem.gpa"
+                  class="badge badge-accent badge-sm font-mono"
+                >
+                  GPA {{ sem.gpa }}
+                </span>
+                <span class="badge badge-lg variant-soft font-mono">
+                  {{ sem.total_credits }} Credits
+                </span>
+                <!-- Chevron Icon -->
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="w-5 h-5 transition-transform duration-200 text-base-content/40 hidden sm:block"
+                  :class="expandedSemesters.has(sem.semester) ? 'rotate-180' : 'rotate-0'"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
               </div>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                class="w-5 h-5 transition-transform duration-200 text-base-content/40 hidden sm:block"
-                :class="expandedSemesters.has(sem.semester) ? 'rotate-180' : ''"
-              >
-                <path
-                  fill-rule="evenodd"
-                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                  clip-rule="evenodd"
-                />
-              </svg>
             </div>
-          </div>
 
-          <!-- Collapsible Content -->
-          <div
-            v-if="expandedSemesters.has(sem.semester)"
-            class="border-t border-base-100"
-          >
-            <div class="overflow-x-auto">
-              <table class="table table-sm">
-                <thead class="bg-base-100/50">
+            <!-- Collapsible Content -->
+            <div
+              v-show="expandedSemesters.has(sem.semester)"
+              class="overflow-x-auto transition-all origin-top rounded-b-lg border-t border-base-200 mt-2"
+            >
+              <table class="table w-full">
+                <thead class="bg-base-200/50 text-base-content/70 uppercase text-xs tracking-wider">
                   <tr>
-                    <th class="w-32 pl-6">Code</th>
+                    <th class="w-24 pl-6">Code</th>
                     <th>Course Name</th>
-                    <th class="text-right w-24">Credits</th>
-                    <th class="text-center w-24">Status</th>
+                    <th class="text-right w-20">Credits</th>
+                    <th class="text-center w-36 pr-6">Status</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y divide-base-200">
                   <tr
                     v-for="course in sem.courses"
                     :key="course.course_id"
-                    class="hover:bg-base-100/50 transition-colors"
+                    class="hover:bg-base-200/30 transition-colors"
                   >
-                    <td class="pl-6">
-                      <span class="font-mono text-sm font-semibold">{{
-                        course.course_code
-                      }}</span>
-                    </td>
-                    <td>{{ course.course_name }}</td>
-                    <td class="text-right font-mono">
-                      {{ course.credit_hour }}
-                    </td>
-                    <td class="text-center">
+                    <td class="font-mono text-sm text-base-content/70 pl-6">{{ course.course_code }}</td>
+                    <td class="font-medium text-base-content">{{ course.course_name }}</td>
+                    <td class="text-right font-mono text-base-content/80">{{ course.credit_hour }}</td>
+                    <td class="text-center pr-6">
                       <span
-                        class="badge badge-xs"
-                        :class="{
-                          'badge-success': course.status === 'Passed',
-                          'badge-error': course.status === 'Failed',
-                          'badge-warning': course.status === 'Planned' && retakeCourseIds.has(course.course_id),
-                          'badge-ghost': course.status === 'Planned' && !retakeCourseIds.has(course.course_id),
-                        }"
+                        class="badge badge-sm font-medium shadow-sm border border-base-200/50 whitespace-nowrap"
+                        :class="getCourseStatusClass(course.status, course.course_id, sem.semester)"
                       >
-                        {{ course.status === 'Planned' && retakeCourseIds.has(course.course_id) ? 'Retake' : course.status }}
+                        {{ getCourseDisplayStatus(course.status, course.course_id, sem.semester) }}
                       </span>
                     </td>
                   </tr>
                 </tbody>
-                <tfoot>
-                  <tr class="font-medium">
-                    <td colspan="3" class="text-right">Total:</td>
-                    <td class="text-center">{{ sem.total_credits }}</td>
+                <tfoot class="bg-base-200/30 border-t border-base-200">
+                  <tr class="font-bold text-base-content">
+                    <td colspan="3" class="text-right uppercase tracking-wide text-xs">Total Credits:</td>
+                    <td class="text-center font-mono text-lg pr-6">{{ sem.total_credits }}</td>
                   </tr>
                 </tfoot>
               </table>
-            </div>
 
-            <!-- Upload / Revoke actions -->
-            <div
-              class="px-4 pb-4 pt-2 flex items-center justify-between border-t border-base-200/50"
-              @click.stop
-            >
-              <div class="text-xs text-base-content/50">
-                <template v-if="sem.result_slip">
-                  Slip uploaded: {{ sem.result_slip.result_slip_filename }}
-                </template>
-                <template v-else> No result slip uploaded </template>
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  class="btn btn-ghost btn-xs text-primary"
-                  @click.stop="exportSemesterToExcel(sem)"
-                  :disabled="exportToExcelLoading === sem.semester"
-                >
-                  <span v-if="exportToExcelLoading === sem.semester" class="loading loading-spinner w-3 h-3"></span>
-                  <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3 h-3"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                  Export to Excel
-                </button>
-                <button
-                  v-if="sem.has_result"
-                  class="btn btn-error btn-outline btn-xs"
-                  @click="openRevokeConfirm(sem)"
-                >
-                  Revoke Result
-                </button>
-                <button
-                  v-if="!sem.has_result"
-                  class="btn btn-primary btn-xs"
-                  @click="openUploadModal(sem)"
-                >
-                  Upload Result
-                </button>
+              <!-- Upload / Revoke actions -->
+              <div
+                class="px-6 py-4 flex flex-wrap items-center justify-between gap-4 border-t border-base-200"
+                @click.stop
+              >
+                <div class="text-sm text-base-content/70 flex items-center gap-2">
+                  <template v-if="sem.result_slip">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke-width="1.5"
+                      stroke="currentColor"
+                      class="w-4 h-4"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                      />
+                    </svg>
+                    Slip uploaded: <span class="font-mono text-xs">{{ sem.result_slip.result_slip_filename }}</span>
+                  </template>
+                  <template v-else>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 opacity-50"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>
+                    No result slip uploaded
+                  </template>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="btn btn-ghost btn-sm text-primary"
+                    @click.stop="exportSemesterToExcel(sem)"
+                    :disabled="exportToExcelLoading === sem.semester"
+                  >
+                    <span v-if="exportToExcelLoading === sem.semester" class="loading loading-spinner w-3 h-3"></span>
+                    <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                    Export to Excel
+                  </button>
+                  <button
+                    v-if="sem.has_result"
+                    class="btn btn-error btn-outline btn-sm"
+                    @click="openRevokeConfirm(sem)"
+                  >
+                    Revoke Result
+                  </button>
+                  <button
+                    v-if="!sem.has_result"
+                    class="btn btn-primary btn-sm"
+                    @click="openUploadModal(sem)"
+                  >
+                    Upload Result
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1237,9 +1378,80 @@ const revokeResult = async () => {
         >
           <p>No scheduled semesters yet. Your schedule is being prepared.</p>
         </div>
+        </div>
+        </div>
       </div>
     </template>
   </div>
+
+  <!-- Re-schedule Modal -->
+  <dialog
+    class="modal modal-bottom sm:modal-middle"
+    :class="{ 'modal-open': showReScheduleModal }"
+  >
+    <div class="modal-box">
+      <h3 class="font-bold text-lg text-warning flex items-center gap-2">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="w-6 h-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+          />
+        </svg>
+        Re-schedule Plan
+      </h3>
+      <div class="py-4 space-y-3">
+        <p>Are you sure you want to re-schedule this plan?</p>
+        <div class="alert alert-info text-sm">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            class="stroke-current shrink-0 w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            ></path>
+          </svg>
+          <div>
+            <p class="font-medium">This will:</p>
+            <ul class="list-disc list-inside text-xs mt-1">
+              <li>Revert the plan status to <strong>Draft</strong></li>
+              <li>Allow you to modify the semester schedule</li>
+              <li>Require re-approval from the Head of Program</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-ghost" @click="closeReScheduleModal">Cancel</button>
+        <button
+          class="btn btn-warning"
+          :disabled="reScheduleLoading"
+          @click="reSchedule"
+        >
+          <span
+            v-if="reScheduleLoading"
+            class="loading loading-spinner loading-sm"
+          ></span>
+          {{ reScheduleLoading ? "Processing..." : "Yes, Re-schedule" }}
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop" @click="closeReScheduleModal">
+      <button>close</button>
+    </form>
+  </dialog>
 
   <!-- Upload Result Modal -->
   <dialog class="modal" :class="{ 'modal-open': showUploadModal }">

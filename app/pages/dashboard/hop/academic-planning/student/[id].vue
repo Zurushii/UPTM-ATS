@@ -65,6 +65,15 @@ interface PlanData {
   };
 }
 
+// Toast notification
+const toast = ref<{ message: string; type: 'error' | 'success' | 'warning' } | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const showToast = (message: string, type: 'error' | 'success' | 'warning' = 'error') => {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.value = { message, type };
+  toastTimer = setTimeout(() => { toast.value = null; }, 4000);
+};
+
 // Fetch plan data
 const { data: planData, pending: loading } = await useFetch<PlanData>(
   `/api/hop/academic-planning/plan/${planId}`,
@@ -217,15 +226,18 @@ const retakeCourseIds = computed(() => {
 });
 
 // Get status badge class for course status
-const getCourseStatusClass = (status: string, courseId?: number) => {
-  if (status === "Planned" && courseId !== undefined && retakeCourseIds.value.has(courseId)) {
-    return "badge-warning";
+const getCourseStatusClass = (status: string, courseId?: number, semesterNum?: number) => {
+  if (status === "Planned") {
+    if (courseId !== undefined && retakeCourseIds.value.has(courseId)) return "badge-warning";
+    if (semesterNum !== undefined) {
+      if (isCurrentSession(semesterNum)) return "badge-info text-info-content";
+      if (isSessionInPast(getSemesterSession(semesterNum))) return "badge-error badge-outline border-error/50 text-error";
+    }
+    return "badge-primary";
   }
   switch (status) {
     case "Transferred":
       return "badge-success";
-    case "Planned":
-      return "badge-primary";
     case "Passed":
       return "badge-success";
     case "Failed":
@@ -233,6 +245,19 @@ const getCourseStatusClass = (status: string, courseId?: number) => {
     default:
       return "badge-ghost";
   }
+};
+
+// Get display status string
+const getCourseDisplayStatus = (status: string, courseId?: number, semesterNum?: number) => {
+  if (status === "Planned") {
+    if (courseId !== undefined && retakeCourseIds.value.has(courseId)) return "Retake";
+    if (semesterNum !== undefined) {
+      if (isCurrentSession(semesterNum)) return "In Progress";
+      if (isSessionInPast(getSemesterSession(semesterNum))) return "Pending Result";
+    }
+    return "Planned";
+  }
+  return status;
 };
 
 // Check if semester contains transferred courses
@@ -413,7 +438,7 @@ const confirmApprove = async () => {
     });
     window.location.reload();
   } catch (error: any) {
-    alert(error.data?.message || "Failed to approve plan");
+    showToast(error.data?.message || "Failed to approve plan", 'error');
   } finally {
     statusLoading.value = false;
   }
@@ -433,7 +458,7 @@ const confirmComplete = async () => {
     });
     window.location.reload();
   } catch (error: any) {
-    alert(error.data?.message || "Failed to mark as completed");
+    showToast(error.data?.message || "Failed to mark as completed", 'error');
   } finally {
     statusLoading.value = false;
   }
@@ -455,7 +480,7 @@ const confirmReSchedule = async () => {
     });
     navigateTo(`/dashboard/hop/academic-planning/schedule/${planId}`);
   } catch (error: any) {
-    alert(error.data?.message || "Failed to revert plan status");
+    showToast(error.data?.message || "Failed to revert plan status", 'error');
   } finally {
     reScheduleLoading.value = false;
   }
@@ -479,6 +504,43 @@ const goBack = () => {
 </script>
 
 <template>
+  <!-- Toast Notification -->
+  <Transition
+    enter-active-class="transition duration-300 ease-out"
+    enter-from-class="translate-y-4 opacity-0"
+    enter-to-class="translate-y-0 opacity-100"
+    leave-active-class="transition duration-200 ease-in"
+    leave-from-class="translate-y-0 opacity-100"
+    leave-to-class="translate-y-4 opacity-0"
+  >
+    <div
+      v-if="toast"
+      class="fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl border text-sm font-medium max-w-sm"
+      :class="{
+        'bg-error/10 border-error/30 text-error': toast.type === 'error',
+        'bg-success/10 border-success/30 text-success': toast.type === 'success',
+        'bg-warning/10 border-warning/30 text-warning': toast.type === 'warning',
+      }"
+    >
+      <!-- Icon -->
+      <svg v-if="toast.type === 'error'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+      <svg v-else-if="toast.type === 'success'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 shrink-0">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+      </svg>
+      <span>{{ toast.message }}</span>
+      <button class="ml-auto opacity-60 hover:opacity-100 transition-opacity" @click="toast = null">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  </Transition>
+
   <div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8 relative">
     <!-- Ambient glow -->
     <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
@@ -526,8 +588,51 @@ const goBack = () => {
     </div>
 
     <template v-else-if="planData">
-      <!-- Student Info Card -->
-      <div class="card bg-base-100 border border-base-300 shadow-sm">
+      <div class="flex flex-col xl:flex-row gap-6 items-start">
+        
+        <!-- Left Sidebar: Legend -->
+        <details class="collapse collapse-arrow bg-base-100 border border-base-300 shadow-sm w-full xl:w-64 shrink-0 xl:sticky xl:top-24 z-10" open>
+          <summary class="collapse-title p-4 sm:p-5 font-bold text-sm text-base-content/70 uppercase tracking-wider min-h-0 select-none">
+            Status Legend
+          </summary>
+          <div class="collapse-content px-4 sm:px-5 pb-4 sm:pb-5">
+            <div class="flex flex-col gap-3 text-sm pt-1">
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-success badge-sm w-fit">Transferred</span>
+                <span class="text-base-content/60 text-xs">Credited from previous study</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-info badge-sm text-info-content w-fit">In Progress</span>
+                <span class="text-base-content/60 text-xs">Currently active</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-error badge-outline border-error/50 text-error badge-sm w-fit">Pending Result</span>
+                <span class="text-base-content/60 text-xs">Awaiting grades</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-primary badge-sm w-fit">Planned</span>
+                <span class="text-base-content/60 text-xs">Future semesters</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-warning badge-sm w-fit">Retake</span>
+                <span class="text-base-content/60 text-xs">Re-enrolling after fail</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-success badge-sm w-fit">Passed</span>
+                <span class="text-base-content/60 text-xs">Completed successfully</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="badge badge-error badge-sm w-fit">Failed</span>
+                <span class="text-base-content/60 text-xs">Needs to retake</span>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Main Content (Right) -->
+        <div class="flex-1 space-y-6 min-w-0 w-full">
+          <!-- Student Info Card -->
+          <div class="card bg-base-100 border border-base-300 shadow-sm">
         <div class="card-body">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -635,29 +740,7 @@ const goBack = () => {
         </div>
       </div>
 
-      <!-- Legend -->
-      <div class="flex items-center gap-4 text-sm flex-wrap">
-        <div class="flex items-center gap-2">
-          <span class="badge badge-success badge-sm">Transferred</span>
-          <span class="text-base-content/60">Credited from previous study</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="badge badge-primary badge-sm">Planned</span>
-          <span class="text-base-content/60">To be taken</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="badge badge-warning badge-sm">Retake</span>
-          <span class="text-base-content/60">Re-enrolling after fail</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="badge badge-success badge-sm">Passed</span>
-          <span class="text-base-content/60">Completed successfully</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="badge badge-error badge-sm">Failed</span>
-          <span class="text-base-content/60">Needs to retake</span>
-        </div>
-      </div>
+
 
       <!-- Transferred Courses Section (Collapsible) -->
       <div
@@ -871,7 +954,7 @@ const goBack = () => {
                     <th class="w-24 pl-6">Code</th>
                     <th>Course Name</th>
                     <th class="text-right w-20">Credits</th>
-                    <th class="text-center w-28 pr-6">Status</th>
+                    <th class="text-center w-36 pr-6">Status</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-base-200">
@@ -885,10 +968,10 @@ const goBack = () => {
                     <td class="text-right font-mono text-base-content/80">{{ course.credit_hour }}</td>
                     <td class="text-center pr-6">
                       <span
-                        class="badge badge-sm font-medium shadow-sm border border-base-200/50"
-                        :class="getCourseStatusClass(course.status, course.course_id)"
+                        class="badge badge-sm font-medium shadow-sm border border-base-200/50 whitespace-nowrap"
+                        :class="getCourseStatusClass(course.status, course.course_id, semester.semester)"
                       >
-                        {{ retakeCourseIds.has(course.course_id) && course.status === 'Planned' ? 'Retake' : course.status }}
+                        {{ getCourseDisplayStatus(course.status, course.course_id, semester.semester) }}
                       </span>
                     </td>
                   </tr>
@@ -935,6 +1018,8 @@ const goBack = () => {
             No scheduled semesters yet. Click "Schedule Semester" to start
             planning.
           </p>
+        </div>
+        </div>
         </div>
       </div>
     </template>
