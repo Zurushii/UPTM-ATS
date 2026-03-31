@@ -31,10 +31,24 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
 
-  // Verify this plan belongs to the student
+  // Verify this plan belongs to the student, and get student/intake info
   const [planRows] = await pool.query(
-    `SELECT ap.id, ap.status, ap.start_semester, ap.created_at
+    `SELECT 
+      ap.id, 
+      ap.status, 
+      ap.start_semester, 
+      ap.created_at,
+      ap.intake_id,
+      s.matric_no,
+      s.total_credit_transferred,
+      u.name AS student_name,
+      u.email,
+      api.intake_name,
+      api.intake_year
      FROM academic_plans ap
+     JOIN students s ON ap.student_id = s.id
+     JOIN user u ON s.user_id = u.id
+     LEFT JOIN academic_planning_intakes api ON ap.intake_id = api.id
      WHERE ap.id = ? AND ap.student_id = ?`,
     [planId, studentId],
   );
@@ -72,7 +86,7 @@ export default defineEventHandler(async (event) => {
       course_code: row.course_code,
       course_name: row.course_name,
       credit_hour: row.credit_hour,
-      status: row.status,
+      status: row.status || "Planned",
     });
   }
 
@@ -129,6 +143,15 @@ export default defineEventHandler(async (event) => {
       status: plan.status,
       start_semester: plan.start_semester,
       created_at: plan.created_at,
+      intake_name: plan.intake_name,
+      intake_year: plan.intake_year,
+    },
+    student: {
+      id: studentId,
+      matric_no: plan.matric_no,
+      name: plan.student_name,
+      email: plan.email,
+      total_credit_transferred: plan.total_credit_transferred,
     },
     semesters,
     summary: {

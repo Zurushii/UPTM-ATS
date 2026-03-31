@@ -3,7 +3,6 @@ import { authClient } from "@@/utils/auth-client";
 
 definePageMeta({
   layout: "dashboard",
-  middleware: ["hop"],
 });
 
 // Session check
@@ -87,23 +86,26 @@ const {
   data: planData,
   pending: loading,
   refresh: refreshPlan,
-} = await useFetch<PlanData>(`/api/hop/academic-planning/plan/${planId}`);
+} = await useFetch<PlanData>(`/api/student/schedule/${planId}`);
 
 // Fetch available courses + semester rules + credit limits
 const { data: coursesData, pending: coursesLoading } = await useFetch<{
   courses: AvailableCourse[];
   semester_rules: SemesterRule[];
   credit_limits: CreditLimits;
+  base_credit_limits: CreditLimits;
+  cgpa: number | null;
+  on_probation: boolean;
   retake_courses: AvailableCourse[];
   max_program_semester: number;
-}>(`/api/hop/academic-planning/plan/${planId}/courses`);
+}>(`/api/student/schedule/${planId}/courses`);
 
 // Check if plan exists or not draft
 if (
   !loading.value &&
   (!planData.value || planData.value.plan.status !== "draft")
 ) {
-  await navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
+  await navigateTo(`/dashboard/student/academic-plan`);
 }
 
 // State
@@ -111,23 +113,22 @@ const selectedSemester = ref<number | null>(null);
 const saveLoading = ref(false);
 const courseAssignments = ref<Map<number, number>>(new Map()); // course_id -> semester
 const showProgramStructure = ref(true);
+
+// Preview All Semesters modal
+const isPreviewAllOpen = ref(false);
+
+// Drag-and-drop state
+const draggedCourseId = ref<number | null>(null);
+const isDragging = ref(false);
+const dragOverSemester = ref<number | null>(null);
+const dragSource = ref<'pool' | 'column'>('pool');
+const searchQuery = ref('');
+const toastMessage = ref('');
+const toastType = ref<'error' | 'success' | 'warning'>('error');
+let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 const showClearConfirmModal = ref(false);
 
-// Toast state
-const toast = reactive({ show: false, message: "", type: "info" });
-const showToast = (
-  message: string,
-  type: "info" | "success" | "warning" | "error" = "error",
-) => {
-  toast.message = message;
-  toast.type = type;
-  toast.show = true;
-  setTimeout(() => {
-    toast.show = false;
-  }, 3000);
-};
-
-// Initialize course assignments from plan data
+// Initialize course assignments from plan data (only from start_semester onwards)
 watchEffect(() => {
   if (planData.value && coursesData.value) {
     const startSem = planData.value.plan.start_semester || 1;
@@ -251,16 +252,31 @@ const retakeCourses = computed(() => {
 // Track extra semesters added by user
 const extraSemesters = ref<number[]>([]);
 
-// Get unique semesters from available courses
+// Get unique semesters from available courses (starting from student's start_semester)
 const availableSemesters = computed(() => {
   const semesters = new Set<number>();
+  const startSem = planData.value?.plan.start_semester || 1;
+
   if (coursesData.value) {
     for (const course of coursesData.value.courses) {
-      semesters.add(course.default_semester);
+      // Only include semesters >= student's start semester
+      if (course.default_semester >= startSem) {
+        semesters.add(course.default_semester);
+      }
     }
     // Include semesters from extended rules (for retake scheduling)
     for (const rule of coursesData.value.semester_rules) {
-      semesters.add(rule.semester_number);
+      if (rule.semester_number >= startSem) {
+        semesters.add(rule.semester_number);
+      }
+    }
+  }
+  // Include semesters from existing plan data (auto-extended during generation)
+  if (planData.value) {
+    for (const semester of planData.value.semesters) {
+      if (semester.semester >= startSem) {
+        semesters.add(semester.semester);
+      }
     }
   }
   // Include user-added extra semesters
@@ -389,7 +405,7 @@ const applyConfig = () => {
   isConfigModalOpen.value = false;
 };
 
-// Get program structure grouped by semester
+// Get program structure grouped by semester (show ALL semesters for reference)
 const programStructure = computed(() => {
   if (!coursesData.value) return new Map<number, AvailableCourse[]>();
 
@@ -443,6 +459,7 @@ const isGroupAlreadyAssigned = (courseId: number): boolean => {
   const defaultSem = getDefaultSemester(courseId);
   if (!courseGroup || defaultSem === null) return false;
 
+  // Check if any other course with the same group AND same default semester is assigned
   for (const [assignedId] of courseAssignments.value) {
     if (
       assignedId !== courseId &&
@@ -452,6 +469,7 @@ const isGroupAlreadyAssigned = (courseId: number): boolean => {
       return true;
     }
   }
+  // Also check transferred courses
   for (const tc of transferredCourses.value) {
     if (tc.course_id !== courseId) {
       const tcGroup = getCourseGroup(tc.course_id);
@@ -494,7 +512,48 @@ const getAssignedFromGroup = (courseId: number): string | null => {
   return null;
 };
 
-// Check if a course can only be taken in Long semesters (FYP2, Industrial Training)
+// Check if course should be disabled (group conflict, LI, Long-only, or prereq restriction)
+const isCourseDisabled = (courseId: number): boolean => {
+  if (isGroupAlreadyAssigned(courseId)) return true;
+
+  if (selectedSemester.value !== null) {
+    const rule = getSemesterRule(selectedSemester.value);
+    const course = coursesData.value?.courses.find(
+      (c) => c.course_id === courseId,
+    );
+    if (rule && course) {
+      // LI semester: only Industrial Training allowed
+      if (rule.is_li && course.course_type !== "Industrial Training")
+        return true;
+      // Non-LI semester: Industrial Training not allowed
+      if (!rule.is_li && course.course_type === "Industrial Training")
+        return true;
+      // Short semester: block FYP2 and Industrial Training (Long semester only)
+      if (rule.semester_type === "S" && isLongSemesterOnly(course)) return true;
+    }
+    // Prerequisite check
+    if (course && course.prerequisite_course_id) {
+      if (
+        !isPrereqSatisfied(
+          course.prerequisite_course_id,
+          selectedSemester.value,
+        )
+      )
+        return true;
+    }
+  }
+  return false;
+};
+
+// Check if a course is Industrial Training type
+const isIndustrialTraining = (courseId: number): boolean => {
+  const course = coursesData.value?.courses.find(
+    (c) => c.course_id === courseId,
+  );
+  return course?.course_type === "Industrial Training";
+};
+
+// Check if a course can only be taken in Long semesters (FYP2. Industrial Training)
 const isLongSemesterOnly = (course: AvailableCourse): boolean => {
   if (course.course_type === "Industrial Training") return true;
   if (
@@ -518,35 +577,6 @@ const isPrereqSatisfied = (
   return false;
 };
 
-// Check if course should be disabled (group conflict, LI, Long-only, or prereq restriction)
-const isCourseDisabled = (courseId: number): boolean => {
-  if (isGroupAlreadyAssigned(courseId)) return true;
-
-  if (selectedSemester.value !== null) {
-    const rule = getSemesterRule(selectedSemester.value);
-    const course = coursesData.value?.courses.find(
-      (c) => c.course_id === courseId,
-    );
-    if (rule && course) {
-      if (rule.is_li && course.course_type !== "Industrial Training")
-        return true;
-      if (!rule.is_li && course.course_type === "Industrial Training")
-        return true;
-      if (rule.semester_type === "S" && isLongSemesterOnly(course)) return true;
-    }
-    if (course && course.prerequisite_course_id) {
-      if (
-        !isPrereqSatisfied(
-          course.prerequisite_course_id,
-          selectedSemester.value,
-        )
-      )
-        return true;
-    }
-  }
-  return false;
-};
-
 // Get reason why a course is disabled (for UI display)
 const getCourseDisabledReason = (courseId: number): string | null => {
   if (isGroupAlreadyAssigned(courseId)) {
@@ -565,6 +595,7 @@ const getCourseDisabledReason = (courseId: number): string | null => {
       if (rule.semester_type === "S" && isLongSemesterOnly(course))
         return "Long sem. only";
     }
+    // Prereq not met
     if (
       course &&
       course.prerequisite_course_id &&
@@ -579,47 +610,6 @@ const getCourseDisabledReason = (courseId: number): string | null => {
 // Get assignment semester for a course
 const getAssignedSemester = (courseId: number): number | null => {
   return courseAssignments.value.get(courseId) ?? null;
-};
-
-// Get semester rule for a given semester number
-const getSemesterRule = (sem: number): SemesterRule | undefined => {
-  return coursesData.value?.semester_rules?.find(
-    (r) => r.semester_number === sem,
-  );
-};
-
-// Get semester type label
-const getSemesterTypeLabel = (sem: number): string => {
-  const rule = getSemesterRule(sem);
-  if (!rule) return "";
-  if (rule.is_li) return "LI";
-  return rule.semester_type === "L" ? "Long" : "Short";
-};
-
-// Get credit limits for a semester based on its type
-const getSemesterCreditLimits = (
-  sem: number,
-): { min: number; max: number } | null => {
-  const rule = getSemesterRule(sem);
-  const limits = coursesData.value?.credit_limits;
-  if (!rule || !limits || rule.is_li) return null; // LI semesters bypass credit validation
-  if (rule.semester_type === "L")
-    return { min: limits.long_min, max: limits.long_max };
-  return { min: limits.short_min, max: limits.short_max };
-};
-
-// Get credit status for badge color
-const getCreditStatus = (
-  sem: number,
-): "ok" | "under" | "over" | "li" | "empty" => {
-  const rule = getSemesterRule(sem);
-  if (rule?.is_li) return "li";
-  const credits = getSemesterCredits(sem);
-  const limits = getSemesterCreditLimits(sem);
-  if (!limits || credits === 0) return "empty";
-  if (credits > limits.max) return "over";
-  if (credits < limits.min) return "under";
-  return "ok";
 };
 
 // Calculate credits for a semester
@@ -639,22 +629,125 @@ const getSemesterCredits = (sem: number) => {
   return credits;
 };
 
-// Calculate total assigned credits
+// Calculate total assigned credits (Numerator: total credit hour planned so far)
+// Only counts courses from the remaining workload (plannedCourses + retakeCourses).
 const totalAssignedCredits = computed(() => {
   let total = 0;
   for (const [courseId] of courseAssignments.value) {
     const course =
       plannedCourses.value.find((c) => c.course_id === courseId) ||
-      passedCourses.value.find((c) => c.course_id === courseId);
+      retakeCourses.value.find((c) => c.course_id === courseId);
     if (course) total += course.credit_hour;
   }
   return total;
 });
 
-// Calculate total planned credits from program structure (not from plan details)
+// Calculate total planned credits (Denominator: remaining total credit hour)
+// Equals the assigned pieces of the remaining workload PLUS the unassigned pieces of the remaining workload.
 const totalPlannedCredits = computed(() => {
-  return plannedCourses.value.reduce((sum, c) => sum + c.credit_hour, 0);
+  let unassignedCredits = 0;
+  
+  // Unassigned regular planned courses (deduplicating elective groups that are already assigned)
+  const unassignedPlannedList = plannedCourses.value.filter(
+    (c) =>
+      !courseAssignments.value.has(c.course_id) &&
+      !isGroupAlreadyAssigned(c.course_id),
+  );
+  
+  // To avoid unassigned credits inflating from multiple options in an unassigned group:
+  const processedGroups = new Set<string>();
+  for (const c of unassignedPlannedList) {
+    if (c.course_group) {
+      if (!processedGroups.has(c.course_group)) {
+        processedGroups.add(c.course_group);
+        unassignedCredits += c.credit_hour;
+      }
+    } else {
+      unassignedCredits += c.credit_hour;
+    }
+  }
+
+  // Unassigned retakes
+  const unassignedRetakesList = retakeCourses.value.filter(
+    (c) => !courseAssignments.value.has(c.course_id),
+  );
+  
+  for (const c of unassignedRetakesList) {
+    unassignedCredits += c.credit_hour;
+  }
+
+  return totalAssignedCredits.value + unassignedCredits;
 });
+
+// Get semester rule for a given semester number
+const getSemesterRule = (sem: number): SemesterRule | null => {
+  if (!coursesData.value?.semester_rules) return null;
+  return (
+    coursesData.value.semester_rules.find((r) => r.semester_number === sem) ||
+    null
+  );
+};
+
+// Get credit limits for a semester based on its type
+// Past semesters (all courses passed/failed) use base limits, not probation-restricted limits
+const isSemesterCompleted = (sem: number): boolean => {
+  let hasCourses = false;
+  for (const [courseId, semester] of courseAssignments.value) {
+    if (semester === sem) {
+      hasCourses = true;
+      // A course is only locked AT this semester if it was passed/failed here
+      const isLockedHere =
+        passedCourses.value.some(
+          (c) => c.course_id === courseId && c.semester === sem,
+        ) ||
+        failedCourses.value.some(
+          (c) => c.course_id === courseId && c.semester === sem,
+        );
+      if (!isLockedHere) return false;
+    }
+  }
+  return hasCourses;
+};
+
+const getSemesterLimits = (
+  sem: number,
+): { min: number; max: number } | null => {
+  const rule = getSemesterRule(sem);
+  if (!rule || rule.is_li) return null; // LI semesters bypass validation
+  const useBase = coursesData.value?.on_probation && isSemesterCompleted(sem);
+  const limits = useBase
+    ? coursesData.value?.base_credit_limits
+    : coursesData.value?.credit_limits;
+  if (!limits) return null;
+  if (rule.semester_type === "L")
+    return { min: limits.long_min, max: limits.long_max };
+  return { min: limits.short_min, max: limits.short_max };
+};
+
+// Get credit status for a semester: 'ok' | 'over' | 'under' | 'li' | 'empty'
+const getSemesterCreditStatus = (sem: number): string => {
+  const rule = getSemesterRule(sem);
+  if (!rule) return "ok"; // No rule found, can't validate
+  if (rule.is_li) return "li";
+
+  const credits = getSemesterCredits(sem);
+  if (credits === 0) return "empty";
+
+  const limits = getSemesterLimits(sem);
+  if (!limits) return "ok";
+
+  if (credits > limits.max) return "over";
+  if (credits < limits.min) return "under";
+  return "ok";
+};
+
+// Get semester type label
+const getSemesterTypeLabel = (sem: number): string => {
+  const rule = getSemesterRule(sem);
+  if (!rule) return "";
+  if (rule.is_li) return "LI";
+  return rule.semester_type === "L" ? "Long" : "Short";
+};
 
 // Format semester label
 const formatSemester = (semesterNum: number) => {
@@ -665,11 +758,7 @@ const formatSemester = (semesterNum: number) => {
 // Assign course to semester (with group, LI, Long-only, and prereq validation)
 const assignCourse = (courseId: number, semester: number) => {
   if (isGroupAlreadyAssigned(courseId)) {
-    const existingCourse = getAssignedFromGroup(courseId);
-    showToast(
-      `Cannot add this course. Another course from the same group (${existingCourse}) is already assigned or transferred.`,
-      "error",
-    );
+    showToast(`Cannot add — ${getAssignedFromGroup(courseId)} from same group already assigned`, 'error');
     return;
   }
 
@@ -679,32 +768,38 @@ const assignCourse = (courseId: number, semester: number) => {
     coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
   if (rule && course) {
     if (rule.is_li && course.course_type !== "Industrial Training") {
-      showToast(
-        "This is an Industrial Training (LI) semester. Only Industrial Training courses can be assigned here.",
-        "error",
-      );
+      showToast('LI semester — only Industrial Training courses allowed', 'error');
       return;
     }
     if (!rule.is_li && course.course_type === "Industrial Training") {
-      showToast(
-        "Industrial Training courses can only be assigned to LI semesters.",
-        "error",
-      );
+      showToast('Industrial Training can only go in LI semesters', 'error');
       return;
     }
     if (rule.semester_type === "S" && isLongSemesterOnly(course)) {
-      showToast(`${course.course_name} can only be taken in a Long semester.`, "error");
+      showToast(`${course.course_name} — Long semester only`, 'error');
       return;
     }
   }
 
   if (course && course.prerequisite_course_id) {
     if (!isPrereqSatisfied(course.prerequisite_course_id, semester)) {
-      showToast(
-        `Cannot assign ${course.course_code}. Pre-requisite ${course.prerequisite_code} must be assigned to an earlier semester first.`,
-        "error",
-      );
+      showToast(`Prereq ${course.prerequisite_code} must be completed first`, 'error');
       return;
+    }
+  }
+
+  // Credit limit check (CGPA probation)
+  if (course) {
+    const limits = getSemesterLimits(semester);
+    if (limits) {
+      const currentCredits = getSemesterCredits(semester);
+      if (currentCredits + course.credit_hour > limits.max) {
+        const reason = coursesData.value?.on_probation
+          ? `CGPA below 2.5 — max ${limits.max} cr per semester`
+          : `Exceeds max ${limits.max} cr for this semester`;
+        showToast(reason, 'error');
+        return;
+      }
     }
   }
 
@@ -722,7 +817,7 @@ const removeCourse = (courseId: number) => {
   courseAssignments.value.delete(courseId);
 };
 
-// Quick assign from program structure
+// Quick assign from program structure - assign to selected semester
 const quickAssign = (course: AvailableCourse) => {
   if (
     selectedSemester.value !== null &&
@@ -752,6 +847,7 @@ const saveChanges = async () => {
   if (!planData.value) return;
 
   saveLoading.value = true;
+  const startSem = planData.value.plan.start_semester || 1;
 
   try {
     // Group courses by semester (only non-locked courses, but include retakes)
@@ -788,22 +884,35 @@ const saveChanges = async () => {
       });
     }
 
-    // Save each semester (including empty ones to clear old assignments)
+    // First, clear all available semesters (from start_semester onwards)
+    // This ensures semesters with no courses are also cleared
     for (const sem of availableSemesters.value) {
-      await $fetch("/api/hop/academic-planning/plan/schedule", {
+      await $fetch("/api/student/schedule", {
         method: "POST",
         body: {
           plan_id: planData.value.plan.id,
           semester: sem,
-          courses: semesterCourses.get(sem) || [],
+          courses: semesterCourses.get(sem) || [], // Empty array clears the semester
+        },
+      });
+    }
+
+    // Also clear semesters before start_semester (to remove old courses)
+    for (let sem = 1; sem < startSem; sem++) {
+      await $fetch("/api/student/schedule", {
+        method: "POST",
+        body: {
+          plan_id: planData.value.plan.id,
+          semester: sem,
+          courses: [], // Clear all planned courses from earlier semesters
         },
       });
     }
 
     await refreshPlan();
-    navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
+    navigateTo(`/dashboard/student/academic-plan`);
   } catch (error: any) {
-    showToast(error.data?.message || "Failed to save schedule", "error");
+    showToast(error.data?.message || "Failed to save schedule", 'error');
   } finally {
     saveLoading.value = false;
   }
@@ -811,7 +920,7 @@ const saveChanges = async () => {
 
 // Go back
 const goBack = () => {
-  navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
+  navigateTo(`/dashboard/student/academic-plan`);
 };
 
 // Select first semester by default
@@ -820,663 +929,507 @@ watchEffect(() => {
     selectedSemester.value = availableSemesters.value[0] ?? null;
   }
 });
+
+// ============ Toast System ============
+const showToast = (message: string, type: 'error' | 'success' | 'warning' = 'error') => {
+  toastMessage.value = message;
+  toastType.value = type;
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { toastMessage.value = ''; }, 3000);
+};
+
+// ============ Drag-and-Drop Helpers ============
+const isCourseDisabledForSemester = (courseId: number, semester: number): boolean => {
+  if (isGroupAlreadyAssigned(courseId)) return true;
+  const rule = getSemesterRule(semester);
+  const course = coursesData.value?.courses.find((c) => c.course_id === courseId)
+    || coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
+  if (rule && course) {
+    if (rule.is_li && course.course_type !== 'Industrial Training') return true;
+    if (!rule.is_li && course.course_type === 'Industrial Training') return true;
+    if (rule.semester_type === 'S' && isLongSemesterOnly(course)) return true;
+  }
+  if (course && course.prerequisite_course_id) {
+    if (!isPrereqSatisfied(course.prerequisite_course_id, semester)) return true;
+  }
+  if (course) {
+    const limits = getSemesterLimits(semester);
+    if (limits && getSemesterCredits(semester) + course.credit_hour > limits.max) return true;
+  }
+  return false;
+};
+
+const getDropReason = (courseId: number, semester: number): string | null => {
+  if (isGroupAlreadyAssigned(courseId)) return `${getAssignedFromGroup(courseId)} selected`;
+  const rule = getSemesterRule(semester);
+  const course = coursesData.value?.courses.find((c) => c.course_id === courseId)
+    || coursesData.value?.retake_courses?.find((c) => c.course_id === courseId);
+  if (rule && course) {
+    if (rule.is_li && course.course_type !== 'Industrial Training') return 'LI semester only';
+    if (!rule.is_li && course.course_type === 'Industrial Training') return 'Needs LI semester';
+    if (rule.semester_type === 'S' && isLongSemesterOnly(course)) return 'Long sem. only';
+  }
+  if (course && course.prerequisite_course_id && !isPrereqSatisfied(course.prerequisite_course_id, semester)) {
+    return `Prereq: ${course.prerequisite_code}`;
+  }
+  if (course) {
+    const limits = getSemesterLimits(semester);
+    if (limits && getSemesterCredits(semester) + course.credit_hour > limits.max) {
+      return coursesData.value?.on_probation ? `Probation: max ${limits.max} cr` : `Exceeds ${limits.max} cr`;
+    }
+  }
+  return null;
+};
+
+const isPoolCourseDisabled = (courseId: number): boolean => isGroupAlreadyAssigned(courseId);
+
+// ============ Drag Event Handlers ============
+const onDragStart = (event: DragEvent, courseId: number, source: 'pool' | 'column') => {
+  draggedCourseId.value = courseId;
+  isDragging.value = true;
+  dragSource.value = source;
+  event.dataTransfer?.setData('text/plain', courseId.toString());
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+};
+
+const onDragEnd = () => {
+  draggedCourseId.value = null;
+  isDragging.value = false;
+  dragOverSemester.value = null;
+};
+
+const onDragOver = (event: DragEvent, semester: number) => {
+  dragOverSemester.value = semester;
+  event.dataTransfer!.dropEffect = (draggedCourseId.value && !isCourseDisabledForSemester(draggedCourseId.value, semester)) ? 'move' : 'none';
+};
+
+const onDragLeave = (event: DragEvent) => {
+  const target = event.currentTarget as HTMLElement;
+  const related = event.relatedTarget as HTMLElement;
+  if (!target.contains(related)) dragOverSemester.value = null;
+};
+
+const onDrop = (event: DragEvent, semester: number) => {
+  dragOverSemester.value = null;
+  const courseId = draggedCourseId.value;
+  if (!courseId) return;
+  if (courseAssignments.value.get(courseId) === semester) return;
+  if (isLocked(courseId) && !failedCourseIds.value.has(courseId)) return;
+  const reason = getDropReason(courseId, semester);
+  if (reason) { showToast(reason, 'error'); return; }
+  assignCourse(courseId, semester);
+};
+
+const onPoolDragOver = (event: DragEvent) => { dragOverSemester.value = null; if (dragSource.value === 'column') event.dataTransfer!.dropEffect = 'move'; };
+const onPoolDragLeave = () => {};
+const onPoolDrop = () => { const courseId = draggedCourseId.value; if (courseId && dragSource.value === 'column') removeCourse(courseId); };
+
+// ============ Pool Computed ============
+const unassignedCount = computed(() =>
+  plannedCourses.value.filter(
+    (c) => !courseAssignments.value.has(c.course_id) && !isGroupAlreadyAssigned(c.course_id)
+  ).length + retakeCourses.value.length
+);
+
+const filteredPoolCourses = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim();
+  let courses = plannedCourses.value.filter((c) => !courseAssignments.value.has(c.course_id));
+  if (query) courses = courses.filter((c) => c.course_code.toLowerCase().includes(query) || c.course_name.toLowerCase().includes(query));
+  const grouped = new Map<number, AvailableCourse[]>();
+  for (const course of courses) {
+    if (!grouped.has(course.default_semester)) grouped.set(course.default_semester, []);
+    grouped.get(course.default_semester)!.push(course);
+  }
+  return grouped;
+});
+
+const filteredRetakeCourses = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim();
+  if (!query) return retakeCourses.value;
+  return retakeCourses.value.filter((c) => c.course_code.toLowerCase().includes(query) || c.course_name.toLowerCase().includes(query));
+});
+
+// ============ Semester Column Helpers ============
+const getAssignedCoursesForSemester = (sem: number) =>
+  plannedCourses.value.filter((c) => courseAssignments.value.get(c.course_id) === sem);
+
+const getAssignedRetakesForSemester = (sem: number) =>
+  (coursesData.value?.retake_courses || []).filter((c) =>
+    courseAssignments.value.get(c.course_id) === sem &&
+    !failedCourses.value.some((f) => f.course_id === c.course_id && f.semester === sem),
+  );
+
+const creditBarWidth = (sem: number): string => {
+  const limits = getSemesterLimits(sem);
+  if (!limits || limits.max === 0) return '0%';
+  return `${Math.min(100, (getSemesterCredits(sem) / limits.max) * 100)}%`;
+};
+
+const getSemesterColumnClasses = (sem: number) => {
+  const cid = draggedCourseId.value;
+  const hovering = dragOverSemester.value === sem;
+  if (!isDragging.value || !cid) return 'border-base-300';
+  const canDrop = !isCourseDisabledForSemester(cid, sem);
+  if (hovering && canDrop) return 'border-success bg-success/5 ring-2 ring-success/30';
+  if (hovering && !canDrop) return 'border-error bg-error/5 ring-2 ring-error/20';
+  if (canDrop) return 'border-success/40';
+  return 'border-base-300 opacity-50';
+};
 </script>
 
 <template>
-  <div class="p-4 w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden">
-    <!-- Toast Notification -->
-    <div v-if="toast.show" class="toast toast-top toast-end z-50">
-      <div
-        class="alert shadow-xl border backdrop-blur-md"
-        :class="{
-          'alert-info border-info/20 text-info-content bg-info/10': toast.type === 'info',
-          'alert-success border-success/20 text-success-content bg-success/10': toast.type === 'success',
-          'alert-warning border-warning/20 text-warning-content bg-warning/10': toast.type === 'warning',
-          'alert-error border-error/20 text-error-content bg-error/10': toast.type === 'error',
-        }"
-      >
-        <span class="font-bold">{{ toast.message }}</span>
-      </div>
-    </div>
+  <div class="p-4 w-full h-[calc(100vh-64px)] flex flex-col overflow-hidden relative">
+    <!-- Ambient glow -->
+    <div class="absolute -top-10 -left-10 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+    <div class="absolute top-40 -right-10 w-64 h-64 bg-secondary/10 rounded-full blur-3xl pointer-events-none transform-gpu -z-10"></div>
+
     <!-- Header -->
-    <div class="flex items-start gap-4 mb-4 flex-shrink-0">
-      <button class="btn btn-ghost btn-sm mt-1" @click="goBack">← Back</button>
-      <div class="flex-1">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 class="text-2xl font-semibold">Schedule Semester</h1>
-            <p v-if="planData" class="text-sm text-base-content/60">
-              {{ planData.student.name }} ({{ planData.student.matric_no }})
-            </p>
-          </div>
+    <div class="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-3 flex-shrink-0 relative z-10">
+      <div class="flex items-start gap-4">
+        <button class="btn btn-ghost btn-sm mt-2 border border-base-200 shadow-sm" @click="goBack">
+          &larr; Back
+        </button>
+        <div class="space-y-2">
           <div class="flex items-center gap-2">
-            <label class="label cursor-pointer gap-2">
-              <span class="label-text text-sm">Program Structure</span>
-              <input
-                type="checkbox"
-                v-model="showProgramStructure"
-                class="toggle toggle-sm toggle-primary"
-              />
-            </label>
-            <button
-              class="btn btn-primary"
-              :disabled="saveLoading"
-              @click="saveChanges"
-            >
-              <span
-                v-if="saveLoading"
-                class="loading loading-spinner loading-xs"
-              ></span>
-              💾 Save
-            </button>
+            <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-base-content">
+              Schedule <span class="text-primary">Semester</span>
+            </h1>
           </div>
+          <p v-if="planData" class="text-base-content/60 font-medium max-w-xl">
+            {{ planData.student.name }} ({{ planData.student.matric_no }})
+          </p>
         </div>
+      </div>
+      <div class="flex items-center gap-2 mt-2 md:mt-0">
+        <button class="btn btn-outline border-base-300 shadow-sm hover:border-primary/50 btn-sm transition-colors" @click="openConfigModal">⚙️ Configure</button>
+        <button v-if="courseAssignments.size > 0" class="btn btn-ghost btn-sm text-error border border-error/20 hover:bg-error/10" @click="clearAllCourses">🗑️ Clear</button>
+        <button
+          class="btn btn-outline btn-secondary border-secondary/40 shadow-sm hover:-translate-y-0.5 transition-transform btn-sm gap-1.5"
+          @click="isPreviewAllOpen = true"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+          </svg>
+          Preview All
+        </button>
+        <button class="btn btn-primary shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-transform btn-sm" :disabled="saveLoading" @click="saveChanges">
+          <span v-if="saveLoading" class="loading loading-spinner loading-xs"></span>
+          💾 Save
+        </button>
       </div>
     </div>
 
     <!-- Loading -->
-    <div
-      v-if="loading || coursesLoading"
-      class="flex justify-center py-12 flex-1"
-    >
+    <div v-if="loading || coursesLoading" class="flex justify-center py-12 flex-1">
       <span class="loading loading-spinner loading-lg"></span>
     </div>
 
     <template v-else-if="planData && coursesData">
+      <!-- CGPA Probation Warning -->
+      <div v-if="coursesData.on_probation" class="alert alert-warning mb-3 flex-shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <div>
+          <h3 class="font-bold">Academic Probation — CGPA {{ coursesData.cgpa }}</h3>
+          <div class="text-sm">Credit hours restricted to minimum only ({{ coursesData.credit_limits.long_max }} cr long / {{ coursesData.credit_limits.short_max }} cr short).</div>
+        </div>
+      </div>
+
       <!-- Summary Bar -->
-      <div
-        class="flex flex-wrap items-center gap-4 mb-4 p-3 bg-base-200 rounded-lg flex-shrink-0"
-      >
+      <div class="flex flex-wrap items-center gap-4 mb-3 p-3 bg-base-200 rounded-lg flex-shrink-0">
         <div class="flex items-center gap-2">
-          <span class="text-sm text-base-content/60">To Schedule:</span>
-          <span class="font-semibold text-primary"
-            >{{ totalAssignedCredits }} / {{ totalPlannedCredits }} cr</span
-          >
+          <span class="text-sm text-base-content/60">Scheduled:</span>
+          <span class="font-semibold text-primary">{{ totalAssignedCredits }} / {{ totalPlannedCredits }} cr</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Transferred:</span>
-          <span class="font-semibold text-success"
-            >{{ transferredCourses.length }} courses ({{
-              planData.summary.transferred_credits
-            }}
-            cr)</span
-          >
+          <span class="font-semibold text-success">{{ transferredCourses.length }} courses ({{ planData.summary.transferred_credits }} cr)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Unassigned:</span>
-          <span
-            class="font-semibold"
-            :class="
-              plannedCourses.filter((c) => !isAssigned(c.course_id)).length > 0
-                ? 'text-warning'
-                : 'text-success'
-            "
-          >
-            {{ plannedCourses.filter((c) => !isAssigned(c.course_id)).length }}
-            courses
-          </span>
+          <span class="font-semibold" :class="unassignedCount > 0 ? 'text-warning' : 'text-success'">{{ unassignedCount }} courses</span>
         </div>
+        <div class="flex-1"></div>
+        <span class="text-xs text-base-content/40">Drag courses → Drop on semester</span>
       </div>
 
-      <!-- Semester Tabs (Horizontal) -->
-      <div class="flex items-center gap-2 mb-4 flex-shrink-0">
-        <div class="tabs tabs-boxed bg-base-200 gap-1 overflow-x-auto flex-1">
-          <button
-            v-for="sem in availableSemesters"
-            :key="sem"
-            class="tab gap-2"
-            :class="selectedSemester === sem ? 'tab-active' : ''"
-            @click="selectedSemester = sem"
-          >
-            <span>Sem {{ sem }}</span>
-            <span v-if="getSemesterTypeLabel(sem)" class="text-xs opacity-70"
-              >({{ getSemesterTypeLabel(sem) }})</span
-            >
-            <span
-              class="badge badge-sm"
-              :class="{
-                'badge-success': getCreditStatus(sem) === 'ok',
-                'badge-error': getCreditStatus(sem) === 'over',
-                'badge-warning': getCreditStatus(sem) === 'under',
-                'badge-ghost':
-                  getCreditStatus(sem) === 'empty' ||
-                  getCreditStatus(sem) === 'li',
-                'badge-primary':
-                  selectedSemester === sem &&
-                  (getCreditStatus(sem) === 'empty' ||
-                    getCreditStatus(sem) === 'li'),
-              }"
-            >
-              {{ getSemesterCredits(sem)
-              }}<template v-if="getSemesterCreditLimits(sem)"
-                >/{{ getSemesterCreditLimits(sem)!.min }}–{{
-                  getSemesterCreditLimits(sem)!.max
-                }}</template
-              >
-            </span>
-          </button>
-        </div>
-        <button
-          class="btn btn-outline btn-sm shrink-0"
-          @click="openConfigModal"
-        >
-          ⚙️ Configure
-        </button>
-        <button
-          v-if="courseAssignments.size > 0"
-          class="btn btn-ghost btn-sm text-error shrink-0"
-          @click="clearAllCourses"
-        >
-          🗑️ Clear All
-        </button>
-      </div>
-
-      <!-- Main Content - Split View with Independent Scroll -->
-      <div
-        class="grid gap-4 flex-1 min-h-0"
-        :class="showProgramStructure ? 'lg:grid-cols-2' : ''"
-      >
-        <!-- Left: Current Semester Schedule -->
+      <!-- Main Layout: Course Pool + Semester Columns -->
+      <div class="flex gap-4 flex-1 min-h-0">
+        <!-- Left: Course Pool -->
         <div
-          class="flex flex-col min-h-0 bg-base-100 rounded-lg border border-base-300 overflow-hidden"
+          class="flex-1 flex flex-col min-h-0 bg-base-100 rounded-lg border overflow-hidden transition-colors"
+          :class="isDragging && dragSource === 'column' ? 'border-success/50 ring-2 ring-success/20' : 'border-base-300'"
+          @dragover.prevent="onPoolDragOver"
+          @dragleave="onPoolDragLeave"
+          @drop.prevent="onPoolDrop"
         >
-          <!-- Fixed Header -->
-          <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100">
-            <div class="flex items-center justify-between">
-              <h2 class="font-semibold">
-                {{
-                  selectedSemester
-                    ? formatSemester(selectedSemester)
-                    : "Select a Semester"
-                }}
-              </h2>
-              <span v-if="selectedSemester" class="badge badge-primary"
-                >{{ getSemesterCredits(selectedSemester) }} credits</span
-              >
-            </div>
+          <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100 space-y-2">
+            <h2 class="font-semibold flex items-center gap-2">
+              📋 Course Pool
+              <span class="badge badge-sm badge-ghost">{{ unassignedCount }}</span>
+            </h2>
+            <input v-model="searchQuery" type="text" placeholder="Search courses..." class="input input-sm input-bordered w-full" />
           </div>
-
-          <!-- Scrollable Content -->
-          <div class="flex-1 overflow-y-auto p-3 space-y-3">
-            <!-- Passed/Failed Courses (Locked) -->
-            <div
-              v-if="
-                passedCourses.filter((c) => c.semester === selectedSemester)
-                  .length > 0
-              "
-            >
-              <h3
-                class="text-xs font-medium text-success/80 mb-2 uppercase tracking-wide"
-              >
-                Completed (Locked)
-              </h3>
+          <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <!-- Grouped by default semester -->
+            <div v-for="[sem, courses] in Array.from(filteredPoolCourses).sort((a, b) => a[0] - b[0])" :key="'pool-' + sem">
+              <h4 class="text-xs font-medium text-base-content/50 mb-1.5 uppercase tracking-wide flex items-center justify-between">
+                <span>Semester {{ sem }}</span>
+                <span class="badge badge-xs badge-ghost">{{ courses.length }}</span>
+              </h4>
               <div class="space-y-1">
                 <div
-                  v-for="course in passedCourses.filter(
-                    (c) => c.semester === selectedSemester,
-                  )"
-                  :key="course.course_id"
-                  class="flex items-center justify-between p-2 rounded border bg-success/10 border-success/30"
+                  v-for="course in courses" :key="course.course_id"
+                  class="pool-card flex items-center gap-2 p-2 rounded border text-sm transition-colors"
+                  :class="isPoolCourseDisabled(course.course_id) ? 'border-base-300 bg-base-200/30 opacity-40 cursor-not-allowed' : 'border-base-300 bg-base-200/50 hover:bg-primary/10 hover:border-primary/30 cursor-grab active:cursor-grabbing'"
+                  :draggable="!isPoolCourseDisabled(course.course_id)"
+                  @dragstart="onDragStart($event, course.course_id, 'pool')"
+                  @dragend="onDragEnd"
                 >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                  </div>
-                  <span class="badge badge-xs badge-success shrink-0">
-                    Passed
-                  </span>
+                  <span class="font-mono text-xs shrink-0 text-primary/80">{{ course.course_code }}</span>
+                  <span class="truncate flex-1">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                  <span v-if="isPoolCourseDisabled(course.course_id)" class="badge badge-xs badge-warning shrink-0">{{ getAssignedFromGroup(course.course_id) }}</span>
                 </div>
               </div>
             </div>
-
-            <!-- Failed Courses (Locked in original semester) -->
-            <div
-              v-if="
-                failedCourses.filter((c) => c.semester === selectedSemester)
-                  .length > 0
-              "
-            >
-              <h3
-                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
-              >
-                Failed (Locked)
-              </h3>
-              <div class="space-y-1">
-                <div
-                  v-for="course in failedCourses.filter(
-                    (c) => c.semester === selectedSemester,
-                  )"
-                  :key="'failed-' + course.course_id"
-                  class="flex items-center justify-between p-2 rounded border bg-error/10 border-error/30"
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                  </div>
-                  <div class="flex items-center gap-1 shrink-0">
-                    <span class="badge badge-xs badge-error">Failed</span>
-                    <span
-                      v-if="failedCourseIds.has(course.course_id)"
-                      class="badge badge-xs badge-warning"
-                      >Needs Retake</span
-                    >
-                  </div>
-                </div>
-              </div>
+            <!-- Empty state -->
+            <div v-if="filteredPoolCourses.size === 0 && filteredRetakeCourses.length === 0" class="text-center py-8 text-base-content/40 text-sm">
+              <template v-if="searchQuery">No matching courses</template>
+              <template v-else>✓ All courses assigned!</template>
             </div>
-
-            <!-- Assigned Courses -->
-            <div>
-              <h3
-                class="text-xs font-medium text-base-content/60 mb-2 uppercase tracking-wide"
-              >
-                Assigned to this Semester
-              </h3>
+            <!-- Retake Courses -->
+            <div v-if="filteredRetakeCourses.length > 0">
+              <h4 class="text-xs font-medium text-error/80 mb-1.5 uppercase tracking-wide flex items-center justify-between">
+                <span>🔄 Retake Courses</span>
+                <span class="badge badge-xs badge-error">{{ filteredRetakeCourses.length }}</span>
+              </h4>
               <div class="space-y-1">
                 <div
-                  v-for="course in plannedCourses.filter(
-                    (c) =>
-                      courseAssignments.get(c.course_id) === selectedSemester,
-                  )"
-                  :key="course.course_id"
-                  class="flex items-center justify-between p-2 bg-primary/10 rounded border border-primary/20"
+                  v-for="course in filteredRetakeCourses" :key="'retake-pool-' + course.course_id"
+                  class="pool-card flex items-center gap-2 p-2 rounded border text-sm border-error/30 bg-error/5 hover:bg-error/10 cursor-grab active:cursor-grabbing transition-colors"
+                  draggable="true"
+                  @dragstart="onDragStart($event, course.course_id, 'pool')"
+                  @dragend="onDragEnd"
                 >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                  </div>
-                  <button
-                    class="btn btn-ghost btn-xs text-error shrink-0"
-                    @click="removeCourse(course.course_id)"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div
-                  v-if="
-                    plannedCourses.filter(
-                      (c) =>
-                        courseAssignments.get(c.course_id) === selectedSemester,
-                    ).length === 0
-                  "
-                  class="text-center py-4 text-base-content/40 text-sm"
-                >
-                  No courses assigned to this semester
-                </div>
-              </div>
-            </div>
-
-            <!-- Assigned Retake Courses -->
-            <div
-              v-if="
-                coursesData?.retake_courses?.filter(
-                  (c) =>
-                    courseAssignments.get(c.course_id) === selectedSemester &&
-                    !failedCourses.some(
-                      (f) =>
-                        f.course_id === c.course_id &&
-                        f.semester === selectedSemester,
-                    ),
-                ).length
-              "
-            >
-              <h3
-                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
-              >
-                🔄 Retake Courses (Assigned)
-              </h3>
-              <div class="space-y-1">
-                <div
-                  v-for="course in coursesData?.retake_courses?.filter(
-                    (c) =>
-                      courseAssignments.get(c.course_id) === selectedSemester &&
-                      !failedCourses.some(
-                        (f) =>
-                          f.course_id === c.course_id &&
-                          f.semester === selectedSemester,
-                      ),
-                  )"
-                  :key="'retake-assigned-' + course.course_id"
-                  class="flex items-center justify-between p-2 bg-error/10 rounded border border-error/20"
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                    <span class="badge badge-xs badge-error shrink-0"
-                      >Retake</span
-                    >
-                  </div>
-                  <button
-                    class="btn btn-ghost btn-xs text-error shrink-0"
-                    @click="removeCourse(course.course_id)"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Unassigned Courses -->
-            <div>
-              <h3
-                class="text-xs font-medium text-base-content/60 mb-2 uppercase tracking-wide"
-              >
-                Unassigned Courses (Click to Add)
-              </h3>
-              <div class="space-y-1">
-                <div
-                  v-for="course in plannedCourses.filter(
-                    (c) => !courseAssignments.has(c.course_id),
-                  )"
-                  :key="course.course_id"
-                  class="flex items-center justify-between p-2 border rounded transition-colors"
-                  :class="
-                    isCourseDisabled(course.course_id)
-                      ? 'border-base-300 bg-base-200/30 opacity-50 cursor-not-allowed'
-                      : 'border-base-300 hover:bg-base-200 cursor-pointer'
-                  "
-                  @click="
-                    !isCourseDisabled(course.course_id) &&
-                    assignCourse(course.course_id, selectedSemester!)
-                  "
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs badge-ghost shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                    <span class="badge badge-xs badge-outline shrink-0"
-                      >S{{ course.default_semester }}</span
-                    >
-                    <span
-                      v-if="isCourseDisabled(course.course_id)"
-                      class="badge badge-xs badge-warning shrink-0"
-                    >
-                      {{ getCourseDisabledReason(course.course_id) }}
-                    </span>
-                  </div>
-                  <span
-                    v-if="!isCourseDisabled(course.course_id)"
-                    class="text-success text-sm shrink-0"
-                    >+</span
-                  >
-                  <span v-else class="text-base-content/30 text-sm shrink-0"
-                    >—</span
-                  >
-                </div>
-                <div
-                  v-if="
-                    plannedCourses.filter(
-                      (c) => !courseAssignments.has(c.course_id),
-                    ).length === 0
-                  "
-                  class="text-center py-4 text-success text-sm"
-                >
-                  ✓ All courses have been assigned
-                </div>
-              </div>
-            </div>
-
-            <!-- Retake Courses (Failed, need rescheduling) -->
-            <div v-if="retakeCourses.length > 0">
-              <h3
-                class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide"
-              >
-                🔄 Retake Courses (Click to Reschedule)
-              </h3>
-              <div class="space-y-1">
-                <div
-                  v-for="course in retakeCourses"
-                  :key="'retake-' + course.course_id"
-                  class="flex items-center justify-between p-2 border border-error/30 rounded transition-colors"
-                  :class="
-                    isCourseDisabled(course.course_id)
-                      ? 'bg-error/5 opacity-50 cursor-not-allowed'
-                      : 'bg-error/5 hover:bg-error/10 cursor-pointer'
-                  "
-                  @click="
-                    !isCourseDisabled(course.course_id) &&
-                    assignCourse(course.course_id, selectedSemester!)
-                  "
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="text-sm truncate">{{
-                      course.course_name
-                    }}</span>
-                    <span class="badge badge-xs badge-ghost shrink-0"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                    <span class="badge badge-xs badge-error shrink-0"
-                      >Retake</span
-                    >
-                    <span
-                      v-if="isCourseDisabled(course.course_id)"
-                      class="badge badge-xs badge-warning shrink-0"
-                    >
-                      {{ getCourseDisabledReason(course.course_id) }}
-                    </span>
-                  </div>
-                  <span
-                    v-if="!isCourseDisabled(course.course_id)"
-                    class="text-error text-sm shrink-0"
-                    >+</span
-                  >
-                  <span v-else class="text-base-content/30 text-sm shrink-0"
-                    >—</span
-                  >
+                  <span class="font-mono text-xs shrink-0">{{ course.course_code }}</span>
+                  <span class="truncate flex-1">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                  <span class="badge badge-xs badge-error shrink-0">Retake</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Right: Program Structure Reference -->
-        <div
-          v-if="showProgramStructure"
-          class="flex flex-col min-h-0 bg-base-100 rounded-lg border border-base-300 overflow-hidden"
-        >
-          <!-- Fixed Header -->
-          <div class="p-3 border-b border-base-300 flex-shrink-0 bg-base-100">
-            <div class="flex items-center justify-between">
-              <h2 class="font-semibold">📚 Program Structure</h2>
-              <div class="flex items-center gap-2 text-xs">
-                <span class="flex items-center gap-1"
-                  ><span class="w-2 h-2 rounded bg-success"></span>
-                  Transferred</span
-                >
-                <span class="flex items-center gap-1"
-                  ><span class="w-2 h-2 rounded bg-primary"></span>
-                  Assigned</span
-                >
-              </div>
-            </div>
-            <p
-              v-if="selectedSemester"
-              class="text-xs text-base-content/60 mt-1"
-            >
-              💡 Click on unassigned courses to add to
-              {{ formatSemester(selectedSemester) }}
-            </p>
-          </div>
-
-          <!-- Scrollable Content -->
-          <div class="flex-1 overflow-y-auto p-3">
-            <div
-              v-for="[sem, courses] in Array.from(programStructure).sort(
-                (a, b) => a[0] - b[0],
-              )"
-              :key="sem"
-              class="mb-4 last:mb-0"
-            >
-              <div
-                class="flex items-center justify-between mb-2 sticky top-0 bg-base-100 py-1 -mt-1"
-              >
-                <h4 class="font-medium text-sm flex items-center gap-2">
-                  <span
-                    :class="sem === selectedSemester ? 'text-primary' : ''"
-                    >{{ formatSemester(sem) }}</span
-                  >
-                  <span
-                    v-if="sem === selectedSemester"
-                    class="badge badge-primary badge-xs"
-                    >Current</span
-                  >
-                </h4>
-                <span class="badge badge-outline badge-sm">
-                  {{ courses.reduce((sum, c) => sum + c.credit_hour, 0) }} cr
+        <!-- Right: Semester Tab Panel -->
+        <div class="flex-1 flex flex-col min-h-0 bg-base-100 rounded-lg border border-base-300 overflow-hidden">
+          <!-- Panel Toolbar: Burger Semester Picker -->
+          <div class="flex items-center gap-2 px-3 py-2 border-b border-base-300 flex-shrink-0 bg-base-100">
+            <!-- Burger dropdown for semester selection -->
+            <div class="dropdown">
+              <label tabindex="0" class="btn btn-ghost btn-sm gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                <span class="text-sm font-medium">
+                  {{ selectedSemester ? `Semester ${selectedSemester}` : 'Select Semester' }}
                 </span>
-              </div>
-              <div class="space-y-1">
-                <div
-                  v-for="course in courses"
-                  :key="course.course_id"
-                  class="flex items-center justify-between p-2 rounded text-sm transition-colors"
-                  :class="{
-                    'bg-success/20 border border-success/30': isTransferred(
-                      course.course_id,
-                    ),
-                    'bg-success/15 border border-success/25':
-                      isLocked(course.course_id) &&
-                      !isTransferred(course.course_id),
-                    'bg-primary/10 border border-primary/20':
-                      isAssigned(course.course_id) &&
-                      !isTransferred(course.course_id) &&
-                      !isLocked(course.course_id),
-                    'bg-base-200/30 opacity-50 cursor-not-allowed':
-                      !isAssigned(course.course_id) &&
-                      !isTransferred(course.course_id) &&
-                      !isLocked(course.course_id) &&
-                      isCourseDisabled(course.course_id),
-                    'bg-base-200/50 hover:bg-base-200 cursor-pointer':
-                      !isAssigned(course.course_id) &&
-                      !isTransferred(course.course_id) &&
-                      !isLocked(course.course_id) &&
-                      !isCourseDisabled(course.course_id),
-                  }"
-                  @click="
-                    !isTransferred(course.course_id) &&
-                    !isLocked(course.course_id) &&
-                    !isCourseDisabled(course.course_id) &&
-                    quickAssign(course)
-                  "
-                >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-mono text-xs shrink-0">{{
-                      course.course_code
-                    }}</span>
-                    <span class="truncate">{{ course.course_name }}</span>
-                  </div>
-                  <div class="flex items-center gap-1 shrink-0">
-                    <span class="badge badge-xs"
-                      >{{ course.credit_hour }}cr</span
-                    >
-                    <span
-                      v-if="isTransferred(course.course_id)"
-                      class="badge badge-xs badge-success"
-                      >T</span
-                    >
-                    <span
-                      v-else-if="isLocked(course.course_id)"
-                      class="badge badge-xs badge-success"
-                    >
-                      {{
-                        passedCourses.find(
-                          (c) => c.course_id === course.course_id,
-                        )?.status === "Passed"
-                          ? "✓"
-                          : "✗"
-                      }}
-                    </span>
-                    <span
-                      v-else-if="isAssigned(course.course_id)"
-                      class="badge badge-xs badge-primary"
-                    >
-                      S{{ getAssignedSemester(course.course_id) }}
-                    </span>
-                    <span
-                      v-else-if="isCourseDisabled(course.course_id)"
-                      class="badge badge-xs badge-warning"
-                      >{{ getCourseDisabledReason(course.course_id) }}</span
-                    >
-                    <span v-else class="text-success">+</span>
-                  </div>
-                </div>
+                <span v-if="selectedSemester && getSemesterTypeLabel(selectedSemester)" class="badge badge-xs"
+                  :class="{ 'badge-primary': getSemesterTypeLabel(selectedSemester) === 'Long', 'badge-secondary': getSemesterTypeLabel(selectedSemester) === 'Short', 'badge-accent': getSemesterTypeLabel(selectedSemester) === 'LI' }"
+                >{{ getSemesterTypeLabel(selectedSemester) }}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+              </label>
+              <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box shadow-sm border border-base-300 w-64 p-1.5 z-50 mt-1">
+                <li v-for="sem in availableSemesters" :key="'drop-' + sem">
+                  <button
+                    class="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-base-200 transition-colors"
+                    :class="selectedSemester === sem ? 'bg-primary/10 text-primary font-medium' : ''"
+                    @click="selectedSemester = sem"
+                  >
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium">Sem {{ sem }}</span>
+                      <span v-if="getSemesterTypeLabel(sem)" class="badge badge-xs"
+                        :class="{ 'badge-primary': getSemesterTypeLabel(sem) === 'Long', 'badge-secondary': getSemesterTypeLabel(sem) === 'Short', 'badge-accent': getSemesterTypeLabel(sem) === 'LI' }"
+                      >{{ getSemesterTypeLabel(sem) }}</span>
+                    </div>
+                    <span class="badge badge-xs badge-neutral"
+                    >{{ getSemesterCredits(sem) }} credit</span>
+                  </button>
+                </li>
+                <li class="border-t border-base-300 mt-1 pt-1">
+                  <button class="flex items-center gap-2 px-3 py-2 text-sm text-base-content/50 hover:text-base-content hover:bg-base-200 rounded-lg w-full" @click="addSemester">
+                    <span>+</span> Add Semester
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <div class="flex-1"></div>
+          </div>
+
+          <!-- Panel Header (for selected semester) -->
+          <div v-if="selectedSemester" class="px-4 py-2.5 border-b border-base-300 flex-shrink-0 bg-base-100 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <h2 class="font-semibold">Semester {{ selectedSemester }}</h2>
+              <span v-if="getSemesterTypeLabel(selectedSemester)" class="badge badge-outline badge-sm">{{ getSemesterTypeLabel(selectedSemester) }}</span>
+              <span class="badge badge-sm"
+                :class="{ 'badge-success': getSemesterCreditStatus(selectedSemester) === 'ok', 'badge-error': getSemesterCreditStatus(selectedSemester) === 'over', 'badge-warning': getSemesterCreditStatus(selectedSemester) === 'under', 'badge-ghost': getSemesterCreditStatus(selectedSemester) === 'empty' || getSemesterCreditStatus(selectedSemester) === 'li' }"
+              >
+                {{ getSemesterCredits(selectedSemester) }}<template v-if="getSemesterLimits(selectedSemester)"> / {{ getSemesterLimits(selectedSemester)!.min }}–{{ getSemesterLimits(selectedSemester)!.max }}</template> credit
+              </span>
+            </div>
+            <!-- Credit progress bar -->
+            <div v-if="getSemesterLimits(selectedSemester)" class="flex-1 max-w-48">
+              <div class="h-2 bg-base-200 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-colors"
+                  :class="{ 'bg-success': getSemesterCreditStatus(selectedSemester) === 'ok', 'bg-error': getSemesterCreditStatus(selectedSemester) === 'over', 'bg-warning': getSemesterCreditStatus(selectedSemester) === 'under', 'bg-base-300': getSemesterCreditStatus(selectedSemester) === 'empty' }"
+                  :style="{ width: creditBarWidth(selectedSemester) }"
+                ></div>
               </div>
             </div>
+          </div>
+
+          <!-- Drop Zone Content Area -->
+          <div
+            class="flex-1 overflow-y-auto p-4 transition-colors"
+            :class="isDragging && selectedSemester ? (draggedCourseId && !isCourseDisabledForSemester(draggedCourseId, selectedSemester) ? 'bg-success/5 ring-inset ring-2 ring-success/30' : 'bg-error/5 ring-inset ring-2 ring-error/20') : ''"
+            @dragover.prevent="selectedSemester && onDragOver($event, selectedSemester)"
+            @dragleave="onDragLeave($event)"
+            @drop.prevent="selectedSemester && onDrop($event, selectedSemester)"
+          >
+            <!-- No semester selected -->
+            <div v-if="!selectedSemester" class="flex items-center justify-center h-full text-base-content/30 text-sm">
+              Select a semester tab above
+            </div>
+
+            <template v-else>
+              <!-- Drop hint when dragging invalid -->
+              <div v-if="isDragging && draggedCourseId && isCourseDisabledForSemester(draggedCourseId, selectedSemester)" class="mb-3 alert alert-error alert-sm py-2 text-sm">
+                ⛔ {{ getDropReason(draggedCourseId, selectedSemester) }}
+              </div>
+              <!-- Drop hint when dragging valid -->
+              <div v-else-if="isDragging && draggedCourseId && !isCourseDisabledForSemester(draggedCourseId, selectedSemester)" class="mb-3 alert alert-success alert-sm py-2 text-sm">
+                ✓ Drop to assign to Semester {{ selectedSemester }}
+              </div>
+
+              <div class="space-y-3">
+                <!-- Locked: Passed Courses -->
+                <div v-if="passedCourses.filter(c => c.semester === selectedSemester).length > 0">
+                  <h3 class="text-xs font-medium text-success/80 mb-2 uppercase tracking-wide">Completed (Locked)</h3>
+                  <div class="space-y-1">
+                    <div v-for="course in passedCourses.filter(c => c.semester === selectedSemester)" :key="'passed-' + course.course_id"
+                      class="flex items-center justify-between p-2.5 rounded-lg border bg-success/10 border-success/30 text-sm">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="font-mono text-xs shrink-0">{{ course.course_code }}</span>
+                        <span class="truncate">{{ course.course_name }}</span>
+                        <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                      </div>
+                      <span class="badge badge-xs badge-success shrink-0">Passed</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Locked: Failed Courses -->
+                <div v-if="failedCourses.filter(c => c.semester === selectedSemester).length > 0">
+                  <h3 class="text-xs font-medium text-error/80 mb-2 uppercase tracking-wide">Failed (Locked)</h3>
+                  <div class="space-y-1">
+                    <div v-for="course in failedCourses.filter(c => c.semester === selectedSemester)" :key="'failed-' + course.course_id"
+                      class="flex items-center justify-between p-2.5 rounded-lg border bg-error/10 border-error/30 text-sm">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="font-mono text-xs shrink-0">{{ course.course_code }}</span>
+                        <span class="truncate">{{ course.course_name }}</span>
+                        <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                      </div>
+                      <div class="flex items-center gap-1 shrink-0">
+                        <span class="badge badge-xs badge-error">Failed</span>
+                        <span v-if="failedCourseIds.has(course.course_id)" class="badge badge-xs badge-warning">Needs Retake</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Assigned Planned Courses -->
+                <div v-if="getAssignedCoursesForSemester(selectedSemester).length > 0 || getAssignedRetakesForSemester(selectedSemester).length > 0">
+                  <h3 class="text-xs font-medium text-base-content/60 mb-2 uppercase tracking-wide">Assigned Courses</h3>
+                  <div class="space-y-1">
+                    <div
+                      v-for="course in getAssignedCoursesForSemester(selectedSemester)" :key="'assigned-' + course.course_id"
+                      class="group flex items-center justify-between p-2.5 rounded-lg border bg-primary/10 border-primary/20 text-sm cursor-grab active:cursor-grabbing hover:bg-primary/15 transition-colors"
+                      draggable="true"
+                      @dragstart="onDragStart($event, course.course_id, 'column')"
+                      @dragend="onDragEnd"
+                    >
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="font-mono text-xs shrink-0 text-primary/80">{{ course.course_code }}</span>
+                        <span class="truncate">{{ course.course_name }}</span>
+                        <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                      </div>
+                      <button class="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity shrink-0" @click.stop="removeCourse(course.course_id)">✕</button>
+                    </div>
+                    <!-- Retakes -->
+                    <div
+                      v-for="course in getAssignedRetakesForSemester(selectedSemester)" :key="'retake-col-' + course.course_id"
+                      class="group flex items-center justify-between p-2.5 rounded-lg border bg-error/10 border-error/20 text-sm cursor-grab active:cursor-grabbing hover:bg-error/15 transition-colors"
+                      draggable="true"
+                      @dragstart="onDragStart($event, course.course_id, 'column')"
+                      @dragend="onDragEnd"
+                    >
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="font-mono text-xs shrink-0">{{ course.course_code }}</span>
+                        <span class="truncate">{{ course.course_name }}</span>
+                        <span class="badge badge-xs badge-outline shrink-0">{{ course.credit_hour }} credit</span>
+                        <span class="badge badge-xs badge-error shrink-0">Retake</span>
+                      </div>
+                      <button class="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity shrink-0" @click.stop="removeCourse(course.course_id)">✕</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Empty State (when no assigned and no locked) -->
+                <div v-if="passedCourses.filter(c => c.semester === selectedSemester).length === 0 && failedCourses.filter(c => c.semester === selectedSemester).length === 0 && getAssignedCoursesForSemester(selectedSemester).length === 0 && getAssignedRetakesForSemester(selectedSemester).length === 0"
+                  class="flex flex-col items-center justify-center h-48 gap-3 text-base-content/30 border-2 border-dashed border-base-300 rounded-xl">
+                  <span class="text-3xl">📥</span>
+                  <span class="text-sm">Drag courses here to assign to Semester {{ selectedSemester }}</span>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>
 
       <!-- Transferred Courses Collapse -->
-      <div
-        v-if="transferredCourses.length > 0"
-        class="collapse collapse-arrow bg-success/5 border border-success/20 rounded-lg mt-4 flex-shrink-0"
-      >
+
+      <div v-if="transferredCourses.length > 0" class="collapse collapse-arrow bg-success/5 border border-success/20 rounded-lg mt-3 flex-shrink-0">
         <input type="checkbox" />
         <div class="collapse-title py-2 min-h-0 text-sm font-medium">
-          View {{ transferredCourses.length }} Transferred Courses ({{
-            planData.summary.transferred_credits
-          }}
-          credits)
+          View {{ transferredCourses.length }} Transferred Courses ({{ planData.summary.transferred_credits }} credits)
         </div>
         <div class="collapse-content">
           <div class="flex flex-wrap gap-2 pt-2">
-            <span
-              v-for="course in transferredCourses"
-              :key="course.course_id"
-              class="badge badge-success gap-1"
-            >
-              {{ course.course_code }} ({{ course.credit_hour }}cr)
+            <span v-for="course in transferredCourses" :key="course.course_id" class="badge badge-success gap-1">
+              {{ course.course_code }} ({{ course.credit_hour }} credit)
             </span>
           </div>
         </div>
       </div>
     </template>
 
+    <!-- Toast Notification -->
+    <Transition name="toast">
+      <div v-if="toastMessage" class="fixed bottom-6 right-6 z-50 alert shadow-sm max-w-sm"
+        :class="{ 'alert-error': toastType === 'error', 'alert-warning': toastType === 'warning', 'alert-success': toastType === 'success' }">
+        <span class="text-sm">{{ toastMessage }}</span>
+        <button class="btn btn-ghost btn-xs" @click="toastMessage = ''">✕</button>
+      </div>
+    </Transition>
+
     <!-- Configure Plan Modal -->
     <dialog class="modal" :class="{ 'modal-open': isConfigModalOpen }">
       <div class="modal-box max-w-2xl">
         <h3 class="font-bold text-lg mb-1">Configure Semester Plan</h3>
-        <p class="text-sm text-base-content/60 mb-4">
-          Add/remove semesters and set LI (Latihan Industri) for scheduling.
-        </p>
-
+        <p class="text-sm text-base-content/60 mb-4">Add/remove semesters and set LI (Latihan Industri) for scheduling.</p>
         <div class="overflow-x-auto">
           <table class="table table-sm">
             <thead>
@@ -1489,80 +1442,227 @@ watchEffect(() => {
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="(rule, index) in editableRules"
-                :key="rule.semester_number"
-              >
+              <tr v-for="(rule, index) in editableRules" :key="rule.semester_number">
+                <td><span class="badge badge-neutral badge-sm">{{ rule.semester_number }}</span></td>
+                <td><span class="badge badge-sm" :class="rule.semester_type === 'L' ? 'badge-primary' : 'badge-secondary'">{{ rule.semester_type === "L" ? "Long" : "Short" }}</span></td>
+                <td><input type="checkbox" class="checkbox checkbox-sm checkbox-accent" v-model="rule.is_li" /></td>
                 <td>
-                  <span class="badge badge-neutral badge-sm">{{
-                    rule.semester_number
-                  }}</span>
-                </td>
-                <td>
-                  <span
-                    class="badge badge-sm"
-                    :class="
-                      rule.semester_type === 'L'
-                        ? 'badge-primary'
-                        : 'badge-secondary'
-                    "
-                  >
-                    {{ rule.semester_type === "L" ? "Long" : "Short" }}
-                  </span>
-                </td>
-                <td>
-                  <input
-                    type="checkbox"
-                    class="checkbox checkbox-sm checkbox-accent"
-                    v-model="rule.is_li"
-                  />
-                </td>
-                <td>
-                  <span
-                    v-if="getConfigCreditRange(rule)"
-                    class="text-xs text-base-content/60"
-                  >
-                    {{ getConfigCreditRange(rule)!.min }}–{{
-                      getConfigCreditRange(rule)!.max
-                    }}
-                    cr
-                  </span>
+                  <span v-if="getConfigCreditRange(rule)" class="text-xs text-base-content/60">{{ getConfigCreditRange(rule)!.min }}–{{ getConfigCreditRange(rule)!.max }} cr</span>
                   <span v-else class="text-xs text-base-content/40">—</span>
                 </td>
                 <td>
-                  <button
-                    v-if="!hasLockedCoursesInSemester(rule.semester_number)"
-                    class="btn btn-ghost btn-xs text-error"
-                    @click="removeConfigSemester(index)"
-                    title="Remove semester"
-                  >
-                    ✕
-                  </button>
+                  <button v-if="!hasLockedCoursesInSemester(rule.semester_number)" class="btn btn-ghost btn-xs text-error" @click="removeConfigSemester(index)" title="Remove semester">✕</button>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-
-        <button
-          class="btn btn-outline btn-sm mt-3 w-full"
-          @click="addConfigSemester"
-        >
-          + Add Semester
-        </button>
-
+        <button class="btn btn-outline btn-sm mt-3 w-full" @click="addConfigSemester">+ Add Semester</button>
         <div class="modal-action">
-          <button class="btn btn-ghost" @click="isConfigModalOpen = false">
-            Discard
-          </button>
+          <button class="btn btn-ghost" @click="isConfigModalOpen = false">Discard</button>
           <button class="btn btn-primary" @click="applyConfig">Apply</button>
         </div>
       </div>
-      <form
-        method="dialog"
-        class="modal-backdrop"
-        @click="isConfigModalOpen = false"
-      >
+      <form method="dialog" class="modal-backdrop" @click="isConfigModalOpen = false">
+        <button>close</button>
+      </form>
+    </dialog>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- Preview All Semesters Modal -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <dialog class="modal" :class="{ 'modal-open': isPreviewAllOpen }">
+      <div class="modal-box max-w-5xl w-full max-h-[85vh] flex flex-col">
+        <!-- Modal Header -->
+        <div class="flex items-start justify-between mb-1 flex-shrink-0">
+          <div>
+            <h3 class="font-bold text-xl flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-secondary">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+              </svg>
+              Semester Schedule Overview
+            </h3>
+            <p v-if="planData" class="text-sm text-base-content/60 mt-0.5">
+              {{ planData.student.name }} ({{ planData.student.matric_no }}) &mdash; Read-only preview
+            </p>
+          </div>
+          <button class="btn btn-ghost btn-sm btn-circle" @click="isPreviewAllOpen = false">✕</button>
+        </div>
+
+        <!-- Summary Strip -->
+        <div class="flex flex-wrap items-center gap-3 mb-4 p-3 bg-base-200 rounded-lg text-sm flex-shrink-0">
+          <div class="flex items-center gap-1.5">
+            <span class="text-base-content/60">Scheduled:</span>
+            <span class="font-semibold text-primary">{{ totalAssignedCredits }} / {{ totalPlannedCredits }} cr</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-base-content/60">Unassigned:</span>
+            <span class="font-semibold" :class="unassignedCount > 0 ? 'text-warning' : 'text-success'">{{ unassignedCount }} courses</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-base-content/60">Transferred:</span>
+            <span class="font-semibold text-success">{{ planData?.summary.transferred_credits ?? 0 }} cr</span>
+          </div>
+          <div class="flex-1"></div>
+          <div class="flex items-center gap-1">
+            <span v-if="unassignedCount === 0" class="badge badge-success badge-sm">✓ All courses assigned</span>
+            <span v-else class="badge badge-warning badge-sm">{{ unassignedCount }} unassigned</span>
+          </div>
+        </div>
+
+        <!-- Scrollable Semester Grid -->
+        <div class="overflow-y-auto flex-1 pr-1">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div
+              v-for="sem in availableSemesters"
+              :key="'preview-sem-' + sem"
+              class="border rounded-xl overflow-hidden"
+              :class="{
+                'border-success/40 bg-success/5': getSemesterCreditStatus(sem) === 'ok',
+                'border-error/40 bg-error/5': getSemesterCreditStatus(sem) === 'over',
+                'border-warning/40 bg-warning/5': getSemesterCreditStatus(sem) === 'under',
+                'border-base-300 bg-base-100': getSemesterCreditStatus(sem) === 'empty' || getSemesterCreditStatus(sem) === 'li',
+              }"
+            >
+              <!-- Semester Header -->
+              <div class="px-3 py-2 flex items-center justify-between border-b"
+                :class="{
+                  'border-success/30 bg-success/10': getSemesterCreditStatus(sem) === 'ok',
+                  'border-error/30 bg-error/10': getSemesterCreditStatus(sem) === 'over',
+                  'border-warning/30 bg-warning/10': getSemesterCreditStatus(sem) === 'under',
+                  'border-base-300 bg-base-200/50': getSemesterCreditStatus(sem) === 'empty' || getSemesterCreditStatus(sem) === 'li',
+                }"
+              >
+                <div class="flex items-center gap-1.5">
+                  <span class="font-semibold text-sm">Semester {{ sem }}</span>
+                  <span v-if="getSemesterTypeLabel(sem)" class="badge badge-xs"
+                    :class="{ 'badge-primary': getSemesterTypeLabel(sem) === 'Long', 'badge-secondary': getSemesterTypeLabel(sem) === 'Short', 'badge-accent': getSemesterTypeLabel(sem) === 'LI' }"
+                  >{{ getSemesterTypeLabel(sem) }}</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <!-- Credit badge -->
+                  <span class="badge badge-xs font-medium"
+                    :class="{
+                      'badge-success': getSemesterCreditStatus(sem) === 'ok',
+                      'badge-error': getSemesterCreditStatus(sem) === 'over',
+                      'badge-warning': getSemesterCreditStatus(sem) === 'under',
+                      'badge-ghost': getSemesterCreditStatus(sem) === 'empty' || getSemesterCreditStatus(sem) === 'li',
+                    }"
+                  >
+                    {{ getSemesterCredits(sem) }}<template v-if="getSemesterLimits(sem)"> / {{ getSemesterLimits(sem)!.min }}–{{ getSemesterLimits(sem)!.max }}</template> cr
+                  </span>
+
+                  <!-- Credit progress bar -->
+                  <div v-if="getSemesterLimits(sem)" class="w-16 h-1.5 bg-base-300 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full transition-all"
+                      :class="{
+                        'bg-success': getSemesterCreditStatus(sem) === 'ok',
+                        'bg-error': getSemesterCreditStatus(sem) === 'over',
+                        'bg-warning': getSemesterCreditStatus(sem) === 'under',
+                        'bg-base-300': getSemesterCreditStatus(sem) === 'empty',
+                      }"
+                      :style="{ width: creditBarWidth(sem) }"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Course List -->
+              <div class="p-2 space-y-1 min-h-[48px]">
+                <!-- Transferred courses in this semester (always sem 0 / untracked — list not shown here) -->
+
+                <!-- Passed -->
+                <div
+                  v-for="course in passedCourses.filter(c => c.semester === sem)"
+                  :key="'prev-pass-' + course.course_id"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-success/10 border border-success/20"
+                >
+                  <span class="font-mono text-success/80 shrink-0">{{ course.course_code }}</span>
+                  <span class="truncate flex-1 text-base-content/80">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-success shrink-0">Passed</span>
+                </div>
+
+                <!-- Failed -->
+                <div
+                  v-for="course in failedCourses.filter(c => c.semester === sem)"
+                  :key="'prev-fail-' + course.course_id"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-error/10 border border-error/20"
+                >
+                  <span class="font-mono text-error/80 shrink-0">{{ course.course_code }}</span>
+                  <span class="truncate flex-1 text-base-content/80">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-error shrink-0">Failed</span>
+                </div>
+
+                <!-- Assigned planned courses -->
+                <div
+                  v-for="course in getAssignedCoursesForSemester(sem)"
+                  :key="'prev-plan-' + course.course_id"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary/10 border border-primary/20"
+                >
+                  <span class="font-mono text-primary/80 shrink-0">{{ course.course_code }}</span>
+                  <span class="truncate flex-1 text-base-content/80">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-neutral shrink-0">{{ course.credit_hour }}cr</span>
+                </div>
+
+                <!-- Assigned retake courses -->
+                <div
+                  v-for="course in getAssignedRetakesForSemester(sem)"
+                  :key="'prev-retake-' + course.course_id"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-error/5 border border-error/20"
+                >
+                  <span class="font-mono shrink-0">{{ course.course_code }}</span>
+                  <span class="truncate flex-1 text-base-content/80">{{ course.course_name }}</span>
+                  <span class="badge badge-xs badge-error shrink-0">Retake</span>
+                </div>
+
+                <!-- Empty state -->
+                <div
+                  v-if="passedCourses.filter(c => c.semester === sem).length === 0 && failedCourses.filter(c => c.semester === sem).length === 0 && getAssignedCoursesForSemester(sem).length === 0 && getAssignedRetakesForSemester(sem).length === 0"
+                  class="flex items-center justify-center py-3 text-xs text-base-content/30"
+                >
+                  No courses assigned
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transferred Courses Summary (at bottom) -->
+          <div v-if="transferredCourses.length > 0" class="mt-4 border border-success/30 bg-success/5 rounded-xl p-3">
+            <h4 class="text-sm font-semibold text-success mb-2 flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              Credit Transferred ({{ transferredCourses.length }} courses, {{ planData?.summary.transferred_credits ?? 0 }} cr)
+            </h4>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="course in transferredCourses"
+                :key="'prev-tr-' + course.course_id"
+                class="badge badge-success badge-sm gap-1 font-mono"
+              >
+                {{ course.course_code }} <span class="opacity-70">{{ course.credit_hour }}cr</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-action flex-shrink-0 mt-4 pt-3 border-t border-base-300">
+          <button class="btn btn-ghost" @click="isPreviewAllOpen = false">Close</button>
+          <button
+            class="btn btn-primary btn-sm gap-1.5 shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-transform"
+            :disabled="saveLoading"
+            @click="isPreviewAllOpen = false; saveChanges()"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            Save Schedule
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="isPreviewAllOpen = false">
         <button>close</button>
       </form>
     </dialog>
@@ -1620,3 +1720,21 @@ watchEffect(() => {
     </dialog>
   </div>
 </template>
+
+<style scoped>
+.pool-card[draggable="true"]:active {
+  opacity: 0.5;
+  transform: scale(0.98);
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
+}
+</style>
