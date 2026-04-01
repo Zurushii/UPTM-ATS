@@ -26,7 +26,11 @@ export default defineEventHandler(async (event) => {
   const programId = hopData[0].program_id;
 
   const [rows] = await pool.query(
-    `SELECT long_sem_min_credit, long_sem_max_credit, short_sem_min_credit, short_sem_max_credit
+    `SELECT total_credit_required,
+            long_sem_min_credit,
+            long_sem_max_credit,
+            short_sem_min_credit,
+            short_sem_max_credit
      FROM programs WHERE id = ?`,
     [programId],
   );
@@ -37,6 +41,7 @@ export default defineEventHandler(async (event) => {
   }
 
   return {
+    total_credit_required: program.total_credit_required,
     long_min: program.long_sem_min_credit,
     long_max: program.long_sem_max_credit,
     short_min: program.short_sem_min_credit,

@@ -1,4 +1,11 @@
 import { pool } from "~~/server/utils/db";
+import {
+  buildSemesterRulePlansForSession,
+  ensureSemesterOneRulePlansBackfilled,
+  getLatestProgramStructureSessionId,
+  normalizeSemesterRulePlans,
+  placeLiOnLastLongSemester,
+} from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -29,6 +36,8 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
+  await ensureSemesterOneRulePlansBackfilled(programId);
+
   // Get rule ID from params
   const ruleId = parseInt(getRouterParam(event, "id") || "");
   if (isNaN(ruleId)) {
@@ -40,7 +49,9 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, intake_type, entry_semester
+     FROM semester_entry_rules
+     WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -51,6 +62,8 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  const rule = (ruleRows as any[])[0];
+
   // Get credit plans for this rule
   const [plans] = await pool.query(
     `SELECT id, semester_number, semester_type, is_li, target_credits
@@ -60,5 +73,27 @@ export default defineEventHandler(async (event) => {
     [ruleId],
   );
 
-  return plans;
+  if ((plans as any[]).length > 0 || Number(rule.entry_semester) !== 1) {
+    const normalizedPlans = normalizeSemesterRulePlans(
+      (plans as any[]).map((plan) => ({
+        id: Number(plan.id),
+        semester_number: Number(plan.semester_number),
+        semester_type: plan.semester_type as "L" | "S",
+        is_li: !!plan.is_li,
+        target_credits: Number(plan.target_credits) || 0,
+      })),
+    );
+
+    return Number(rule.entry_semester) === 1
+      ? placeLiOnLastLongSemester(normalizedPlans)
+      : normalizedPlans;
+  }
+
+  const latestSessionId = await getLatestProgramStructureSessionId(programId);
+
+  if (!latestSessionId) {
+    return [];
+  }
+
+  return buildSemesterRulePlansForSession(latestSessionId, rule.intake_type);
 });

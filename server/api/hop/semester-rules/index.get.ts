@@ -1,4 +1,5 @@
 import { pool } from "~~/server/utils/db";
+import { ensureSemesterOneRulePlansBackfilled } from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -28,6 +29,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+
+  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Get query param for filtering by intake type
   const query = getQuery(event);

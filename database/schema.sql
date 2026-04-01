@@ -198,6 +198,18 @@ CREATE TABLE semester_credit_plans (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE semester_rule_plan_backfills (
+  program_id INT NOT NULL,
+  version VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (program_id, version),
+
+  CONSTRAINT fk_srpb_program
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 CREATE TABLE student_transferred_courses (
   id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,

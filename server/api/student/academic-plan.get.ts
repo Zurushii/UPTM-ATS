@@ -1,4 +1,5 @@
 import { pool } from "../../utils/db";
+import { ensureSemesterOneRulePlansBackfilled } from "~~/server/utils/semester-rule-plans";
 import { auth } from "@@/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -25,6 +26,8 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
   const programId = students[0].program_id;
+
+  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Get academic plan
   const [planRows] = await pool.query(

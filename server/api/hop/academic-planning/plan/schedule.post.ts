@@ -1,4 +1,8 @@
 import { pool } from "~~/server/utils/db";
+import {
+  ensureSemesterOneRulePlansBackfilled,
+  getSemesterRuleMetaForSemester,
+} from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -53,6 +57,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+
+  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Verify the plan exists and belongs to a student in this program
   const [planRows] = await pool.query(
@@ -178,10 +184,11 @@ export default defineEventHandler(async (event) => {
     if (prog) {
       // Determine semester type from intake rules
       const [intakeRows2] = await pool.query(
-        `SELECT intake_type FROM academic_planning_intakes WHERE id = ?`,
+        `SELECT intake_type, session_id FROM academic_planning_intakes WHERE id = ?`,
         [plan.intake_id],
       );
       const intakeType = (intakeRows2 as any[])[0]?.intake_type;
+      const sessionId = (intakeRows2 as any[])[0]?.session_id || null;
 
       // Get start_semester for the plan
       const [planInfo] = await pool.query(
@@ -190,27 +197,17 @@ export default defineEventHandler(async (event) => {
       );
       const startSemester = (planInfo as any[])[0]?.start_semester || 1;
 
-      let semType: string | null = null;
-      let isLi = false;
-      if (intakeType) {
-        const [ruleRows] = await pool.query(
-          `SELECT ser.id AS rule_id FROM semester_entry_rules ser
-           WHERE ser.program_id = ? AND ser.intake_type = ? AND ser.entry_semester = ?
-           LIMIT 1`,
-          [programId, intakeType, startSemester],
-        );
-        if ((ruleRows as any[]).length > 0) {
-          const [planRows2] = await pool.query(
-            `SELECT semester_type, is_li FROM semester_credit_plans
-             WHERE rule_id = ? AND semester_number = ?`,
-            [(ruleRows as any[])[0].rule_id, semester],
-          );
-          if ((planRows2 as any[]).length > 0) {
-            semType = (planRows2 as any[])[0].semester_type;
-            isLi = !!(planRows2 as any[])[0].is_li;
-          }
-        }
-      }
+      const semesterMeta = intakeType
+        ? await getSemesterRuleMetaForSemester({
+            programId,
+            intakeType,
+            entrySemester: startSemester,
+            sessionId,
+            semester,
+          })
+        : null;
+      const semType = semesterMeta?.semester_type || null;
+      const isLi = !!semesterMeta?.is_li;
 
       // Skip validation for LI semesters
       if (!isLi && semType) {

@@ -1,6 +1,11 @@
 import { pool } from "../../../../utils/db";
 import { auth } from "@@/utils/auth";
 import { getAcademicPlanSemesterConfigs } from "~~/server/utils/academic-plan-semester-config";
+import {
+  ensureSemesterOneRulePlansBackfilled,
+  getEffectiveSemesterRulePlans,
+  getIntakeLifecyclePattern,
+} from "~~/server/utils/semester-rule-plans";
 
 export default defineEventHandler(async (event) => {
   const session = await auth.api.getSession({ headers: event.headers });
@@ -35,6 +40,8 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
   const programId = students[0].program_id;
+
+  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Verify this plan belongs to the student and get intake_id + start_semester
   const [planRows] = await pool.query(
@@ -85,33 +92,19 @@ export default defineEventHandler(async (event) => {
     [sessionId],
   );
 
-  // Get semester credit plans for this student's rule
-  const [ruleRows] = await pool.query(
-    `SELECT ser.id AS rule_id
-     FROM semester_entry_rules ser
-     WHERE ser.program_id = ? AND ser.intake_type = ? AND ser.entry_semester = ?
-     LIMIT 1`,
-    [programId, intakeType, startSemester],
-  );
-
   let semesterRules: any[] = [];
   const planSpecificRules = await getAcademicPlanSemesterConfigs(numericPlanId);
   const hasPlanSpecificRules = planSpecificRules.length > 0;
 
   if (hasPlanSpecificRules) {
     semesterRules = planSpecificRules;
-  } else if ((ruleRows as any[]).length > 0) {
-    const ruleId = (ruleRows as any[])[0].rule_id;
-
-    const [creditPlans] = await pool.query(
-      `SELECT semester_number, semester_type, is_li, target_credits
-       FROM semester_credit_plans
-       WHERE rule_id = ?
-       ORDER BY semester_number ASC`,
-      [ruleId],
-    );
-
-    semesterRules = creditPlans as any[];
+  } else {
+    semesterRules = await getEffectiveSemesterRulePlans({
+      programId,
+      intakeType,
+      entrySemester: startSemester,
+      sessionId,
+    });
   }
 
   // Get program info (credit limits + duration)
@@ -174,70 +167,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // ── INTAKE-BASED DYNAMIC SEMESTER CYCLES (mirrors generate.post.ts & HOP courses.get.ts) ──
-  const rawIntake = intakeType ? intakeType.toLowerCase() : "";
-  let baseCyclePattern: ("L" | "S")[] = ["L", "L", "S"]; // Default (August)
-  if (rawIntake.includes("may")) {
-    baseCyclePattern = ["S", "L", "L"];
-  } else if (rawIntake.includes("aug")) {
-    baseCyclePattern = ["L", "L", "S"];
-  } else if (rawIntake.includes("dec")) {
-    baseCyclePattern = ["L", "S", "L"];
-  }
-
-  // If no matching rule found AND student starts at semester 1,
-  // infer semester types from the intake's physical cycle (same approach as HOP API).
-  // Students with entry_semester > 1 must rely on HOP-configured rules.
-  if (
-    !hasPlanSpecificRules &&
-    semesterRules.length === 0 &&
-    program &&
-    startSemester === 1
-  ) {
-    // Detect which semesters contain Industrial Training courses
-    const [liSemRows] = await pool.query(
-      `SELECT DISTINCT pc.semester
-       FROM program_courses pc
-       WHERE pc.session_id = ? AND pc.course_type = 'Industrial Training'`,
-      [sessionId],
-    );
-    const liSemesters = new Set(
-      (liSemRows as any[]).map((r: any) => r.semester),
-    );
-
-    // Get total credits per semester from program structure
-    // For grouped courses (e.g. MPU electives), only count one per group
-    const [semCredits] = await pool.query(
-      `SELECT semester, SUM(credit_hour) AS total_credits FROM (
-        SELECT pc.semester, c.credit_hour
-        FROM program_courses pc
-        JOIN courses c ON pc.course_id = c.id
-        WHERE pc.session_id = ? AND pc.course_group IS NULL
-        UNION ALL
-        SELECT pc.semester, MAX(c.credit_hour) AS credit_hour
-        FROM program_courses pc
-        JOIN courses c ON pc.course_id = c.id
-        WHERE pc.session_id = ? AND pc.course_group IS NOT NULL
-        GROUP BY pc.semester, pc.course_group
-      ) combined
-      GROUP BY semester
-      ORDER BY semester ASC`,
-      [sessionId, sessionId],
-    );
-
-    for (const row of semCredits as any[]) {
-      const credits = Number(row.total_credits);
-      const isLi = liSemesters.has(row.semester);
-      // FIX Bug #3: use intake cycle pattern, not a credit-range heuristic
-      const semType = isLi ? "L" : baseCyclePattern[(row.semester - 1) % 3];
-
-      semesterRules.push({
-        semester_number: row.semester,
-        semester_type: semType,
-        is_li: isLi,
-        target_credits: credits,
-      });
-    }
-  }
+  const baseCyclePattern = getIntakeLifecyclePattern(intakeType);
 
   const longMin = program?.long_sem_min_credit ?? 12;
   const longMax = program?.long_sem_max_credit ?? 20;
@@ -312,6 +242,26 @@ export default defineEventHandler(async (event) => {
   const semHasIt = new Map<number, boolean>();
   for (const row of planDetailSems as any[]) {
     semHasIt.set(Number(row.semester), row.has_it === 1);
+  }
+
+  const defaultLiSemesters = new Set<number>(
+    (courseRows as any[])
+      .filter((row: any) => row.course_type === "Industrial Training")
+      .map((row: any) => Number(row.default_semester)),
+  );
+  const actualLiSemesters = new Set<number>(
+    (planDetailSems as any[])
+      .filter((row: any) => row.has_it === 1)
+      .map((row: any) => Number(row.semester)),
+  );
+  const authoritativeLiSemesters =
+    actualLiSemesters.size > 0 ? actualLiSemesters : defaultLiSemesters;
+
+  for (const rule of semesterRules) {
+    if (authoritativeLiSemesters.has(Number(rule.semester_number))) {
+      rule.is_li = true;
+      rule.semester_type = "L";
+    }
   }
 
   // If a configured LI semester now has NO IT courses assigned (e.g., IT moved to

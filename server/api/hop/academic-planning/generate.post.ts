@@ -1,4 +1,8 @@
 import { pool } from "~~/server/utils/db";
+import {
+  getIntakeLifecyclePattern,
+  getLastLongSemesterNumber,
+} from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
@@ -225,6 +229,19 @@ export default defineEventHandler(async (event) => {
     }
     stat.credits = baseCredits;
   }
+
+  const semesterOneLifecyclePattern = getIntakeLifecyclePattern(
+    intake.intake_type,
+  );
+  const semesterOneLiSemester = getLastLongSemesterNumber(
+    Array.from(semesterStats.keys())
+      .sort((a, b) => a - b)
+      .map((semesterNumber) => ({
+        semester_number: semesterNumber,
+        semester_type:
+          semesterOneLifecyclePattern[(semesterNumber - 1) % 3],
+      })),
+  );
   // --------------------------------------------------------
 
   // Get all courses for code-to-ID lookup and credit hours
@@ -401,10 +418,16 @@ export default defineEventHandler(async (event) => {
         const assignedCourseGroupsPerSem = new Set<string>();
 
         if (student.starting_semester === 1) {
-          // ── Semester 1 students: follow program structure directly ──
+          // ── Semester 1 students: follow program structure, keeping LI on the last Long semester ──
           for (const course of allProgramCourses) {
+            const targetSemester =
+              course.course_type === "Industrial Training" &&
+              semesterOneLiSemester
+                ? semesterOneLiSemester
+                : course.semester;
+
             if (course.course_group) {
-              const groupKey = `${course.semester}:${course.course_group}`;
+              const groupKey = `${targetSemester}:${course.course_group}`;
               if (assignedCourseGroupsPerSem.has(groupKey)) continue;
               assignedCourseGroupsPerSem.add(groupKey);
             }
@@ -415,7 +438,7 @@ export default defineEventHandler(async (event) => {
 
             courseAssignments.push({
               course_id: course.course_id,
-              semester: course.semester,
+              semester: targetSemester,
               status: status,
             });
           }

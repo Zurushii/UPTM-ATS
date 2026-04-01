@@ -1,4 +1,8 @@
 import { pool } from "~~/server/utils/db";
+import {
+  ensureBaseRuleForIntake,
+  seedSemesterOneRulePlans,
+} from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
@@ -217,27 +221,36 @@ export default defineEventHandler(async (event) => {
         insertedRules++;
       }
 
-      // Delete existing credit plans for this rule
-      await pool.query(`DELETE FROM semester_credit_plans WHERE rule_id = ?`, [
-        ruleId,
-      ]);
-
-      // Insert credit plans
-      if (rule.credit_plans.length > 0) {
-        const planValues = rule.credit_plans.map((plan) => [
+      if (rule.entry_semester === 1) {
+        const seededPlans = await seedSemesterOneRulePlans(
           ruleId,
-          plan.semester_number,
-          plan.semester_type,
-          plan.is_li,
-          plan.target_credits,
+          programId,
+          rule.intake_type,
+        );
+        insertedPlans += seededPlans.length;
+      } else {
+        // Delete existing credit plans for this rule
+        await pool.query(`DELETE FROM semester_credit_plans WHERE rule_id = ?`, [
+          ruleId,
         ]);
 
-        await pool.query(
-          `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
-           VALUES ?`,
-          [planValues],
-        );
-        insertedPlans += rule.credit_plans.length;
+        // Insert credit plans
+        if (rule.credit_plans.length > 0) {
+          const planValues = rule.credit_plans.map((plan) => [
+            ruleId,
+            plan.semester_number,
+            plan.semester_type,
+            plan.is_li,
+            plan.target_credits,
+          ]);
+
+          await pool.query(
+            `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
+             VALUES ?`,
+            [planValues],
+          );
+          insertedPlans += rule.credit_plans.length;
+        }
       }
     } catch (error: any) {
       console.error(`Error inserting rule:`, error);
@@ -250,77 +263,8 @@ export default defineEventHandler(async (event) => {
   let baseRulesCreated = 0;
 
   for (const intakeType of uniqueIntakeTypes) {
-    const [baseCheck] = await pool.query(
-      `SELECT id FROM semester_entry_rules
-       WHERE program_id = ? AND intake_type = ? AND credit_transfer = 0 AND entry_semester = 1`,
-      [programId, intakeType],
-    );
-
-    if ((baseCheck as any[]).length === 0) {
-      // Create base rule
-      const [baseResult] = await pool.query(
-        `INSERT INTO semester_entry_rules (program_id, intake_type, credit_transfer, entry_semester)
-         VALUES (?, ?, 0, 1)`,
-        [programId, intakeType],
-      );
-
-      const baseRuleId = (baseResult as any).insertId;
-
-      // Get program credit limit ranges
-      const [progRows] = await pool.query(
-        `SELECT short_sem_min_credit, short_sem_max_credit FROM programs WHERE id = ?`,
-        [programId],
-      );
-      const prog = (progRows as any[])[0];
-      const shortMin = prog?.short_sem_min_credit ?? 6;
-      const shortMax = prog?.short_sem_max_credit ?? 10;
-
-      // Get the latest session that has program_courses for this program
-      const [sessionRows] = await pool.query(
-        `SELECT s.id AS session_id
-         FROM program_sessions s
-         WHERE s.program_id = ?
-           AND EXISTS (
-             SELECT 1
-             FROM program_courses pc
-             WHERE pc.session_id = s.id
-           )
-         ORDER BY s.id DESC
-         LIMIT 1`,
-        [programId],
-      );
-
-      if ((sessionRows as any[]).length > 0) {
-        const latestSessionId = (sessionRows as any[])[0].session_id;
-
-        // Get total credits per semester from program structure
-        const [semCredits] = await pool.query(
-          `SELECT pc.semester, SUM(c.credit_hour) AS total_credits
-           FROM program_courses pc
-           JOIN courses c ON pc.course_id = c.id
-           WHERE pc.session_id = ?
-           GROUP BY pc.semester
-           ORDER BY pc.semester ASC`,
-          [latestSessionId],
-        );
-
-        const planValues: any[][] = [];
-        for (const row of semCredits as any[]) {
-          const credits = Number(row.total_credits);
-          const semType =
-            credits >= shortMin && credits <= shortMax ? "S" : "L";
-          planValues.push([baseRuleId, row.semester, semType, 0, credits]);
-        }
-
-        if (planValues.length > 0) {
-          await pool.query(
-            `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
-             VALUES ?`,
-            [planValues],
-          );
-        }
-      }
-
+    const { created } = await ensureBaseRuleForIntake(programId, intakeType);
+    if (created) {
       baseRulesCreated++;
       insertedRules++;
     }

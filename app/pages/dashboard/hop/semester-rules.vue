@@ -28,6 +28,91 @@ interface CreditPlan {
   target_credits: number;
 }
 
+const normalizeCreditPlan = (plan: CreditPlan): CreditPlan => {
+  if (plan.is_li) {
+    return {
+      ...plan,
+      semester_type: "L",
+    };
+  }
+
+  return plan;
+};
+
+const normalizeCreditPlans = (plans: CreditPlan[]): CreditPlan[] =>
+  plans.map((plan) => normalizeCreditPlan({ ...plan }));
+
+const getLastLongCreditPlanSemester = (plans: CreditPlan[]): number | null => {
+  if (plans.length === 0) {
+    return null;
+  }
+
+  const longSemesters = plans
+    .filter((plan) => plan.semester_type === "L" || plan.is_li)
+    .map((plan) => plan.semester_number);
+
+  if (longSemesters.length > 0) {
+    return Math.max(...longSemesters);
+  }
+
+  return Math.max(...plans.map((plan) => plan.semester_number));
+};
+
+const alignSemesterOneLiPlacement = (plans: CreditPlan[]): CreditPlan[] => {
+  const normalizedPlans = normalizeCreditPlans(plans);
+
+  if (creditPlanRule.value?.entry_semester !== 1) {
+    return normalizedPlans;
+  }
+
+  const hasLi = normalizedPlans.some((plan) => plan.is_li);
+  if (!hasLi) {
+    return normalizedPlans.map((plan) => ({ ...plan, is_li: false }));
+  }
+
+  const liSemester = getLastLongCreditPlanSemester(normalizedPlans);
+  if (!liSemester) {
+    return normalizedPlans;
+  }
+
+  return normalizedPlans.map((plan) => ({
+    ...plan,
+    is_li: plan.semester_number === liSemester,
+    semester_type: plan.semester_number === liSemester ? "L" : plan.semester_type,
+  }));
+};
+
+const syncCreditPlanLiRules = (index: number) => {
+  const plan = creditPlans.value[index];
+
+  if (!plan) {
+    return;
+  }
+
+  const nextPlan = normalizeCreditPlan({ ...plan });
+  const nextPlans = creditPlans.value.map((currentPlan, currentIndex) =>
+    currentIndex === index ? nextPlan : { ...currentPlan },
+  );
+
+  creditPlans.value = alignSemesterOneLiPlacement(nextPlans);
+};
+
+const syncCreditPlanSemesterType = (index: number) => {
+  const plan = creditPlans.value[index];
+
+  if (!plan) {
+    return;
+  }
+
+  const nextPlans = creditPlans.value.map((currentPlan, currentIndex) =>
+    currentIndex === index
+      ? normalizeCreditPlan({ ...plan })
+      : { ...currentPlan },
+  );
+
+  creditPlans.value = alignSemesterOneLiPlacement(nextPlans);
+};
+
 interface IntakesData {
   rule_intakes: string[];
   student_intakes: string[];
@@ -145,6 +230,7 @@ const rulesByIntakeType = computed(() => {
 // Fetch program credit limits from DB
 const { data: creditLimitsData, refresh: refreshCreditLimits } =
   await useFetch<{
+    total_credit_required: number;
     long_min: number;
     long_max: number;
     short_min: number;
@@ -174,6 +260,18 @@ const CREDIT_RULES = computed(() => ({
     label: "Short Semester",
   },
 }));
+
+const isSemesterOneCreditPlan = computed(
+  () => creditPlanRule.value?.entry_semester === 1,
+);
+
+const expectedTotalPlanCredits = computed(() => {
+  if (!isSemesterOneCreditPlan.value) {
+    return null;
+  }
+
+  return creditLimitsData.value?.total_credit_required ?? null;
+});
 
 const startEditCreditLimits = () => {
   creditLimitsForm.value = {
@@ -227,8 +325,8 @@ const totalPlanCredits = computed(() => {
 // Computed: validation errors for each credit plan entry
 const creditPlanErrors = computed(() => {
   return creditPlans.value.map((plan) => {
-    if (plan.target_credits === 0) return null; // Skip validation for empty/zero entries
-    if (plan.is_li) return null; // Industrial Training (LI) bypasses credit hour rules
+    if (plan.target_credits === 0 && !isSemesterOneCreditPlan.value) return null;
+    if (plan.is_li && !isSemesterOneCreditPlan.value) return null;
     const rule = CREDIT_RULES.value[plan.semester_type];
     if (plan.target_credits < rule.min) {
       return `${rule.label} requires at least ${rule.min} credit hours (currently ${plan.target_credits})`;
@@ -240,9 +338,24 @@ const creditPlanErrors = computed(() => {
   });
 });
 
+const totalPlanCreditsError = computed(() => {
+  if (!isSemesterOneCreditPlan.value || expectedTotalPlanCredits.value == null) {
+    return null;
+  }
+
+  if (totalPlanCredits.value !== expectedTotalPlanCredits.value) {
+    return `Total plan credits must equal ${expectedTotalPlanCredits.value} credit hours (currently ${totalPlanCredits.value}).`;
+  }
+
+  return null;
+});
+
 // Computed: whether there are any credit plan validation errors
 const hasCreditPlanErrors = computed(() => {
-  return creditPlanErrors.value.some((err) => err !== null);
+  return (
+    creditPlanErrors.value.some((err) => err !== null) ||
+    totalPlanCreditsError.value !== null
+  );
 });
 
 // Open add modal
@@ -284,7 +397,9 @@ const openCreditPlanModal = async (rule: Rule) => {
     );
 
     if (plans.length > 0) {
-      creditPlans.value = plans.map((p: any) => ({ ...p, is_li: !!p.is_li }));
+      creditPlans.value = alignSemesterOneLiPlacement(
+        plans.map((p: any) => ({ ...p, is_li: !!p.is_li })),
+      );
     } else {
       // Initialize with default semesters starting from entry semester
       creditPlans.value = [];
@@ -296,6 +411,7 @@ const openCreditPlanModal = async (rule: Rule) => {
           target_credits: 0,
         });
       }
+      creditPlans.value = alignSemesterOneLiPlacement(creditPlans.value);
     }
   } catch (error: any) {
     showToast(
@@ -477,8 +593,11 @@ const saveCreditPlans = async () => {
   if (hasCreditPlanErrors.value) {
     const lr = CREDIT_RULES.value.L;
     const sr = CREDIT_RULES.value.S;
+    const totalError = totalPlanCreditsError.value;
     showToast(
-      `Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min ${lr.min}, max ${lr.max} credit hours\n- Short Semester: min ${sr.min}, max ${sr.max} credit hours`,
+      totalError
+        ? `${totalError}\n\nRules:\n- Long Semester: min ${lr.min}, max ${lr.max} credit hours\n- Short Semester: min ${sr.min}, max ${sr.max} credit hours`
+        : `Please fix the credit hour violations before saving.\n\nRules:\n- Long Semester: min ${lr.min}, max ${lr.max} credit hours\n- Short Semester: min ${sr.min}, max ${sr.max} credit hours`,
     );
     return;
   }
@@ -486,12 +605,17 @@ const saveCreditPlans = async () => {
   isSubmitting.value = true;
 
   try {
+    const normalizedPlans = alignSemesterOneLiPlacement(creditPlans.value);
+    creditPlans.value = normalizedPlans;
+
     await $fetch(
       `/api/hop/semester-rules/${creditPlanRule.value.id}/credit-plans`,
       {
         method: "POST",
         body: {
-          plans: creditPlans.value.filter((p) => p.target_credits > 0),
+          plans: isSemesterOneCreditPlan.value
+            ? normalizedPlans
+            : normalizedPlans.filter((p) => p.target_credits > 0),
         },
       },
     );
@@ -1558,12 +1682,23 @@ const manualSteps = [
           </div>
           <div class="flex flex-col items-end">
             <div class="text-3xl font-mono font-bold">
-              {{ totalPlanCredits }}
+              <template v-if="expectedTotalPlanCredits !== null">
+                {{ totalPlanCredits }} / {{ expectedTotalPlanCredits }}
+              </template>
+              <template v-else>
+                {{ totalPlanCredits }}
+              </template>
             </div>
             <div
               class="text-xs uppercase tracking-wide font-bold text-base-content/40"
             >
               Total Plan Credits
+            </div>
+            <div
+              v-if="expectedTotalPlanCredits !== null"
+              class="text-xs text-base-content/50 mt-1"
+            >
+              Program total: {{ expectedTotalPlanCredits }} credit hours
             </div>
           </div>
         </div>
@@ -1598,6 +1733,8 @@ const manualSteps = [
                     <select
                       v-model="plan.semester_type"
                       class="select select-sm select-bordered w-full"
+                      :disabled="plan.is_li"
+                      @change="syncCreditPlanSemesterType(index)"
                     >
                       <option value="L">Long Semester</option>
                       <option value="S">Short Semester</option>
@@ -1610,12 +1747,7 @@ const manualSteps = [
                         type="checkbox"
                         v-model="plan.is_li"
                         class="checkbox checkbox-sm checkbox-primary"
-                        @change="
-                          if (plan.is_li) {
-                            plan.target_credits = 8;
-                            plan.semester_type = 'L';
-                          }
-                        "
+                        @change="syncCreditPlanLiRules(index)"
                       />
                       <span class="label-text text-xs font-semibold">LI</span>
                     </label>
@@ -1628,7 +1760,7 @@ const manualSteps = [
                       >
                       <span class="label-text-alt text-xs text-base-content/40">
                         {{
-                          plan.is_li
+                          plan.is_li && !isSemesterOneCreditPlan
                             ? "LI"
                             : plan.semester_type === "L"
                               ? `${CREDIT_RULES.L.min}–${CREDIT_RULES.L.max}`
@@ -1715,6 +1847,12 @@ const manualSteps = [
               >Some semesters have invalid credit hours.
               <strong>Long: 12–20</strong> · <strong>Short: 6–10</strong></span
             >
+          </div>
+          <div
+            v-if="totalPlanCreditsError"
+            class="mt-2 text-xs font-medium text-warning"
+          >
+            {{ totalPlanCreditsError }}
           </div>
         </div>
 

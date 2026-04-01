@@ -1,4 +1,11 @@
 import { pool } from "~~/server/utils/db";
+import {
+  getProgramSemesterPlanConstraints,
+  normalizeSemesterRulePlans,
+  placeLiOnLastLongSemester,
+  replaceSemesterCreditPlans,
+  validateSemesterRulePlanTargets,
+} from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 
 interface CreditPlanInput {
@@ -47,7 +54,7 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, entry_semester FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -90,31 +97,50 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Delete existing plans for this rule
-  await pool.query(`DELETE FROM semester_credit_plans WHERE rule_id = ?`, [
-    ruleId,
-  ]);
+  const rule = (ruleRows as any[])[0];
 
-  // Insert new plans
-  if (body.plans.length > 0) {
-    const values = body.plans.map((plan) => [
-      ruleId,
-      plan.semester_number,
-      plan.semester_type,
-      plan.is_li ? 1 : 0,
-      plan.target_credits,
-    ]);
+  const normalizedPlans = normalizeSemesterRulePlans(
+    body.plans.map((plan) => ({
+      semester_number: Number(plan.semester_number),
+      semester_type: plan.semester_type,
+      is_li: !!plan.is_li,
+      target_credits: Number(plan.target_credits) || 0,
+    })),
+  );
 
-    await pool.query(
-      `INSERT INTO semester_credit_plans (rule_id, semester_number, semester_type, is_li, target_credits)
-       VALUES ?`,
-      [values],
-    );
+  const finalPlans =
+    Number(rule.entry_semester) === 1
+      ? placeLiOnLastLongSemester(normalizedPlans)
+      : normalizedPlans;
+
+  if (Number(rule.entry_semester) === 1) {
+    const constraints = await getProgramSemesterPlanConstraints(programId);
+
+    if (!constraints) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Program credit rules not found",
+      });
+    }
+
+    const validation = validateSemesterRulePlanTargets(finalPlans, constraints);
+
+    if (validation.semesterErrors.length > 0 || validation.totalError) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          validation.totalError ||
+          validation.semesterErrors[0] ||
+          "Semester 1 credit plan is invalid",
+      });
+    }
   }
+
+  await replaceSemesterCreditPlans(ruleId, finalPlans);
 
   // Return updated plans
   const [plans] = await pool.query(
-    `SELECT id, semester_number, semester_type, target_credits
+    `SELECT id, semester_number, semester_type, is_li, target_credits
      FROM semester_credit_plans
      WHERE rule_id = ?
      ORDER BY semester_number ASC`,

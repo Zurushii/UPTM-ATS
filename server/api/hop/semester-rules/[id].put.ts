@@ -1,4 +1,5 @@
 import { pool } from "~~/server/utils/db";
+import { seedSemesterOneRulePlans } from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
 
 interface RuleInput {
@@ -45,7 +46,9 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id, intake_type, credit_transfer FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, intake_type, credit_transfer, entry_semester
+     FROM semester_entry_rules
+     WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -59,6 +62,7 @@ export default defineEventHandler(async (event) => {
 
   const intakeType = ruleData[0].intake_type;
   const oldCreditTransfer = ruleData[0].credit_transfer;
+  const oldEntrySemester = ruleData[0].entry_semester;
 
   // Parse request body
   const body = await readBody<RuleInput>(event);
@@ -99,6 +103,10 @@ export default defineEventHandler(async (event) => {
     `UPDATE semester_entry_rules SET credit_transfer = ?, entry_semester = ? WHERE id = ?`,
     [body.credit_transfer, body.entry_semester, ruleId],
   );
+
+  if (oldEntrySemester !== 1 && body.entry_semester === 1) {
+    await seedSemesterOneRulePlans(ruleId, programId, intakeType);
+  }
 
   return {
     id: ruleId,
