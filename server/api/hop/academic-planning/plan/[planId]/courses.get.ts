@@ -1,5 +1,6 @@
 import { pool } from "~~/server/utils/db";
 import { auth } from "~~/utils/auth";
+import { getAcademicPlanSemesterConfigs } from "~~/server/utils/academic-plan-semester-config";
 
 export default defineEventHandler(async (event) => {
   // Authenticate user
@@ -68,6 +69,7 @@ export default defineEventHandler(async (event) => {
 
   const sessionId = (intakeRows as any[])[0].session_id;
   const intakeType = (intakeRows as any[])[0].intake_type;
+  const numericPlanId = Number(planId);
 
   // Get all available courses from program structure
   const [courseRows] = await pool.query(
@@ -100,8 +102,12 @@ export default defineEventHandler(async (event) => {
   );
 
   let semesterRules: any[] = [];
+  const planSpecificRules = await getAcademicPlanSemesterConfigs(numericPlanId);
+  const hasPlanSpecificRules = planSpecificRules.length > 0;
 
-  if ((ruleRows as any[]).length > 0) {
+  if (hasPlanSpecificRules) {
+    semesterRules = planSpecificRules;
+  } else if ((ruleRows as any[]).length > 0) {
     const ruleId = (ruleRows as any[])[0].rule_id;
 
     const [creditPlans] = await pool.query(
@@ -188,7 +194,12 @@ export default defineEventHandler(async (event) => {
 
   // If no matching rule found AND student starts at semester 1,
   // generate default semester sequence using the intake's physical cycle.
-  if (semesterRules.length === 0 && program && startSemester === 1) {
+  if (
+    !hasPlanSpecificRules &&
+    semesterRules.length === 0 &&
+    program &&
+    startSemester === 1
+  ) {
     // Detect which semesters contain Industrial Training courses
     const [liSemRows] = await pool.query(
       `SELECT DISTINCT pc.semester
@@ -271,7 +282,7 @@ export default defineEventHandler(async (event) => {
 
   // Auto-extend semester rules if retake courses exist beyond max program semester
   // Extend using the intake's physical pattern
-  if ((failedRows as any[]).length > 0 || onProbation) {
+  if (!hasPlanSpecificRules && ((failedRows as any[]).length > 0 || onProbation)) {
     const lastSem = maxProgramSemester;
     for (let i = 1; i <= 3; i++) {
       const semNum = lastSem + i;
@@ -313,16 +324,18 @@ export default defineEventHandler(async (event) => {
 
   // If a configured LI semester now has NO IT courses assigned (e.g., IT moved to
   // an auto-extended later semester), flip it back to a regular Long semester.
-  for (const rule of semesterRules) {
-    if (rule.is_li) {
-      const hasIt = semHasIt.get(rule.semester_number);
-      // hasIt === false means semester exists in plan but has no IT courses
-      // hasIt === undefined means semester has no courses at all
-      // In both cases, revert to regular Long semester (auto-extend may have
-      // moved the IT course to a later semester)
-      if (hasIt !== true) {
-        rule.is_li = false;
-        rule.semester_type = "L";
+  if (!hasPlanSpecificRules) {
+    for (const rule of semesterRules) {
+      if (rule.is_li) {
+        const hasIt = semHasIt.get(rule.semester_number);
+        // hasIt === false means semester exists in plan but has no IT courses
+        // hasIt === undefined means semester has no courses at all
+        // In both cases, revert to regular Long semester (auto-extend may have
+        // moved the IT course to a later semester)
+        if (hasIt !== true) {
+          rule.is_li = false;
+          rule.semester_type = "L";
+        }
       }
     }
   }

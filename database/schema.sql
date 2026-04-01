@@ -268,6 +268,22 @@ CREATE TABLE academic_plan_details (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE academic_plan_semester_configs (
+  academic_plan_id INT NOT NULL,
+  semester_number INT NOT NULL,
+  semester_type ENUM('L', 'S') NOT NULL,
+  is_li BOOLEAN NOT NULL DEFAULT FALSE,
+  target_credits INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (academic_plan_id, semester_number),
+
+  CONSTRAINT fk_apsc_plan
+    FOREIGN KEY (academic_plan_id) REFERENCES academic_plans(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 -- Activity logs for audit trail and notifications
 CREATE TABLE plan_activity_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,

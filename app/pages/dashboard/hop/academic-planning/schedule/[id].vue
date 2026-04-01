@@ -91,7 +91,11 @@ const {
 } = await useFetch<PlanData>(`/api/hop/academic-planning/plan/${planId}`);
 
 // Fetch available courses + semester rules + credit limits
-const { data: coursesData, pending: coursesLoading } = await useFetch<{
+const {
+  data: coursesData,
+  pending: coursesLoading,
+  refresh: refreshCourses,
+} = await useFetch<{
   courses: AvailableCourse[];
   semester_rules: SemesterRule[];
   credit_limits: CreditLimits;
@@ -263,6 +267,7 @@ const retakeCourses = computed(() => {
 
 // Track extra semesters added by user
 const extraSemesters = ref<number[]>([]);
+const removedSemesters = ref<number[]>([]);
 
 // Get unique semesters from available courses (starting from student's start_semester)
 const availableSemesters = computed(() => {
@@ -270,16 +275,18 @@ const availableSemesters = computed(() => {
   const startSem = planData.value?.plan.start_semester || 1;
 
   if (coursesData.value) {
-    for (const course of coursesData.value.courses) {
-      // Only include semesters >= student's start semester
-      if (course.default_semester >= startSem) {
-        semesters.add(course.default_semester);
+    if (coursesData.value.semester_rules.length > 0) {
+      for (const rule of coursesData.value.semester_rules) {
+        if (rule.semester_number >= startSem) {
+          semesters.add(rule.semester_number);
+        }
       }
-    }
-    // Include semesters from extended rules (for retake scheduling)
-    for (const rule of coursesData.value.semester_rules) {
-      if (rule.semester_number >= startSem) {
-        semesters.add(rule.semester_number);
+    } else {
+      for (const course of coursesData.value.courses) {
+        // Fall back to programme structure semesters when no rules exist yet.
+        if (course.default_semester >= startSem) {
+          semesters.add(course.default_semester);
+        }
       }
     }
   }
@@ -351,6 +358,9 @@ const detectCycle = (rules: SemesterRule[]): ("L" | "S")[] => {
 const openConfigModal = () => {
   editableRules.value = JSON.parse(
     JSON.stringify(coursesData.value?.semester_rules || []),
+  ).sort(
+    (a: SemesterRule, b: SemesterRule) =>
+      a.semester_number - b.semester_number,
   );
   isConfigModalOpen.value = true;
 };
@@ -371,7 +381,46 @@ const addConfigSemester = () => {
 };
 
 const removeConfigSemester = (index: number) => {
+  const semesterNumber = editableRules.value[index]?.semester_number;
+  if (!semesterNumber) return;
+
+  const nextAssignments = new Map(courseAssignments.value);
+  let movedCourses = 0;
+
+  for (const [courseId, semester] of nextAssignments) {
+    if (semester !== semesterNumber) continue;
+
+    const isLockedInRemovedSemester =
+      passedCourses.value.some(
+        (course) => course.course_id === courseId && course.semester === semesterNumber,
+      ) ||
+      failedCourses.value.some(
+        (course) => course.course_id === courseId && course.semester === semesterNumber,
+      );
+
+    if (!isLockedInRemovedSemester) {
+      nextAssignments.delete(courseId);
+      movedCourses++;
+    }
+  }
+
+  courseAssignments.value = nextAssignments;
   editableRules.value.splice(index, 1);
+
+  if (selectedSemester.value === semesterNumber) {
+    const fallbackSemester =
+      editableRules.value[index]?.semester_number ??
+      editableRules.value[index - 1]?.semester_number ??
+      null;
+    selectedSemester.value = fallbackSemester;
+  }
+
+  if (movedCourses > 0) {
+    showToast(
+      `${movedCourses} course${movedCourses === 1 ? "" : "s"} moved back to the pool`,
+      "warning",
+    );
+  }
 };
 
 const getConfigCreditRange = (rule: SemesterRule) => {
@@ -397,7 +446,14 @@ const hasLockedCoursesInSemester = (semNum: number): boolean => {
 const applyConfig = () => {
   if (!coursesData.value) return;
   const oldRules = coursesData.value.semester_rules;
-  for (const rule of editableRules.value) {
+  const nextRules = JSON.parse(
+    JSON.stringify(editableRules.value),
+  ).sort(
+    (a: SemesterRule, b: SemesterRule) =>
+      a.semester_number - b.semester_number,
+  ) as SemesterRule[];
+
+  for (const rule of nextRules) {
     const old = oldRules.find(
       (r) => r.semester_number === rule.semester_number,
     );
@@ -405,15 +461,22 @@ const applyConfig = () => {
       rule.target_credits = 0;
     }
   }
-  coursesData.value.semester_rules = editableRules.value;
-  const allRuleSems = new Set(
-    editableRules.value.map((r) => r.semester_number),
+  const nextRuleSems = new Set(nextRules.map((r) => r.semester_number));
+  const removedNow = oldRules
+    .map((r) => r.semester_number)
+    .filter((sem) => !nextRuleSems.has(sem));
+
+  coursesData.value.semester_rules = nextRules;
+  removedSemesters.value = Array.from(
+    new Set(
+      [...removedSemesters.value, ...removedNow].filter(
+        (sem) => !nextRuleSems.has(sem),
+      ),
+    ),
+  ).sort((a, b) => a - b);
+  extraSemesters.value = extraSemesters.value.filter((sem) =>
+    nextRuleSems.has(sem),
   );
-  for (const sem of allRuleSems) {
-    if (!extraSemesters.value.includes(sem)) {
-      extraSemesters.value.push(sem);
-    }
-  }
   isConfigModalOpen.value = false;
 };
 
@@ -1053,9 +1116,30 @@ const saveChanges = async () => {
       });
     }
 
+    await $fetch(`/api/hop/academic-planning/plan/${planId}/semester-config`, {
+      method: "POST",
+      body: {
+        rules: (coursesData.value?.semester_rules || []).map((rule) => ({
+          semester_number: rule.semester_number,
+          semester_type: rule.semester_type,
+          is_li: rule.is_li,
+          target_credits: rule.target_credits,
+        })),
+      },
+    });
+
+    const semestersToPersist = Array.from(
+      new Set([
+        ...availableSemesters.value,
+        ...removedSemesters.value,
+        ...Array.from(semesterCourses.keys()),
+      ]),
+    ).sort((a, b) => a - b);
+
     // First, clear all available semesters (from start_semester onwards)
     // This ensures semesters with no courses are also cleared
-    for (const sem of availableSemesters.value) {
+    for (const sem of semestersToPersist) {
+      if (sem < startSem) continue;
       await $fetch("/api/hop/academic-planning/plan/schedule", {
         method: "POST",
         body: {
@@ -1078,7 +1162,8 @@ const saveChanges = async () => {
       });
     }
 
-    await refreshPlan();
+    removedSemesters.value = [];
+    await Promise.all([refreshPlan(), refreshCourses()]);
     navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
   } catch (error: any) {
     showToast(error.data?.message || "Failed to save schedule", 'error');
@@ -1094,7 +1179,15 @@ const goBack = () => {
 
 // Select first semester by default
 watchEffect(() => {
-  if (availableSemesters.value.length > 0 && selectedSemester.value === null) {
+  if (availableSemesters.value.length === 0) {
+    selectedSemester.value = null;
+    return;
+  }
+
+  if (
+    selectedSemester.value === null ||
+    !availableSemesters.value.includes(selectedSemester.value)
+  ) {
     selectedSemester.value = availableSemesters.value[0] ?? null;
   }
 });
