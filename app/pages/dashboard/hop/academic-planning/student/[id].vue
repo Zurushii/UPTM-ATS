@@ -593,7 +593,7 @@ const goBack = () => {
         <!-- Left Sidebar: Legend -->
         <details class="collapse collapse-arrow bg-base-100 border border-base-300 shadow-sm w-full xl:w-64 shrink-0 xl:sticky xl:top-24 z-10" open>
           <summary class="collapse-title p-4 sm:p-5 font-bold text-sm text-base-content/70 uppercase tracking-wider min-h-0 select-none">
-            Status Legend
+            Status Guide
           </summary>
           <div class="collapse-content px-4 sm:px-5 pb-4 sm:pb-5">
             <div class="flex flex-col gap-3 text-sm pt-1">

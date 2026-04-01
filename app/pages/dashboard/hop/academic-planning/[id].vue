@@ -47,7 +47,7 @@ interface PreviewStudent {
   student_name: string;
   entry_semester: number | null;
   total_credit_transferred: number | null;
-  status: "ready" | "missing_entry_semester" | "already_has_plan";
+  status: "ready" | "missing_entry_semester" | "already_has_plan" | "credit_mismatch";
   reason?: string;
 }
 
@@ -91,6 +91,7 @@ const regenPreviewResult = ref<{
     ready_to_generate: number;
     will_be_skipped: number;
     missing_entry_semester: number;
+    credit_mismatch: number;
     failed_records: number;
   };
   preview_students: PreviewStudent[];
@@ -818,14 +819,27 @@ const regenGenerate = async () => {
                 {{ regenPreviewResult.summary.missing_entry_semester }}
               </div>
             </div>
+            <div class="stat">
+              <div class="stat-title">Credit Mismatch</div>
+              <div class="stat-value text-xl" :class="(regenPreviewResult.summary.credit_mismatch ?? 0) > 0 ? 'text-error' : 'text-base-content/30'">
+                {{ regenPreviewResult.summary.credit_mismatch ?? 0 }}
+              </div>
+            </div>
           </div>
 
-          <!-- Preview note -->
+          <!-- Preview notes -->
           <div v-if="regenPreviewResult.summary.will_be_skipped > 0" class="alert alert-info text-sm py-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 shrink-0">
               <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
             </svg>
             <span>Students who already have plans will be automatically skipped during generation.</span>
+          </div>
+
+          <div v-if="(regenPreviewResult.summary.credit_mismatch ?? 0) > 0" class="alert alert-error text-sm py-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 shrink-0">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+            </svg>
+            <span><strong>{{ regenPreviewResult.summary.credit_mismatch }}</strong> student(s) have a credit mismatch — the <code>total_credit_transferred</code> recorded in the system does not match the sum of credit hours of the transferred courses listed in the Excel file. These students will be skipped during generation and will remain <strong>No Plan</strong>. Please fix the Excel data and re-run Intake Assessment before regenerating.</span>
           </div>
 
           <!-- Preview Table -->
@@ -846,23 +860,28 @@ const regenGenerate = async () => {
                   :class="{
                     'text-success': student.status === 'ready',
                     'text-warning': student.status === 'already_has_plan',
-                    'text-error': student.status === 'missing_entry_semester',
+                    'text-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch',
                   }"
                 >
                   <td class="font-mono">{{ student.matric_no }}</td>
                   <td>{{ student.student_name }}</td>
                   <td>{{ student.entry_semester || "-" }}</td>
                   <td>
-                    <span
-                      class="badge badge-sm"
-                      :class="{
-                        'badge-success': student.status === 'ready',
-                        'badge-warning': student.status === 'already_has_plan',
-                        'badge-error': student.status === 'missing_entry_semester',
-                      }"
-                    >
-                      {{ student.status.replace(/_/g, " ") }}
-                    </span>
+                    <div class="flex flex-col gap-1">
+                      <span
+                        class="badge badge-sm"
+                        :class="{
+                          'badge-success': student.status === 'ready',
+                          'badge-warning': student.status === 'already_has_plan',
+                          'badge-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch',
+                        }"
+                      >
+                        {{ student.status.replace(/_/g, " ") }}
+                      </span>
+                      <span v-if="student.reason && student.status === 'credit_mismatch'" class="text-xs text-error/80 max-w-[180px] leading-tight">
+                        {{ student.reason }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               </tbody>

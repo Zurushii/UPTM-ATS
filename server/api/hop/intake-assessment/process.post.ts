@@ -14,6 +14,8 @@ interface ProcessedStudent {
   entry_semester: number;
   transferred_course_ids: number[];
   is_new_student: boolean; // true if student was created during processing
+  has_error: boolean; // true if student was registered despite validation errors
+  error_reason: string; // reason for error if has_error is true
 }
 
 interface FailedRecord {
@@ -21,6 +23,7 @@ interface FailedRecord {
   matric_no: string | null;
   student_id: number | null;
   reason: string;
+  pre_registered: boolean; // true if student was still pre-registered despite the error
 }
 
 interface SemesterRule {
@@ -315,6 +318,7 @@ export default defineEventHandler(async (event) => {
           matric_no: matricNoValue ? String(matricNoValue) : null,
           student_id: studentIdValue ? Number(studentIdValue) : null,
           reason: `Intake mismatch: Excel intake_year (${excelIntakeYear}) does not match selected intake (${intake})`,
+          pre_registered: false,
         });
         continue;
       }
@@ -333,6 +337,7 @@ export default defineEventHandler(async (event) => {
           matric_no: matricNoValue ? String(matricNoValue) : null,
           student_id: studentIdValue ? Number(studentIdValue) : null,
           reason: `Program mismatch: Excel program_code (${excelProgramCode}) does not match your program (${programCode})`,
+          pre_registered: false,
         });
         continue;
       }
@@ -356,6 +361,7 @@ export default defineEventHandler(async (event) => {
           matric_no: matricNoValue ? String(matricNoValue) : null,
           student_id: studentIdValue ? Number(studentIdValue) : null,
           reason: `Invalid starting_semester: must be empty or 0, got ${semesterVal}`,
+          pre_registered: false,
         });
         continue;
       }
@@ -368,6 +374,7 @@ export default defineEventHandler(async (event) => {
         matric_no: null,
         student_id: studentIdValue ? Number(studentIdValue) : null,
         reason: "matric_no is required for processing",
+        pre_registered: false,
       });
       continue;
     }
@@ -394,6 +401,7 @@ export default defineEventHandler(async (event) => {
 
     // 5. Parse and validate credit value
     let credits = 0;
+    let creditError: string | null = null;
     if (typeof creditValue === "number") {
       credits = creditValue;
     } else if (creditValue !== null && creditValue !== undefined) {
@@ -401,27 +409,24 @@ export default defineEventHandler(async (event) => {
     }
 
     if (isNaN(credits) || credits < 0) {
-      failedRecords.push({
-        row: rowNum,
-        matric_no: student.matric_no,
-        student_id: student.id,
-        reason: "Invalid credit value",
-      });
-      continue;
+      // Still pre-register the student with 0 credits
+      creditError = "Invalid credit value — registered with 0 credits";
+      credits = 0;
     }
 
-    // 6. Check for duplicates
+    // 6. Check for duplicates — skip entirely (cannot register the same student twice)
     if (processedMatricNos.has(student.matric_no.toLowerCase())) {
       failedRecords.push({
         row: rowNum,
         matric_no: student.matric_no,
         student_id: student.id,
         reason: "Duplicate entry for this student",
+        pre_registered: false,
       });
       continue;
     }
 
-    // Determine entry semester based on rules
+    // Determine entry semester based on rules (use raw credits even if 0)
     let entrySemester = 1; // Default to semester 1
     for (const rule of rules) {
       if (credits >= rule.credit_transfer) {
@@ -434,6 +439,7 @@ export default defineEventHandler(async (event) => {
     const transferredCourseIds: number[] = [];
     const invalidCoursesList: string[] = [];
     let transferredCoursesCredits = 0;
+    let courseError: string | null = null;
 
     if (transferredCoursesValue) {
       const courseCodes = String(transferredCoursesValue)
@@ -481,30 +487,33 @@ export default defineEventHandler(async (event) => {
         }
       }
 
-      // Fail if any course codes don't exist in the system
+      // If any course codes don't exist in the system — register without transferred courses
       if (invalidCoursesList.length > 0) {
-        failedRecords.push({
-          row: rowNum,
-          matric_no: student.matric_no,
-          student_id: student.id,
-          reason: `Invalid course(s) not found in system: ${invalidCoursesList.join(", ")}`,
-        });
-        continue;
-      }
-
-      // 8. Validate that total_credit_transferred matches the sum of transferred courses
-      if (
+        courseError = `Invalid course(s) not found in system: ${invalidCoursesList.join(", ")} — registered without transferred courses`;
+        transferredCourseIds.length = 0; // Clear course ids, don't link invalid courses
+      } else if (
+        // 8. Validate that total_credit_transferred matches the sum of transferred courses
         transferredCourseIds.length > 0 &&
         credits !== transferredCoursesCredits
       ) {
-        failedRecords.push({
-          row: rowNum,
-          matric_no: student.matric_no,
-          student_id: student.id,
-          reason: `Credit mismatch: total_credit_transferred (${credits}) does not match sum of transferred courses (${transferredCoursesCredits})`,
-        });
-        continue;
+        courseError = `Credit mismatch: total_credit_transferred (${credits}) does not match sum of transferred courses (${transferredCoursesCredits}) — registered with provided credits, no courses linked`;
+        transferredCourseIds.length = 0; // Don't link courses if credits don't reconcile
       }
+    }
+
+    // Combine errors
+    const hasError = !!(creditError || courseError);
+    const errorReason = [creditError, courseError].filter(Boolean).join(" | ");
+
+    // Add to failed records list for visibility (but still register)
+    if (hasError) {
+      failedRecords.push({
+        row: rowNum,
+        matric_no: student.matric_no,
+        student_id: student.id,
+        reason: errorReason,
+        pre_registered: true,
+      });
     }
 
     processedMatricNos.add(student.matric_no.toLowerCase());
@@ -512,15 +521,21 @@ export default defineEventHandler(async (event) => {
       student_id: student.id,
       matric_no: student.matric_no,
       intake_year: intake,
+      // Always keep the original credit value from Excel — needed for academic planning generation
       total_credit_transferred: credits,
       starting_semester: 0, // Always 0 as per validation
       program_code: programCode,
-      transferred_courses: transferredCoursesValue
-        ? String(transferredCoursesValue)
-        : "",
+      // Only store transferred_courses string if courses are valid; drop if unresolvable
+      transferred_courses: hasError
+        ? ""
+        : (transferredCoursesValue ? String(transferredCoursesValue) : ""),
+      // Still compute entry semester from the original credits (not forced to 1)
       entry_semester: entrySemester,
-      transferred_course_ids: transferredCourseIds,
+      // Only link course IDs if they are fully valid and reconciled
+      transferred_course_ids: hasError ? [] : transferredCourseIds,
       is_new_student: isNewStudent,
+      has_error: hasError,
+      error_reason: errorReason,
     });
   }
 
@@ -588,15 +603,20 @@ export default defineEventHandler(async (event) => {
       statusMessage: "Failed to update student records",
       message: error?.message || "Unknown database error",
     });
+    
   } finally {
     connection.release();
   }
 
+  // Strictly failed = those not in processedStudents (duplicate, missing matric_no, wrong intake/program)
+  const strictFailedRecords = failedRecords.filter((f) => !f.pre_registered);
+
   return {
     summary: {
-      total_records: processedStudents.length + failedRecords.length,
-      successful: processedStudents.length,
-      failed: failedRecords.length,
+      total_records: processedStudents.length + strictFailedRecords.length,
+      successful: processedStudents.filter((s) => !s.has_error).length,
+      failed: strictFailedRecords.length,
+      registered_with_errors: processedStudents.filter((s) => s.has_error).length,
       new_students: processedStudents.filter((s) => s.is_new_student).length,
       updated_students: processedStudents.filter((s) => !s.is_new_student)
         .length,
@@ -611,7 +631,10 @@ export default defineEventHandler(async (event) => {
       transferred_courses: s.transferred_courses,
       entry_semester: s.entry_semester,
       is_new_student: s.is_new_student,
+      has_error: s.has_error,
+      error_reason: s.error_reason,
     })),
-    failed_records: failedRecords,
+    failed_records: strictFailedRecords,
+    error_registered_records: failedRecords.filter((f) => f.pre_registered),
   };
 });

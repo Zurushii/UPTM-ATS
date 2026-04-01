@@ -66,6 +66,7 @@ const processingResult = ref<{
     total_records: number;
     successful: number;
     failed: number;
+    registered_with_errors: number;
     new_students: number;
     updated_students: number;
   };
@@ -79,8 +80,16 @@ const processingResult = ref<{
     transferred_courses: string;
     entry_semester: number;
     is_new_student: boolean;
+    has_error: boolean;
+    error_reason: string;
   }>;
   failed_records: Array<{
+    row: number;
+    matric_no: string | null;
+    student_id: number | null;
+    reason: string;
+  }>;
+  error_registered_records: Array<{
     row: number;
     matric_no: string | null;
     student_id: number | null;
@@ -1109,12 +1118,20 @@ const manualSteps = [
                 <div class="stat-desc">New students reserved</div>
               </div>
 
+              <div v-if="processingResult.summary.registered_with_errors > 0" class="stat">
+                <div class="stat-title">Registered w/ Errors</div>
+                <div class="stat-value text-2xl text-orange-500">
+                  {{ processingResult.summary.registered_with_errors }}
+                </div>
+                <div class="stat-desc">Pre-registered, check details</div>
+              </div>
+
               <div class="stat">
                 <div class="stat-title">Failed</div>
                 <div class="stat-value text-2xl text-error">
                   {{ processingResult.summary.failed }}
                 </div>
-                <div class="stat-desc">Invalid records</div>
+                <div class="stat-desc">Invalid records (not registered)</div>
               </div>
             </div>
 
@@ -1261,8 +1278,48 @@ const manualSteps = [
             </div>
             <p class="text-xs text-base-content/50 mt-2">
               Failed records are shown here for reference only and are not
-              included in the output file.
+              registered in the system.
             </p>
+          </div>
+        </div>
+
+        <!-- Registered with Errors -->
+        <div
+          v-if="processingResult.error_registered_records && processingResult.error_registered_records.length > 0"
+          class="card bg-base-100 border border-warning/40 shadow-sm"
+        >
+          <div class="card-body">
+            <h3 class="font-medium mb-1 text-warning flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+              </svg>
+              Registered with Errors ({{ processingResult.error_registered_records.length }})
+            </h3>
+            <p class="text-xs text-base-content/60 mb-4">
+              These students were <strong>pre-registered</strong> as reserved despite validation errors. Their credits and transferred courses were cleared — the HOP should update them manually.
+            </p>
+            <div class="overflow-x-auto max-h-64">
+              <table class="table table-sm w-full">
+                <thead class="sticky top-0 bg-base-100">
+                  <tr>
+                    <th>Row</th>
+                    <th>Student ID</th>
+                    <th>Reason / Action Taken</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="(record, index) in processingResult.error_registered_records"
+                    :key="index"
+                    class="text-warning/90"
+                  >
+                    <td>{{ record.row }}</td>
+                    <td class="font-mono">{{ record.matric_no || "-" }}</td>
+                    <td class="text-xs">{{ record.reason }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 

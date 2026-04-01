@@ -7,7 +7,7 @@ interface PreviewStudent {
   student_name: string;
   entry_semester: number | null;
   total_credit_transferred: number | null;
-  status: "ready" | "missing_entry_semester" | "already_has_plan";
+  status: "ready" | "missing_entry_semester" | "already_has_plan" | "credit_mismatch";
   reason?: string;
 }
 
@@ -126,6 +126,18 @@ export default defineEventHandler(async (event) => {
     studentsWithPlans.add(row.student_id);
   }
 
+  // Get all courses for code-to-ID lookup and credit hours
+  // (same as generate.post.ts — needed for transferred_courses validation)
+  const [allCoursesRows] = await pool.query(
+    `SELECT id, course_code, credit_hour FROM courses`,
+  );
+  const courseCodeToId = new Map<string, number>();
+  const courseIdToCreditHour = new Map<number, number>();
+  for (const course of allCoursesRows as any[]) {
+    courseCodeToId.set(course.course_code.toUpperCase(), course.id);
+    courseIdToCreditHour.set(course.id, course.credit_hour);
+  }
+
   // Parse Excel file
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(fileBuffer as unknown as ExcelJS.Buffer);
@@ -138,9 +150,10 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Find matric_no column
+  // Find column indices (matric_no + optional transferred_courses)
   const headerRow = worksheet.getRow(1);
   let matricNoCol = -1;
+  let transferredCoursesCol = -1;
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value || "")
@@ -154,6 +167,12 @@ export default defineEventHandler(async (event) => {
       value === "matric_number"
     ) {
       matricNoCol = colNumber;
+    } else if (
+      value === "transferred_courses" ||
+      value === "transferredcourses" ||
+      value === "transfer_courses"
+    ) {
+      transferredCoursesCol = colNumber;
     }
   });
 
@@ -227,6 +246,61 @@ export default defineEventHandler(async (event) => {
       continue;
     }
 
+    // ── Credit Transfer Validation ──
+    // Only runs when the Excel file contains a transferred_courses column.
+    // Mirrors the same check in generate.post.ts (lines 322–364) and
+    // intake-assessment/process.post.ts (lines 495–507).
+    // If no column is present, skip validation (same behaviour as generate endpoint).
+    if (transferredCoursesCol !== -1) {
+      const transferredCoursesValue = row.getCell(transferredCoursesCol).value;
+
+      if (transferredCoursesValue) {
+        const courseCodes = String(transferredCoursesValue)
+          .split(",")
+          .map((code) => code.trim().toUpperCase())
+          .filter((code) => code.length > 0);
+
+        let transferredCoursesCredits = 0;
+        for (const code of courseCodes) {
+          // Support slash-separated course groups (e.g. "UCS3153/UCS3143") —
+          // use the first code that matches, same as intake-assessment process.
+          if (code.includes("/")) {
+            const groupCodes = code
+              .split("/")
+              .map((c) => c.trim().toUpperCase())
+              .filter((c) => c.length > 0);
+            for (const groupCode of groupCodes) {
+              const id = courseCodeToId.get(groupCode);
+              if (id) {
+                transferredCoursesCredits += courseIdToCreditHour.get(id) || 0;
+                break;
+              }
+            }
+          } else {
+            const courseId = courseCodeToId.get(code);
+            if (courseId) {
+              transferredCoursesCredits += courseIdToCreditHour.get(courseId) || 0;
+            }
+          }
+        }
+
+        const dbCredits = student.total_credit_transferred || 0;
+
+        // Only flag a mismatch when at least one side is non-zero
+        if ((courseCodes.length > 0 || dbCredits > 0) && dbCredits !== transferredCoursesCredits) {
+          previewStudents.push({
+            matric_no: student.matric_no,
+            student_name: student.student_name,
+            entry_semester: student.starting_semester,
+            total_credit_transferred: student.total_credit_transferred,
+            status: "credit_mismatch",
+            reason: `Credit mismatch: DB total_credit_transferred (${dbCredits}) does not match sum of transferred courses in Excel (${transferredCoursesCredits}). This student will be skipped during generation.`,
+          });
+          continue;
+        }
+      }
+    }
+
     previewStudents.push({
       matric_no: student.matric_no,
       student_name: student.student_name,
@@ -243,6 +317,9 @@ export default defineEventHandler(async (event) => {
   const missingEntryCount = previewStudents.filter(
     (s) => s.status === "missing_entry_semester"
   ).length;
+  const creditMismatchCount = previewStudents.filter(
+    (s) => s.status === "credit_mismatch"
+  ).length;
 
   return {
     summary: {
@@ -250,6 +327,7 @@ export default defineEventHandler(async (event) => {
       ready_to_generate: readyCount,
       will_be_skipped: skippedCount,
       missing_entry_semester: missingEntryCount,
+      credit_mismatch: creditMismatchCount,
       failed_records: failedRecords.length,
     },
     preview_students: previewStudents,
