@@ -293,6 +293,38 @@ const allTransferredCourses = computed(() => {
   return transferred;
 });
 
+const latestCourses = computed(() => {
+  const latestByCourse = new Map<number, Course>();
+
+  for (const semester of planData.value?.semesters ?? []) {
+    for (const course of semester.courses) {
+      latestByCourse.set(course.course_id, course);
+    }
+  }
+
+  return [...latestByCourse.values()];
+});
+
+const obtainedCredits = computed(() => {
+  return latestCourses.value.reduce((sum, course) => {
+    if (course.status === "Transferred" || course.status === "Passed") {
+      return sum + course.credit_hour;
+    }
+
+    return sum;
+  }, 0);
+});
+
+const creditHoursLeft = computed(() => {
+  return latestCourses.value.reduce((sum, course) => {
+    if (course.status === "Transferred" || course.status === "Passed") {
+      return sum;
+    }
+
+    return sum + course.credit_hour;
+  }, 0);
+});
+
 // Result slip map by semester
 const resultSlipMap = computed(() => {
   const map = new Map<number, ResultSlip>();
@@ -367,6 +399,8 @@ const scheduledSemesters = computed(() => {
     .filter((sem) => sem.courses.length > 0)
     .sort((a, b) => a.semester - b.semester);
 });
+
+const totalStudySemesters = computed(() => scheduledSemesters.value.length);
 
 // Check if student has uploaded any results yet
 const hasAnyResult = computed(() => {
@@ -688,24 +722,24 @@ const goBack = () => {
         <div class="stat">
           <div class="stat-title">Total Semesters</div>
           <div class="stat-value text-2xl">
-            {{ planData.summary.total_semesters }}
+            {{ totalStudySemesters }}
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Total Credits</div>
+          <div class="stat-title">Total Credit Hour Left</div>
           <div class="stat-value text-2xl">
-            {{ planData.summary.total_credits }}
+            {{ creditHoursLeft }}
           </div>
           <div class="stat-desc">
-            {{ planData.summary.transferred_credits }} transferred +
-            {{ planData.summary.planned_credits }} planned
+            Remaining to complete
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Total Courses</div>
+          <div class="stat-title">Total Credit Obtained</div>
           <div class="stat-value text-2xl">
-            {{ planData.summary.total_courses }}
+            {{ obtainedCredits }}
           </div>
+          <div class="stat-desc">Transferred and passed</div>
         </div>
         <div class="stat">
           <div class="stat-title">CGPA</div>

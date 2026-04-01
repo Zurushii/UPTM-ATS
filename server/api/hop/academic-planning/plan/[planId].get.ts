@@ -48,7 +48,8 @@ export default defineEventHandler(async (event) => {
       u.email,
       s.total_credit_transferred,
       api.intake_name,
-      api.intake_year
+      api.intake_year,
+      api.current_semester
     FROM academic_plans ap
     JOIN students s ON ap.student_id = s.id
     JOIN user u ON s.user_id = u.id
@@ -92,6 +93,7 @@ export default defineEventHandler(async (event) => {
   let transferredCredits = 0;
   let plannedCredits = 0;
   let totalCourses = 0;
+  const scheduledSemesters = new Set<number>();
 
   // Pre-compute retake course IDs: course_ids that appear as Failed AND later as Planned
   const failedCourseIds = new Set<number>();
@@ -121,6 +123,13 @@ export default defineEventHandler(async (event) => {
       grade: detail.grade || null,
     });
     totalCourses++;
+
+    if (
+      detail.semester >= plan.start_semester &&
+      detail.status !== "Transferred"
+    ) {
+      scheduledSemesters.add(detail.semester);
+    }
 
     // Retake entries don't contribute to programme credit totals
     const isRetake = retakeCourseIds.has(detail.course_id) && (detail.status === "Planned" || !detail.status);
@@ -161,6 +170,7 @@ export default defineEventHandler(async (event) => {
       created_at: plan.created_at,
       intake_name: plan.intake_name,
       intake_year: plan.intake_year,
+      current_semester: plan.current_semester,
     },
     student: {
       id: plan.student_id,
@@ -172,7 +182,7 @@ export default defineEventHandler(async (event) => {
     semesters,
     resultSlips: resultSlipRows as any[],
     summary: {
-      total_semesters: semesters.length,
+      total_semesters: scheduledSemesters.size,
       total_credits: totalCredits,
       transferred_credits: transferredCredits,
       planned_credits: plannedCredits,

@@ -44,7 +44,8 @@ export default defineEventHandler(async (event) => {
       u.name AS student_name,
       u.email,
       api.intake_name,
-      api.intake_year
+      api.intake_year,
+      api.current_semester
      FROM academic_plans ap
      JOIN students s ON ap.student_id = s.id
      JOIN user u ON s.user_id = u.id
@@ -110,6 +111,7 @@ export default defineEventHandler(async (event) => {
   let transferredCredits = 0;
   let plannedCredits = 0;
   let totalCourses = 0;
+  const scheduledSemesters = new Set<number>();
 
   for (const [semester, courses] of semesterMap) {
     const semCredits = courses.reduce((sum: number, c: any) => sum + c.credit_hour, 0);
@@ -122,6 +124,13 @@ export default defineEventHandler(async (event) => {
     for (const course of courses) {
       // All course appearances count towards totalCourses (it's measuring number of entries)
       totalCourses++;
+
+      if (
+        semester >= plan.start_semester &&
+        course.status !== "Transferred"
+      ) {
+        scheduledSemesters.add(semester);
+      }
 
       // Retake entries don't contribute to programme credit totals
       const isRetake = retakeCourseIds.has(course.course_id) && (course.status === "Planned" || !course.status);
@@ -145,6 +154,7 @@ export default defineEventHandler(async (event) => {
       created_at: plan.created_at,
       intake_name: plan.intake_name,
       intake_year: plan.intake_year,
+      current_semester: plan.current_semester,
     },
     student: {
       id: studentId,
@@ -155,7 +165,7 @@ export default defineEventHandler(async (event) => {
     },
     semesters,
     summary: {
-      total_semesters: semesters.length,
+      total_semesters: scheduledSemesters.size,
       total_credits: transferredCredits + plannedCredits,
       transferred_credits: transferredCredits,
       planned_credits: plannedCredits,

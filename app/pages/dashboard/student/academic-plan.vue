@@ -217,6 +217,8 @@ const scheduledSemesters = computed(() => {
     });
 });
 
+const totalStudySemesters = computed(() => scheduledSemesters.value.length);
+
 // Initialize all semesters as expanded on initial load only
 watch(
   () => scheduledSemesters.value,
@@ -370,6 +372,36 @@ const plannedCredits = computed(() => {
 // Total credits (transferred + planned)
 const totalCredits = computed(() => {
   return transferredCredits.value + plannedCredits.value;
+});
+
+const latestCourses = computed(() => {
+  const latestByCourse = new Map<number, Course>();
+
+  for (const course of data.value?.courses ?? []) {
+    latestByCourse.set(course.course_id, course);
+  }
+
+  return [...latestByCourse.values()];
+});
+
+const obtainedCredits = computed(() => {
+  return latestCourses.value.reduce((sum, course) => {
+    if (course.status === "Transferred" || course.status === "Passed") {
+      return sum + course.credit_hour;
+    }
+
+    return sum;
+  }, 0);
+});
+
+const creditHoursLeft = computed(() => {
+  return latestCourses.value.reduce((sum, course) => {
+    if (course.status === "Transferred" || course.status === "Passed") {
+      return sum;
+    }
+
+    return sum + course.credit_hour;
+  }, 0);
 });
 
 // Credit progress percentage
@@ -962,24 +994,24 @@ const revokeResult = async () => {
         <div class="stat">
           <div class="stat-title">Total Semesters</div>
           <div class="stat-value text-2xl">
-            {{ scheduledSemesters.length }}
+            {{ totalStudySemesters }}
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Total Credits</div>
+          <div class="stat-title">Total Credit Hour Left</div>
           <div class="stat-value text-2xl">
-            {{ totalCredits }}
+            {{ creditHoursLeft }}
           </div>
           <div class="stat-desc">
-            {{ transferredCredits }} transferred +
-            {{ plannedCredits }} planned
+            Remaining to complete
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Total Courses</div>
+          <div class="stat-title">Total Credit Obtained</div>
           <div class="stat-value text-2xl">
-            {{ data?.courses?.length || 0 }}
+            {{ obtainedCredits }}
           </div>
+          <div class="stat-desc">Transferred and passed</div>
         </div>
         <div class="stat">
           <div class="stat-title">CGPA</div>

@@ -944,7 +944,24 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Update intake statistics
+    const totalStudents = (studentRows as any[]).length;
+    const [successfulPlanRows] = await connection.query(
+      `SELECT COUNT(DISTINCT ap.student_id) AS successful_plans
+       FROM academic_plans ap
+       JOIN students s ON s.id = ap.student_id
+       WHERE ap.intake_id = ?
+         AND s.program_id = ?
+         AND s.intake_year = ?`,
+      [intakeId, programId, intake.intake_year],
+    );
+
+    const successfulPlanCount = Number(
+      (successfulPlanRows as any[])[0]?.successful_plans ?? 0,
+    );
+    const failedPlanCount = Math.max(totalStudents - successfulPlanCount, 0);
+
+    // Update intake statistics using the full intake counts so regenerate
+    // doesn't overwrite the dashboard totals with only the retry batch.
     await connection.query(
       `UPDATE academic_planning_intakes 
        SET status = 'generated',
@@ -954,9 +971,9 @@ export default defineEventHandler(async (event) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
-        studentsToProcess.length + failedStudents.length,
-        successfulPlans,
-        failedStudents.length,
+        totalStudents,
+        successfulPlanCount,
+        failedPlanCount,
         intakeId,
       ],
     );

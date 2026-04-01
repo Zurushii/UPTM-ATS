@@ -15,9 +15,16 @@ interface AcademicPlan {
   start_semester: number;
 }
 
+interface Course {
+  course_id: number;
+  credit_hour: number;
+  semester: number;
+  status: "Planned" | "Transferred" | "Passed" | "Failed";
+}
+
 interface PlanResponse {
   plan: AcademicPlan | null;
-  courses: any[];
+  courses: Course[];
 }
 
 const { data: profile, pending } = await useFetch<any>("/api/student/profile");
@@ -45,14 +52,45 @@ const formatIntake = (mmyy: string) => {
   return `${months[month - 1]} ${year}`;
 };
 
+const totalCreditRequired = computed(() =>
+  Number(profile.value?.total_credit_required ?? 0),
+);
+
+const effectiveCourses = computed(() => {
+  const latestByCourse = new Map<number, Course>();
+
+  for (const course of academicPlan.value?.courses ?? []) {
+    latestByCourse.set(course.course_id, course);
+  }
+
+  return [...latestByCourse.values()];
+});
+
+const earnedCredits = computed(() => {
+  if (effectiveCourses.value.length === 0) {
+    return Number(profile.value?.total_credit_transferred ?? 0);
+  }
+
+  return effectiveCourses.value.reduce((sum, course) => {
+    if (course.status === "Transferred" || course.status === "Passed") {
+      return sum + Number(course.credit_hour || 0);
+    }
+
+    return sum;
+  }, 0);
+});
+
+const progressValue = computed(() => {
+  if (!totalCreditRequired.value) return 0;
+  return Math.min(earnedCredits.value, totalCreditRequired.value);
+});
+
+const progressMax = computed(() => Math.max(totalCreditRequired.value, 1));
+
 // Calculate progress percentage
 const creditProgress = computed(() => {
-  if (!profile.value) return 0;
-  return Math.round(
-    (profile.value.total_credit_transferred /
-      profile.value.total_credit_required) *
-      100,
-  );
+  if (!totalCreditRequired.value) return 0;
+  return Math.round((progressValue.value / totalCreditRequired.value) * 100);
 });
 </script>
 
@@ -241,9 +279,9 @@ const creditProgress = computed(() => {
                         <span class="font-medium mb-1">Total Progress</span>
                         <span class="font-mono text-primary">{{ creditProgress }}%</span>
                     </div>
-                    <progress class="progress progress-primary w-full h-3 bg-base-200" :value="profile.total_credit_transferred" :max="profile.total_credit_required"></progress>
+                    <progress class="progress progress-primary w-full h-3 bg-base-200" :value="progressValue" :max="progressMax"></progress>
                      <p class="text-xs text-center mt-2 text-base-content/50">
-                        {{ profile.total_credit_transferred }} of {{ profile.total_credit_required }} credits obtained
+                        {{ progressValue }} of {{ totalCreditRequired }} credits obtained
                      </p>
                 </div>
              </template>
