@@ -252,7 +252,7 @@ export default defineEventHandler(async (event) => {
   for (const intakeType of uniqueIntakeTypes) {
     const [baseCheck] = await pool.query(
       `SELECT id FROM semester_entry_rules
-       WHERE program_id = ? AND intake_type = ? AND entry_semester = 1`,
+       WHERE program_id = ? AND intake_type = ? AND credit_transfer = 0 AND entry_semester = 1`,
       [programId, intakeType],
     );
 
@@ -277,12 +277,16 @@ export default defineEventHandler(async (event) => {
 
       // Get the latest session that has program_courses for this program
       const [sessionRows] = await pool.query(
-        `SELECT pc.session_id
-        FROM program_courses pc
-        JOIN program_sessions s ON pc.session_id = s.id
-        WHERE s.program_id = ?
-        ORDER BY s.id DESC
-        LIMIT 1`,
+        `SELECT s.id AS session_id
+         FROM program_sessions s
+         WHERE s.program_id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM program_courses pc
+             WHERE pc.session_id = s.id
+           )
+         ORDER BY s.id DESC
+         LIMIT 1`,
         [programId],
       );
 

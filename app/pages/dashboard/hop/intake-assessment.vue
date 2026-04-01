@@ -58,6 +58,7 @@ const intakeValidation = computed(() => {
 const fileInput = ref<HTMLInputElement | null>(null);
 const selectedFile = ref<File | null>(null);
 const isDragging = ref(false);
+const isExportingTemplate = ref(false);
 
 // Step 3: Processing state
 const isProcessing = ref(false);
@@ -318,6 +319,44 @@ const exportToExcel = async () => {
   }
 };
 
+// Export intake assessment template
+const exportTemplate = async () => {
+  if (!selectedIntake.value || isExportingTemplate.value) return;
+
+  isExportingTemplate.value = true;
+
+  try {
+    const response = await $fetch("/api/hop/intake-assessment/export-template", {
+      method: "POST",
+      body: {
+        intake_year: selectedIntake.value,
+      },
+      responseType: "blob",
+    });
+
+    const blob = new Blob([response as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `intake_assessment_template_${selectedIntake.value}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error: any) {
+    showToast(
+      error.data?.message ||
+        error.message ||
+        "Failed to export intake assessment template",
+      "error",
+    );
+  } finally {
+    isExportingTemplate.value = false;
+  }
+};
+
 // Navigation
 const goToStep = (step: number) => {
   if (step < currentStep.value) {
@@ -378,8 +417,8 @@ const filteredProcessedStudents = computed(() => {
 });
 
 const manualSteps = [
-  { text: 'Step 1: Configure the assessment by selecting the intake code and semester entry rule set.' },
-  { text: 'Step 2: Upload the Excel file containing student credit transfer records.', note: 'The file should include matric numbers and transferred course details.' },
+  { text: 'Step 1: Configure the assessment by selecting the intake code and semester entry rule set. Export the template here if you need a starter workbook.', note: 'The template follows the expected columns, includes 10 sample rows, and now comes with an Instructions sheet for HOP guidance.' },
+  { text: 'Step 2: Upload the Excel file containing student credit transfer records.' },
   { text: 'Step 3: Click "Process" to run the assessment. The system will match credits and determine each student\'s entry semester.' },
   { text: 'Step 4: Review the results showing successful and failed records.' },
   { text: 'Export the results to Excel for record-keeping or further analysis.' },
@@ -669,6 +708,43 @@ const manualSteps = [
             </div>
           </div>
 
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-base-200 bg-base-200/40 p-4">
+            <div>
+              <div class="font-semibold">Need a starter file?</div>
+              <p class="text-sm text-base-content/60">
+                Export the Intake Assessment template from here. It uses the
+                expected column layout, includes 10 sample rows, and adds an
+                Instructions sheet for HOP.
+              </p>
+            </div>
+            <button
+              class="btn btn-outline btn-primary gap-2"
+              :disabled="isExportingTemplate"
+              @click="exportTemplate"
+            >
+              <span
+                v-if="isExportingTemplate"
+                class="loading loading-spinner loading-sm"
+              ></span>
+              <svg
+                v-else
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-4 h-4"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 16.5V3m0 13.5 4.5-4.5m-4.5 4.5L7.5 12m-3.75 6.75h16.5"
+                />
+              </svg>
+              {{ isExportingTemplate ? "Exporting..." : "Export Template" }}
+            </button>
+          </div>
+
           <!-- Info about manual intake entry -->
           <div
             v-if="configData?.intakes?.length === 0"
@@ -909,7 +985,8 @@ const manualSteps = [
             </div>
             <div class="collapse-content">
               <p class="text-sm text-base-content/70 mb-3">
-                Ensure your Excel file contains these exact column headers:
+                Ensure your Excel file contains these exact column headers.
+                Export Template if you want a ready-made starter workbook.
               </p>
               <div
                 class="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs font-mono"

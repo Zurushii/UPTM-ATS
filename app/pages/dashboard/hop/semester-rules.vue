@@ -46,6 +46,7 @@ const creditPlanRule = ref<Rule | null>(null);
 const isSubmitting = ref(false);
 const isLoadingCreditPlans = ref(false);
 const isImporting = ref(false);
+const isExportingTemplate = ref(false);
 const importFile = ref<File | null>(null);
 const importFileInput = ref<HTMLInputElement | null>(null);
 const importResult = ref<{
@@ -559,6 +560,40 @@ const importRules = async () => {
   }
 };
 
+// Export import-ready Excel template
+const exportTemplate = async () => {
+  if (isExportingTemplate.value) return;
+
+  isExportingTemplate.value = true;
+
+  try {
+    const response = await $fetch("/api/hop/semester-rules/export-template", {
+      responseType: "blob",
+    });
+
+    const blob = new Blob([response as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "semester_rules_template.xlsx";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error: any) {
+    showToast(
+      error.data?.message ||
+        error.message ||
+        "Failed to export semester rules template",
+      "error",
+    );
+  } finally {
+    isExportingTemplate.value = false;
+  }
+};
+
 // Close import modal
 const closeImportModal = () => {
   isImportModalOpen.value = false;
@@ -574,6 +609,7 @@ const manualSteps = [
   { text: 'Specify the intake type (e.g., Aug, May, Dec), credit transfer threshold, and entry semester.' },
   { text: 'Use "Credit Plan" to define how many credits each semester should carry.', note: 'Credit plans determine the workload distribution across semesters.' },
   { text: 'Adjust Credit Hour Limits at the top to set min/max credits for Long and Short semesters.' },
+  { text: 'Use "Export Template" to download the Excel guide workbook. The first sheet follows the HOP-friendly planning template and the second sheet explains how to use it.' },
   { text: 'Use the Import feature to bulk-upload rules from an Excel file.' },
   { text: 'Rules are grouped by intake type. Click the chevron to collapse/expand each group.' },
 ];
@@ -848,23 +884,52 @@ const manualSteps = [
             </select>
           </div>
 
-          <button class="btn btn-sm btn-ghost gap-2" @click="openImportModal()">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-              class="w-4 h-4"
+          <div class="flex items-center gap-2">
+            <button
+              class="btn btn-sm btn-ghost gap-2"
+              :disabled="isExportingTemplate"
+              @click="exportTemplate"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-              />
-            </svg>
-            Import Rules
-          </button>
+              <span
+                v-if="isExportingTemplate"
+                class="loading loading-spinner loading-xs"
+              ></span>
+              <svg
+                v-else
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-4 h-4"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 16.5V3m0 13.5 4.5-4.5m-4.5 4.5L7.5 12m-3.75 6.75h16.5"
+                />
+              </svg>
+              {{ isExportingTemplate ? "Exporting..." : "Export Template" }}
+            </button>
+
+            <button class="btn btn-sm btn-ghost gap-2" @click="openImportModal()">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                class="w-4 h-4"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+                />
+              </svg>
+              Import Rules
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1680,9 +1745,9 @@ const manualSteps = [
         <h3 class="font-bold text-lg mb-4">Import Semester Rules</h3>
 
         <p class="text-sm text-base-content/60 mb-4">
-          Upload an Excel file with semester rules. The file should have
-          sections like "August Intake(SEM 2)" with columns for Credit Transfer
-          and semester credits.
+          Upload an Excel file with semester rules using the system import
+          layout. Use Export Template if you need the HOP guide workbook with
+          the custom planning format and an Instructions sheet for reference.
         </p>
 
         <!-- Drag & Drop Zone -->
