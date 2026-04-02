@@ -1,5 +1,6 @@
 import { pool } from "~~/server/utils/db";
 import {
+  getSemesterRulePlanRequiredTotalCredits,
   getProgramSemesterPlanConstraints,
   normalizeSemesterRulePlans,
   placeLiOnLastLongSemester,
@@ -54,7 +55,9 @@ export default defineEventHandler(async (event) => {
 
   // Verify rule belongs to this program
   const [ruleRows] = await pool.query(
-    `SELECT id, entry_semester FROM semester_entry_rules WHERE id = ? AND program_id = ?`,
+    `SELECT id, entry_semester, credit_transfer
+     FROM semester_entry_rules
+     WHERE id = ? AND program_id = ?`,
     [ruleId, programId],
   );
 
@@ -113,27 +116,35 @@ export default defineEventHandler(async (event) => {
       ? placeLiOnLastLongSemester(normalizedPlans)
       : normalizedPlans;
 
-  if (Number(rule.entry_semester) === 1) {
-    const constraints = await getProgramSemesterPlanConstraints(programId);
+  const constraints = await getProgramSemesterPlanConstraints(programId);
 
-    if (!constraints) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: "Program credit rules not found",
-      });
-    }
+  if (!constraints) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Program credit rules not found",
+    });
+  }
 
-    const validation = validateSemesterRulePlanTargets(finalPlans, constraints);
+  const requiredTotalCredits = getSemesterRulePlanRequiredTotalCredits({
+    entrySemester: Number(rule.entry_semester),
+    creditTransfer: Number(rule.credit_transfer) || 0,
+    constraints,
+  });
 
-    if (validation.semesterErrors.length > 0 || validation.totalError) {
-      throw createError({
-        statusCode: 400,
-        statusMessage:
-          validation.totalError ||
-          validation.semesterErrors[0] ||
-          "Semester 1 credit plan is invalid",
-      });
-    }
+  const validation = validateSemesterRulePlanTargets(
+    finalPlans,
+    constraints,
+    requiredTotalCredits,
+  );
+
+  if (validation.semesterErrors.length > 0 || validation.totalError) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        validation.totalError ||
+        validation.semesterErrors[0] ||
+        "Credit plan is invalid",
+    });
   }
 
   await replaceSemesterCreditPlans(ruleId, finalPlans);

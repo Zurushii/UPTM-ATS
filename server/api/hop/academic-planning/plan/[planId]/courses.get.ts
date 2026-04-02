@@ -44,7 +44,7 @@ export default defineEventHandler(async (event) => {
 
   // Verify the plan exists and get intake info + student's starting semester
   const [planRows] = await pool.query(
-    `SELECT ap.intake_id, ap.start_semester
+    `SELECT ap.intake_id, ap.start_semester, s.total_credit_transferred
      FROM academic_plans ap
      JOIN students s ON ap.student_id = s.id
      WHERE ap.id = ? AND s.program_id = ?`,
@@ -60,6 +60,8 @@ export default defineEventHandler(async (event) => {
 
   const intakeId = (planRows as any[])[0].intake_id;
   const startSemester = (planRows as any[])[0].start_semester;
+  const transferredCredits =
+    Number((planRows as any[])[0].total_credit_transferred) || 0;
 
   // Get session_id and intake_type from intake
   const [intakeRows] = await pool.query(
@@ -110,6 +112,7 @@ export default defineEventHandler(async (event) => {
       intakeType,
       entrySemester: startSemester,
       sessionId,
+      transferredCredits,
     });
   }
 

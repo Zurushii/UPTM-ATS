@@ -266,12 +266,45 @@ const isSemesterOneCreditPlan = computed(
 );
 
 const expectedTotalPlanCredits = computed(() => {
-  if (!isSemesterOneCreditPlan.value) {
+  const programTotal = creditLimitsData.value?.total_credit_required ?? null;
+
+  if (programTotal == null || !creditPlanRule.value) {
     return null;
   }
 
-  return creditLimitsData.value?.total_credit_required ?? null;
+  if (isSemesterOneCreditPlan.value) {
+    return programTotal;
+  }
+
+  return Math.max(
+    programTotal - (Number(creditPlanRule.value.credit_transfer) || 0),
+    0,
+  );
 });
+
+const creditPlanTotalHelperText = computed(() => {
+  if (expectedTotalPlanCredits.value !== null) {
+    return isSemesterOneCreditPlan.value
+      ? `Program total: ${expectedTotalPlanCredits.value} credit hours`
+      : `Required total after credit transfer: ${expectedTotalPlanCredits.value} credit hours`;
+  }
+
+  if (creditPlans.value.length === 0) {
+    return "Running total across configured semesters";
+  }
+
+  return `Running total across ${creditPlans.value.length} configured semesters`;
+});
+
+const getCreditPlanRangeText = (plan: CreditPlan) => {
+  const rule = CREDIT_RULES.value[plan.semester_type];
+  return plan.is_li ? "LI exception (8 credit hours)" : `${rule.min}-${rule.max}`;
+};
+
+const creditPlanValidationSummary = computed(
+  () =>
+    `Some semesters have invalid credit hours. Long: ${CREDIT_RULES.value.L.min}-${CREDIT_RULES.value.L.max} | Short: ${CREDIT_RULES.value.S.min}-${CREDIT_RULES.value.S.max} | LI: exception`,
+);
 
 const startEditCreditLimits = () => {
   creditLimitsForm.value = {
@@ -325,8 +358,7 @@ const totalPlanCredits = computed(() => {
 // Computed: validation errors for each credit plan entry
 const creditPlanErrors = computed(() => {
   return creditPlans.value.map((plan) => {
-    if (plan.target_credits === 0 && !isSemesterOneCreditPlan.value) return null;
-    if (plan.is_li && !isSemesterOneCreditPlan.value) return null;
+    if (plan.is_li) return null;
     const rule = CREDIT_RULES.value[plan.semester_type];
     if (plan.target_credits < rule.min) {
       return `${rule.label} requires at least ${rule.min} credit hours (currently ${plan.target_credits})`;
@@ -339,7 +371,10 @@ const creditPlanErrors = computed(() => {
 });
 
 const totalPlanCreditsError = computed(() => {
-  if (!isSemesterOneCreditPlan.value || expectedTotalPlanCredits.value == null) {
+  if (
+    expectedTotalPlanCredits.value == null ||
+    expectedTotalPlanCredits.value <= 0
+  ) {
     return null;
   }
 
@@ -613,9 +648,7 @@ const saveCreditPlans = async () => {
       {
         method: "POST",
         body: {
-          plans: isSemesterOneCreditPlan.value
-            ? normalizedPlans
-            : normalizedPlans.filter((p) => p.target_credits > 0),
+          plans: normalizedPlans,
         },
       },
     );
@@ -1682,23 +1715,15 @@ const manualSteps = [
           </div>
           <div class="flex flex-col items-end">
             <div class="text-3xl font-mono font-bold">
-              <template v-if="expectedTotalPlanCredits !== null">
-                {{ totalPlanCredits }} / {{ expectedTotalPlanCredits }}
-              </template>
-              <template v-else>
-                {{ totalPlanCredits }}
-              </template>
+              {{ totalPlanCredits }}
             </div>
             <div
               class="text-xs uppercase tracking-wide font-bold text-base-content/40"
             >
               Total Plan Credits
             </div>
-            <div
-              v-if="expectedTotalPlanCredits !== null"
-              class="text-xs text-base-content/50 mt-1"
-            >
-              Program total: {{ expectedTotalPlanCredits }} credit hours
+            <div class="text-xs text-base-content/50 mt-1">
+              {{ creditPlanTotalHelperText }}
             </div>
           </div>
         </div>
@@ -1758,7 +1783,10 @@ const manualSteps = [
                         class="label-text text-xs uppercase font-bold text-base-content/40"
                         >Target Credits</span
                       >
-                      <span class="label-text-alt text-xs text-base-content/40">
+                      <span
+                        v-if="false"
+                        class="label-text-alt text-xs text-base-content/40"
+                      >
                         {{
                           plan.is_li && !isSemesterOneCreditPlan
                             ? "LI"
@@ -1766,6 +1794,9 @@ const manualSteps = [
                               ? `${CREDIT_RULES.L.min}–${CREDIT_RULES.L.max}`
                               : `${CREDIT_RULES.S.min}–${CREDIT_RULES.S.max}`
                         }}
+                      </span>
+                      <span class="label-text-alt text-xs text-base-content/40">
+                        {{ getCreditPlanRangeText(plan) }}
                       </span>
                     </label>
                     <input
@@ -1783,7 +1814,7 @@ const manualSteps = [
                       "
                       class="input input-sm input-bordered font-mono"
                       :class="{ 'input-error': creditPlanErrors[index] }"
-                      :disabled="plan.is_li"
+                      :disabled="isSemesterOneCreditPlan && plan.is_li"
                     />
                     <label
                       v-if="creditPlanErrors[index]"
@@ -1843,10 +1874,11 @@ const manualSteps = [
                 d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
               ></path>
             </svg>
-            <span
+            <span v-if="false"
               >Some semesters have invalid credit hours.
               <strong>Long: 12–20</strong> · <strong>Short: 6–10</strong></span
             >
+            <span>{{ creditPlanValidationSummary }}</span>
           </div>
           <div
             v-if="totalPlanCreditsError"

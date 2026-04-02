@@ -339,6 +339,9 @@ const addSemester = () => {
 // Configure Plan modal
 const isConfigModalOpen = ref(false);
 const editableRules = ref<SemesterRule[]>([]);
+const editableLiCount = computed(
+  () => editableRules.value.filter((rule) => rule.is_li).length,
+);
 
 const detectCycle = (rules: SemesterRule[]): ("L" | "S")[] => {
   const posLong = [0, 0, 0];
@@ -1689,11 +1692,149 @@ const getSemesterColumnClasses = (sem: number) => {
 
     <!-- Configure Plan Modal -->
     <dialog class="modal" :class="{ 'modal-open': isConfigModalOpen }">
-      <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-1">Configure Semester Plan</h3>
-        <p class="text-sm text-base-content/60 mb-4">Add/remove semesters and set LI (Latihan Industri) for scheduling.</p>
-        <div class="overflow-x-auto">
-          <table class="table table-sm">
+      <div class="modal-box w-11/12 max-w-4xl p-0 h-[80vh] flex flex-col">
+        <div
+          class="p-6 bg-base-100 border-b border-base-200 flex justify-between items-start"
+        >
+          <div>
+            <h3 class="font-bold text-xl">Configure Semester Plan</h3>
+            <p class="text-sm mt-1 text-base-content/60">
+              Add or remove semesters and set LI (Latihan Industri) for scheduling.
+            </p>
+          </div>
+          <div class="flex flex-col items-end">
+            <div class="text-3xl font-mono font-bold">
+              {{ editableRules.length }}
+            </div>
+            <div
+              class="text-xs uppercase tracking-wide font-bold text-base-content/40"
+            >
+              Configured Semesters
+            </div>
+            <div class="text-xs text-base-content/50 mt-1">
+              LI semesters: {{ editableLiCount }}
+            </div>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6 bg-base-200/30">
+          <div class="space-y-4">
+            <div
+              v-for="(rule, index) in editableRules"
+              :key="`config-card-${rule.semester_number}`"
+              class="card bg-base-100 shadow-sm border border-base-200"
+            >
+              <div class="card-body p-4 flex flex-row items-center gap-4">
+                <div
+                  class="w-10 h-10 rounded-lg bg-base-200 flex items-center justify-center font-bold text-base-content/60"
+                >
+                  {{ rule.semester_number }}
+                </div>
+
+                <div class="flex-1 grid grid-cols-[1fr_auto_1fr] gap-4">
+                  <div class="form-control hover:bg-transparent">
+                    <label class="label pl-0 pt-0 pb-1">
+                      <span
+                        class="label-text text-xs uppercase font-bold text-base-content/40"
+                      >
+                        Semester Type
+                      </span>
+                    </label>
+                    <div
+                      class="min-h-10 rounded-lg border border-base-300 bg-base-200/70 px-3 py-2 flex items-center justify-between gap-3 text-sm"
+                    >
+                      <span class="font-medium text-base-content/80">
+                        {{
+                          rule.semester_type === "L"
+                            ? "Long Semester"
+                            : "Short Semester"
+                        }}
+                      </span>
+                      <span
+                        class="badge badge-sm"
+                        :class="
+                          rule.semester_type === 'L'
+                            ? 'badge-primary'
+                            : 'badge-secondary'
+                        "
+                      >
+                        {{ rule.semester_type === "L" ? "Long" : "Short" }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="flex items-end pb-2">
+                    <label class="label cursor-pointer gap-2">
+                      <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm checkbox-primary"
+                        v-model="rule.is_li"
+                      />
+                      <span class="label-text text-xs font-semibold">LI</span>
+                    </label>
+                  </div>
+
+                  <div class="form-control hover:bg-transparent">
+                    <label class="label pl-0 pt-0 pb-1">
+                      <span
+                        class="label-text text-xs uppercase font-bold text-base-content/40"
+                      >
+                        Credit Range
+                      </span>
+                    </label>
+                    <div
+                      class="min-h-10 rounded-lg border border-base-300 bg-base-200/70 px-3 py-2 flex items-center text-sm font-mono text-base-content/70"
+                    >
+                      <template v-if="getConfigCreditRange(rule)">
+                        {{ getConfigCreditRange(rule)!.min }}-{{
+                          getConfigCreditRange(rule)!.max
+                        }}
+                        cr
+                      </template>
+                      <span v-else class="text-base-content/40">LI semester</span>
+                    </div>
+                    <label
+                      v-if="hasLockedCoursesInSemester(rule.semester_number)"
+                      class="label pt-1 pb-0"
+                    >
+                      <span class="label-text-alt text-xs text-base-content/45">
+                        Locked courses are already assigned in this semester.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  v-if="!hasLockedCoursesInSemester(rule.semester_number)"
+                  class="btn btn-square btn-sm btn-ghost text-error"
+                  @click="removeConfigSemester(index)"
+                  title="Remove semester"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke-width="1.5"
+                    stroke="currentColor"
+                    class="w-4 h-4"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M6 18 18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <button
+              class="btn btn-outline btn-block border-dashed"
+              @click="addConfigSemester"
+            >
+              + Add Next Semester
+            </button>
+          </div>
+          <table v-if="false" class="table table-sm">
             <thead>
               <tr>
                 <th>Semester</th>
@@ -1719,10 +1860,22 @@ const getSemesterColumnClasses = (sem: number) => {
             </tbody>
           </table>
         </div>
-        <button class="btn btn-outline btn-sm mt-3 w-full" @click="addConfigSemester">+ Add Semester</button>
-        <div class="modal-action">
-          <button class="btn btn-ghost" @click="isConfigModalOpen = false">Discard</button>
-          <button class="btn btn-primary" @click="applyConfig">Apply</button>
+        <button
+          v-if="false"
+          class="btn btn-outline btn-sm mt-3 w-full"
+          @click="addConfigSemester"
+        >
+          + Add Semester
+        </button>
+        <div
+          class="p-4 bg-base-100 border-t border-base-200 flex justify-end gap-3 z-20"
+        >
+          <button class="btn btn-ghost" @click="isConfigModalOpen = false">
+            Discard Changes
+          </button>
+          <button class="btn btn-primary" @click="applyConfig">
+            Apply Configuration
+          </button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="isConfigModalOpen = false">

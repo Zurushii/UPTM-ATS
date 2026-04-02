@@ -241,6 +241,10 @@ export const validateSemesterRulePlanTargets = (
   const semesterErrors: string[] = [];
 
   for (const plan of plans) {
+    if (plan.is_li) {
+      continue;
+    }
+
     const bounds = getSemesterCreditBounds(plan.semester_type, constraints);
     const label =
       plan.semester_type === "L" ? "Long Semester" : "Short Semester";
@@ -265,6 +269,28 @@ export const validateSemesterRulePlanTargets = (
     semesterErrors,
     totalError,
   };
+};
+
+export const getSemesterRulePlanRequiredTotalCredits = ({
+  entrySemester,
+  creditTransfer,
+  constraints,
+}: {
+  entrySemester: number;
+  creditTransfer: number;
+  constraints: ProgramSemesterPlanConstraints;
+}) => {
+  const programTotal = Number(constraints.total_credit_required);
+
+  if (!Number.isFinite(programTotal) || programTotal <= 0) {
+    return null;
+  }
+
+  if (Number(entrySemester) === 1) {
+    return programTotal;
+  }
+
+  return Math.max(programTotal - (Number(creditTransfer) || 0), 0);
 };
 
 export const getProgramSemesterPlanConstraints = async (
@@ -534,20 +560,47 @@ export const getStoredSemesterRulePlans = async (
   programId: number,
   intakeType: string,
   entrySemester: number,
+  transferredCredits?: number | null,
   executor: QueryExecutor = pool,
 ): Promise<SemesterRulePlan[]> => {
-  const [ruleRows] = await executor.query(
-    `SELECT id
-     FROM semester_entry_rules
-     WHERE program_id = ?
-       AND intake_type = ?
-       AND entry_semester = ?
-     ORDER BY credit_transfer ASC, id ASC
-     LIMIT 1`,
-    [programId, intakeType, entrySemester],
-  );
+  let ruleRows: any[] = [];
 
-  if ((ruleRows as any[]).length === 0) {
+  if (
+    transferredCredits != null &&
+    Number.isFinite(transferredCredits) &&
+    transferredCredits >= 0
+  ) {
+    const [matchedRuleRows] = await executor.query(
+      `SELECT id
+       FROM semester_entry_rules
+       WHERE program_id = ?
+         AND intake_type = ?
+         AND entry_semester = ?
+         AND credit_transfer <= ?
+       ORDER BY credit_transfer DESC, id ASC
+       LIMIT 1`,
+      [programId, intakeType, entrySemester, transferredCredits],
+    );
+
+    ruleRows = matchedRuleRows as any[];
+  }
+
+  if (ruleRows.length === 0) {
+    const [fallbackRuleRows] = await executor.query(
+      `SELECT id
+       FROM semester_entry_rules
+       WHERE program_id = ?
+         AND intake_type = ?
+         AND entry_semester = ?
+       ORDER BY credit_transfer ASC, id ASC
+       LIMIT 1`,
+      [programId, intakeType, entrySemester],
+    );
+
+    ruleRows = fallbackRuleRows as any[];
+  }
+
+  if (ruleRows.length === 0) {
     return [];
   }
 
@@ -556,7 +609,7 @@ export const getStoredSemesterRulePlans = async (
      FROM semester_credit_plans
      WHERE rule_id = ?
      ORDER BY semester_number ASC`,
-    [Number((ruleRows as any[])[0].id)],
+    [Number(ruleRows[0].id)],
   );
 
   return normalizeSemesterRulePlans(
@@ -574,12 +627,14 @@ export const getEffectiveSemesterRulePlans = async ({
   intakeType,
   entrySemester,
   sessionId,
+  transferredCredits,
   executor = pool,
 }: {
   programId: number;
   intakeType?: string | null;
   entrySemester: number;
   sessionId?: number | null;
+  transferredCredits?: number | null;
   executor?: QueryExecutor;
 }) => {
   if (!intakeType) {
@@ -594,6 +649,7 @@ export const getEffectiveSemesterRulePlans = async ({
     programId,
     intakeType,
     entrySemester,
+    transferredCredits,
     executor,
   );
 
@@ -610,6 +666,7 @@ export const getSemesterRuleMetaForSemester = async ({
   entrySemester,
   sessionId,
   semester,
+  transferredCredits,
   executor = pool,
 }: {
   programId: number;
@@ -617,6 +674,7 @@ export const getSemesterRuleMetaForSemester = async ({
   entrySemester: number;
   sessionId?: number | null;
   semester: number;
+  transferredCredits?: number | null;
   executor?: QueryExecutor;
 }) => {
   const plans = await getEffectiveSemesterRulePlans({
@@ -624,6 +682,7 @@ export const getSemesterRuleMetaForSemester = async ({
     intakeType,
     entrySemester,
     sessionId,
+    transferredCredits,
     executor,
   });
 

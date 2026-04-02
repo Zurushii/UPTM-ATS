@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
 
   // Get student ID and program_id
   const [studentRows] = await pool.query(
-    "SELECT id, program_id FROM students WHERE user_id = ?",
+    "SELECT id, program_id, total_credit_transferred FROM students WHERE user_id = ?",
     [session.user.id],
   );
 
@@ -40,6 +40,7 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
   const programId = students[0].program_id;
+  const transferredCredits = Number(students[0].total_credit_transferred) || 0;
 
   await ensureSemesterOneRulePlansBackfilled(programId);
 
@@ -104,6 +105,7 @@ export default defineEventHandler(async (event) => {
       intakeType,
       entrySemester: startSemester,
       sessionId,
+      transferredCredits,
     });
   }
 
