@@ -912,7 +912,6 @@ export default defineEventHandler(async (event) => {
             while (rebalanceAssignments(getEffectiveCapacity)) {}
             while (rebalanceAssignments(getMaxCredit)) {}
 
-
             // ── Assign IT courses to LI semester AFTER all regular courses ──
             // LI requires all other courses to be completed first
             if (itCourses.length > 0) {
