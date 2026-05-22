@@ -1,4 +1,15 @@
 import { pool } from "~~/server/utils/db";
+import {
+  ensureStudentEntrySemesterColumns,
+  getProgramCreditCeiling,
+  getSemesterEntryBands,
+  validateSemesterEntryBands,
+} from "~~/server/utils/semester-entry-bands";
+import {
+  resolveProgramSessionForIntake,
+  resolveSemesterRuleSetForIntake,
+} from "~~/server/utils/intake-planning-config";
+import { resolveSemesterRuleJourney } from "~~/server/utils/semester-rule-journeys";
 import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
 
@@ -12,10 +23,17 @@ interface ProcessedStudent {
   transferred_courses: string;
   // Internal fields
   entry_semester: number;
+  system_assigned_entry_semester: number;
+  final_entry_semester: number;
+  entry_semester_rule_id: number | null;
+  entry_semester_assignment_note: string | null;
   transferred_course_ids: number[];
   is_new_student: boolean; // true if student was created during processing
   has_error: boolean; // true if student was registered despite validation errors
   error_reason: string; // reason for error if has_error is true
+  entry_semester_override_reason?: string | null;
+  has_academic_plan?: boolean;
+  academic_plan_lock_reason?: string | null;
 }
 
 interface FailedRecord {
@@ -26,10 +44,42 @@ interface FailedRecord {
   pre_registered: boolean; // true if student was still pre-registered despite the error
 }
 
-interface SemesterRule {
-  credit_transfer: number;
-  entry_semester: number;
+interface ExistingOrReservedStudent {
+  id: number;
+  matric_no: string;
+  status: string;
+  total_credit_transferred: number;
+  starting_semester: number | null;
+  system_assigned_entry_semester: number | null;
+  final_entry_semester: number | null;
+  entry_semester_assignment_note: string | null;
+  entry_semester_override_reason: string | null;
 }
+
+const getRepresentativeCredit = (band: {
+  credit_transfer?: number | null;
+  transfer_min: number;
+}) => {
+  const representativeCredit = Number(band.credit_transfer);
+
+  if (Number.isFinite(representativeCredit) && representativeCredit >= 0) {
+    return representativeCredit;
+  }
+
+  return Math.max(Number(band.transfer_min) || 0, 0);
+};
+
+const getCoverageRangeLabel = (band: {
+  transfer_min: number;
+  transfer_max: number;
+}) => {
+  const transferMin = Math.max(Number(band.transfer_min) || 0, 0);
+  const transferMax = Math.max(Number(band.transfer_max) || 0, 0);
+
+  return transferMin === transferMax
+    ? `${transferMin}`
+    : `${transferMin}-${transferMax}`;
+};
 
 export default defineEventHandler(async (event) => {
   // Authenticate user
@@ -100,13 +150,6 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (!intakeType) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: "Intake type (rule set) is required",
-    });
-  }
-
   // Validate intake matches current session
   const [sessionRows] = await pool.query(
     `SELECT active_intake_period FROM program_current_session WHERE program_id = ?`,
@@ -129,37 +172,103 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Get semester entry rules for the selected intake type
-  const [ruleRows] = await pool.query(
-    `SELECT credit_transfer, entry_semester 
-     FROM semester_entry_rules 
-     WHERE program_id = ? AND intake_type = ?
-     ORDER BY credit_transfer DESC`,
-    [programId, intakeType],
-  );
+  await ensureStudentEntrySemesterColumns();
 
-  const rules = ruleRows as SemesterRule[];
-  if (rules.length === 0) {
+  const creditCeiling = await getProgramCreditCeiling(programId);
+  const resolvedRuleSet =
+    intakeType && intakeType.trim()
+      ? {
+          status: "resolved" as const,
+          value: {
+            intake_type: intakeType.trim(),
+            resolution_source: "month_token" as const,
+          },
+          reason: "",
+          candidates: [],
+        }
+      : await resolveSemesterRuleSetForIntake({
+          programId,
+          intakeYear: intake,
+        });
+  const effectiveIntakeType = resolvedRuleSet.value?.intake_type || "";
+
+  if (!effectiveIntakeType) {
     throw createError({
       statusCode: 400,
       statusMessage:
-        "No semester entry rules found for the selected intake type",
+        resolvedRuleSet.reason ||
+        "The system could not resolve a semester rule set for this intake.",
+    });
+  }
+
+  const resolvedProgramSession = await resolveProgramSessionForIntake({
+    programId,
+    intakeYear: intake,
+  });
+  const matchedProgramSessionId = resolvedProgramSession.value?.id ?? null;
+
+  if (!matchedProgramSessionId) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        resolvedProgramSession.reason ||
+        "The system could not resolve a program structure for this intake.",
+    });
+  }
+
+  const entryBands = await getSemesterEntryBands(programId, effectiveIntakeType);
+  const bandValidation = validateSemesterEntryBands({
+    bands: entryBands,
+    creditCeiling,
+  });
+
+  if (entryBands.length === 0) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        "No semester entry rules found for the resolved intake type",
+    });
+  }
+
+  if (!bandValidation.is_valid) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        bandValidation.issues[0]?.message ||
+        "The selected semester-entry band table is incomplete or overlapping. Fix the rule set before running Student Entry Assessment.",
     });
   }
 
   // Get all students in this program (regardless of intake - they may already exist)
   const [studentRows] = await pool.query(
-    `SELECT id, matric_no, intake_year, status FROM students WHERE program_id = ?`,
+    `SELECT id,
+            matric_no,
+            intake_year,
+            status,
+            total_credit_transferred,
+            starting_semester,
+            system_assigned_entry_semester,
+            final_entry_semester,
+            entry_semester_assignment_note,
+            entry_semester_override_reason
+     FROM students
+     WHERE program_id = ?`,
     [programId],
   );
 
   const studentsMap = new Map<
     string,
-    { id: number; matric_no: string; status: string }
-  >();
-  const studentsById = new Map<
-    number,
-    { id: number; matric_no: string; status: string }
+    {
+      id: number;
+      matric_no: string;
+      status: string;
+      total_credit_transferred: number;
+      starting_semester: number | null;
+      system_assigned_entry_semester: number | null;
+      final_entry_semester: number | null;
+      entry_semester_assignment_note: string | null;
+      entry_semester_override_reason: string | null;
+    }
   >();
 
   for (const student of studentRows as any[]) {
@@ -167,13 +276,32 @@ export default defineEventHandler(async (event) => {
       id: student.id,
       matric_no: student.matric_no,
       status: student.status,
-    });
-    studentsById.set(student.id, {
-      id: student.id,
-      matric_no: student.matric_no,
-      status: student.status,
+      total_credit_transferred: Number(student.total_credit_transferred) || 0,
+      starting_semester:
+        student.starting_semester == null
+          ? null
+          : Number(student.starting_semester),
+      system_assigned_entry_semester:
+        student.system_assigned_entry_semester == null
+          ? null
+          : Number(student.system_assigned_entry_semester),
+      final_entry_semester:
+        student.final_entry_semester == null
+          ? null
+          : Number(student.final_entry_semester),
+      entry_semester_assignment_note:
+        student.entry_semester_assignment_note ?? null,
+      entry_semester_override_reason:
+        student.entry_semester_override_reason ?? null,
     });
   }
+
+  const [existingPlanRows] = await pool.query(
+    `SELECT DISTINCT student_id FROM academic_plans`,
+  );
+  const studentsWithAcademicPlans = new Set<number>(
+    (existingPlanRows as any[]).map((row) => Number(row.student_id)),
+  );
 
   // Get all courses for lookup (bulk fetch for performance) - include credit_hour
   const [courseRows] = await pool.query(
@@ -383,7 +511,7 @@ export default defineEventHandler(async (event) => {
     const matricNoLower = matricNo.toLowerCase();
 
     // 5. Find or mark student for creation
-    let student: { id: number; matric_no: string; status: string } | undefined;
+    let student: ExistingOrReservedStudent | undefined;
     let isNewStudent = false;
 
     const existingStudent = studentsMap.get(matricNoLower);
@@ -396,7 +524,17 @@ export default defineEventHandler(async (event) => {
       // Student doesn't exist - will create as reserved
       isNewStudent = true;
       // Create a placeholder - actual ID will be assigned after INSERT
-      student = { id: -1, matric_no: matricNo, status: "reserved" };
+      student = {
+        id: -1,
+        matric_no: matricNo,
+        status: "reserved",
+        total_credit_transferred: 0,
+        starting_semester: null,
+        system_assigned_entry_semester: null,
+        final_entry_semester: null,
+        entry_semester_assignment_note: null,
+        entry_semester_override_reason: null,
+      };
     }
 
     // 5. Parse and validate credit value
@@ -426,14 +564,73 @@ export default defineEventHandler(async (event) => {
       continue;
     }
 
-    // Determine entry semester based on rules (use raw credits even if 0)
-    let entrySemester = 1; // Default to semester 1
-    for (const rule of rules) {
-      if (credits >= rule.credit_transfer) {
-        entrySemester = rule.entry_semester;
-        break;
-      }
+    const hasAcademicPlan =
+      student.id > 0 && studentsWithAcademicPlans.has(Number(student.id));
+
+    if (hasAcademicPlan) {
+      const lockedSemester =
+        student.final_entry_semester ??
+        student.system_assigned_entry_semester ??
+        student.starting_semester ??
+        0;
+      processedMatricNos.add(student.matric_no.toLowerCase());
+      processedStudents.push({
+        student_id: student.id,
+        matric_no: student.matric_no,
+        intake_year: intake,
+        total_credit_transferred: student.total_credit_transferred || 0,
+        starting_semester: lockedSemester,
+        program_code: programCode,
+        transferred_courses: "",
+        entry_semester: lockedSemester,
+        system_assigned_entry_semester:
+          student.system_assigned_entry_semester ?? lockedSemester,
+        final_entry_semester: lockedSemester,
+        entry_semester_rule_id: null,
+        entry_semester_assignment_note:
+          student.entry_semester_assignment_note ||
+          "Locked because an academic plan already exists for this student.",
+        transferred_course_ids: [],
+        is_new_student: false,
+        has_error: false,
+        error_reason: "",
+        entry_semester_override_reason:
+          student.entry_semester_override_reason ?? null,
+        has_academic_plan: true,
+        academic_plan_lock_reason:
+          "Academic plan already exists. Starting semester cannot be changed here.",
+      });
+      continue;
     }
+
+    const matchingBand = entryBands.find(
+      (band) => credits >= band.transfer_min && credits <= band.transfer_max,
+    );
+
+    if (!matchingBand) {
+        failedRecords.push({
+          row: rowNum,
+          matric_no: student.matric_no,
+          student_id: student.id > 0 ? student.id : null,
+          reason: `No semester rule covered ${credits} transferred credits for ${effectiveIntakeType}`,
+          pre_registered: false,
+        });
+        continue;
+    }
+
+    const entrySemester = matchingBand.entry_semester;
+    const coverageRange = getCoverageRangeLabel(matchingBand);
+    const resolvedJourney = await resolveSemesterRuleJourney({
+      programId,
+      intakeType: effectiveIntakeType,
+      entrySemester,
+      transferredCredits: credits,
+      sessionId: matchedProgramSessionId,
+      ruleId: matchingBand.id,
+    });
+    const assignmentNote =
+      resolvedJourney.explanation ||
+      `${effectiveIntakeType} + ${credits} transferred credits matched Semester ${matchingBand.entry_semester} band (${coverageRange}) and will follow the configured band journey.`;
 
     // 7. Parse and validate transferred courses
     const transferredCourseIds: number[] = [];
@@ -523,19 +720,28 @@ export default defineEventHandler(async (event) => {
       intake_year: intake,
       // Always keep the original credit value from Excel — needed for academic planning generation
       total_credit_transferred: credits,
-      starting_semester: 0, // Always 0 as per validation
+      starting_semester: entrySemester,
       program_code: programCode,
       // Only store transferred_courses string if courses are valid; drop if unresolvable
       transferred_courses: hasError
         ? ""
         : (transferredCoursesValue ? String(transferredCoursesValue) : ""),
-      // Still compute entry semester from the original credits (not forced to 1)
       entry_semester: entrySemester,
+      system_assigned_entry_semester: entrySemester,
+      final_entry_semester: entrySemester,
+      entry_semester_rule_id:
+        matchingBand.is_system_default || Number(matchingBand.id) <= 0
+          ? null
+          : matchingBand.id,
+      entry_semester_assignment_note: assignmentNote,
       // Only link course IDs if they are fully valid and reconciled
       transferred_course_ids: hasError ? [] : transferredCourseIds,
       is_new_student: isNewStudent,
       has_error: hasError,
       error_reason: errorReason,
+      entry_semester_override_reason: null,
+      has_academic_plan: false,
+      academic_plan_lock_reason: null,
     });
   }
 
@@ -546,17 +752,45 @@ export default defineEventHandler(async (event) => {
 
     // Process students in database - create new or update existing
     for (const student of processedStudents) {
+      if (student.has_academic_plan) {
+        continue;
+      }
+
       if (student.student_id === -1) {
         // Brand new student - create as reserved
         const [insertResult] = await connection.query(
-          `INSERT INTO students (user_id, status, matric_no, program_id, intake_year, total_credit_transferred, starting_semester)
-           VALUES (NULL, 'reserved', ?, ?, ?, ?, ?)`,
+          `INSERT INTO students (
+             user_id,
+             status,
+             matric_no,
+             program_id,
+             intake_year,
+             total_credit_transferred,
+             starting_semester,
+             system_assigned_entry_semester,
+             final_entry_semester,
+             entry_semester_rule_id,
+             entry_semester_assignment_note,
+             intake_assessment_needs_fix,
+             intake_assessment_error_reason,
+             is_entry_semester_override,
+             entry_semester_override_reason,
+             entry_semester_overridden_by,
+             entry_semester_overridden_at
+           )
+           VALUES (NULL, 'reserved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, NULL, NULL, NULL)`,
           [
             student.matric_no,
             programId,
             student.intake_year,
             student.total_credit_transferred,
-            student.entry_semester,
+            student.final_entry_semester,
+            student.system_assigned_entry_semester,
+            student.final_entry_semester,
+            student.entry_semester_rule_id,
+            student.entry_semester_assignment_note,
+            student.has_error ? 1 : 0,
+            student.has_error ? student.error_reason : null,
           ],
         );
         // Update student_id with the newly created ID
@@ -565,11 +799,28 @@ export default defineEventHandler(async (event) => {
         // Update existing student (either reserved or active)
         await connection.query(
           `UPDATE students 
-           SET total_credit_transferred = ?, starting_semester = ?
+           SET total_credit_transferred = ?,
+               starting_semester = ?,
+               system_assigned_entry_semester = ?,
+               final_entry_semester = ?,
+               entry_semester_rule_id = ?,
+               entry_semester_assignment_note = ?,
+               intake_assessment_needs_fix = ?,
+               intake_assessment_error_reason = ?,
+               is_entry_semester_override = FALSE,
+               entry_semester_override_reason = NULL,
+               entry_semester_overridden_by = NULL,
+               entry_semester_overridden_at = NULL
            WHERE id = ?`,
           [
             student.total_credit_transferred,
-            student.entry_semester,
+            student.final_entry_semester,
+            student.system_assigned_entry_semester,
+            student.final_entry_semester,
+            student.entry_semester_rule_id,
+            student.entry_semester_assignment_note,
+            student.has_error ? 1 : 0,
+            student.has_error ? student.error_reason : null,
             student.student_id,
           ],
         );
@@ -614,12 +865,17 @@ export default defineEventHandler(async (event) => {
   return {
     summary: {
       total_records: processedStudents.length + strictFailedRecords.length,
-      successful: processedStudents.filter((s) => !s.has_error).length,
+      successful: processedStudents.filter(
+        (s) => !s.has_error && !s.has_academic_plan,
+      ).length,
       failed: strictFailedRecords.length,
       registered_with_errors: processedStudents.filter((s) => s.has_error).length,
-      new_students: processedStudents.filter((s) => s.is_new_student).length,
-      updated_students: processedStudents.filter((s) => !s.is_new_student)
+      locked_existing_plans: processedStudents.filter((s) => s.has_academic_plan)
         .length,
+      new_students: processedStudents.filter((s) => s.is_new_student).length,
+      updated_students: processedStudents.filter(
+        (s) => !s.is_new_student && !s.has_academic_plan,
+      ).length,
     },
     processed_students: processedStudents.map((s) => ({
       student_id: s.student_id,
@@ -630,9 +886,15 @@ export default defineEventHandler(async (event) => {
       program_code: s.program_code,
       transferred_courses: s.transferred_courses,
       entry_semester: s.entry_semester,
+      system_assigned_entry_semester: s.system_assigned_entry_semester,
+      final_entry_semester: s.final_entry_semester,
+      entry_semester_assignment_note: s.entry_semester_assignment_note,
+      entry_semester_override_reason: s.entry_semester_override_reason ?? null,
       is_new_student: s.is_new_student,
       has_error: s.has_error,
       error_reason: s.error_reason,
+      has_academic_plan: !!s.has_academic_plan,
+      academic_plan_lock_reason: s.academic_plan_lock_reason ?? null,
     })),
     failed_records: strictFailedRecords,
     error_registered_records: failedRecords.filter((f) => f.pre_registered),

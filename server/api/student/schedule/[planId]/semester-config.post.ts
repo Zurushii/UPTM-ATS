@@ -78,6 +78,11 @@ export default defineEventHandler(async (event) => {
       semester_type: rule.semester_type,
       is_li: !!rule.is_li,
       target_credits: Number(rule.target_credits ?? 0),
+      is_credit_exception: !!rule.is_credit_exception,
+      credit_exception_reason:
+        rule.is_credit_exception && rule.credit_exception_reason
+          ? String(rule.credit_exception_reason).trim() || null
+          : null,
     }))
     .sort((a, b) => a.semester_number - b.semester_number);
 

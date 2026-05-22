@@ -123,6 +123,14 @@ CREATE TABLE students (
   intake_year VARCHAR(4) NOT NULL,              -- Format: MMYY (e.g., 0824 = Aug 2024)
   total_credit_transferred INT DEFAULT 0,       -- Student fills during onboarding
   starting_semester INT DEFAULT 1,              -- Calculated by HoP later
+  system_assigned_entry_semester INT DEFAULT NULL,
+  final_entry_semester INT DEFAULT NULL,
+  entry_semester_rule_id INT DEFAULT NULL,
+  entry_semester_assignment_note TEXT NULL,
+  is_entry_semester_override BOOLEAN NOT NULL DEFAULT FALSE,
+  entry_semester_override_reason TEXT NULL,
+  entry_semester_overridden_by VARCHAR(36) NULL,
+  entry_semester_overridden_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_student_user
@@ -172,7 +180,10 @@ CREATE TABLE semester_entry_rules (
   program_id INT NOT NULL,
   intake_type VARCHAR(20) NOT NULL,             -- Flexible intake name (e.g., "May Intake", "Aug Intake")
   credit_transfer INT NOT NULL,                 -- Exact credit transfer value
+  transfer_min INT NULL,
+  transfer_max INT NULL,
   entry_semester INT NOT NULL,                  -- Starting semester for this credit level
+  reference_note VARCHAR(255) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT fk_ser_program
@@ -182,31 +193,51 @@ CREATE TABLE semester_entry_rules (
   UNIQUE KEY unique_program_intake_credit (program_id, intake_type, credit_transfer)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-
-CREATE TABLE semester_credit_plans (
+CREATE TABLE program_intake_lifecycles (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  rule_id INT NOT NULL,
-  semester_number INT NOT NULL,
-  semester_type ENUM('L', 'S') NOT NULL,
-  is_li BOOLEAN NOT NULL DEFAULT FALSE,
-  target_credits INT NOT NULL,
+  program_id INT NOT NULL,
+  intake_type VARCHAR(50) NOT NULL,
+  cycle_slot_1 ENUM('L', 'S') NOT NULL DEFAULT 'L',
+  cycle_slot_2 ENUM('L', 'S') NOT NULL DEFAULT 'L',
+  cycle_slot_3 ENUM('L', 'S') NOT NULL DEFAULT 'S',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-  CONSTRAINT fk_scp_rule
-    FOREIGN KEY (rule_id) REFERENCES semester_entry_rules(id) ON DELETE CASCADE,
-  UNIQUE KEY unique_rule_semester (rule_id, semester_number)
+  CONSTRAINT fk_pil_program
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+
+  UNIQUE KEY unique_program_intake_lifecycle (program_id, intake_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-
-CREATE TABLE semester_rule_plan_backfills (
-  program_id INT NOT NULL,
-  version VARCHAR(100) NOT NULL,
+CREATE TABLE semester_rule_journey_slots (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  rule_id INT NOT NULL,
+  slot_order INT NOT NULL,
+  semester_type ENUM('L', 'S') NOT NULL DEFAULT 'L',
+  slot_role ENUM('regular', 'fyp1', 'fyp2', 'li') NOT NULL DEFAULT 'regular',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-  PRIMARY KEY (program_id, version),
+  CONSTRAINT fk_srjs_rule
+    FOREIGN KEY (rule_id) REFERENCES semester_entry_rules(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_rule_slot_order (rule_id, slot_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-  CONSTRAINT fk_srpb_program
-    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+CREATE TABLE semester_rule_exception_windows (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  rule_id INT NOT NULL,
+  slot_order INT NOT NULL,
+  transfer_min INT NOT NULL,
+  transfer_max INT NOT NULL,
+  allowed_overload_credits INT NOT NULL DEFAULT 0,
+  allowed_underload_credits INT NOT NULL DEFAULT 0,
+  default_reason TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_srew_rule
+    FOREIGN KEY (rule_id) REFERENCES semester_entry_rules(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_rule_slot_transfer_window (rule_id, slot_order, transfer_min, transfer_max)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -286,6 +317,8 @@ CREATE TABLE academic_plan_semester_configs (
   semester_type ENUM('L', 'S') NOT NULL,
   is_li BOOLEAN NOT NULL DEFAULT FALSE,
   target_credits INT NOT NULL DEFAULT 0,
+  is_credit_exception BOOLEAN NOT NULL DEFAULT FALSE,
+  credit_exception_reason TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

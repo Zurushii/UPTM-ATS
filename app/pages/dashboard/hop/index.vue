@@ -212,7 +212,7 @@ const workflowManuals = {
     { text: "Navigate to the Semester Rules page." },
     { text: "Define credit transfer ranges and their corresponding entry semesters.", note: "e.g. 0\u201320 credits \u2192 Semester 1, 21\u201340 credits \u2192 Semester 2" },
     { text: "Add or edit rules by specifying the minimum and maximum credit hours." },
-    { text: "Save your changes. These rules are used during Intake Assessment to auto-calculate each student's starting semester." },
+    { text: "Save your changes. These rules are used during Student Entry Assessment to auto-calculate each student's starting semester." },
   ],
   programStructure: [
     { text: "Navigate to the Program Structure page." },
@@ -230,7 +230,7 @@ const workflowManuals = {
     { text: "View the Cohort Semester Progress to see how each intake is tracking.", note: "Semesters are automatically calculated from the active session." },
   ],
   intakeAssessment: [
-    { text: "Navigate to the Intake Assessment page." },
+    { text: "Navigate to the Student Entry Assessment page." },
     { text: "Select a session and upload the student Excel sheet.", note: "The sheet should contain student matric numbers and credit transfer data." },
     { text: "The system will automatically match students and process credit transfers." },
     { text: "Review the assessment results \u2014 students will be assigned entry semesters based on semester rules." },
@@ -518,13 +518,13 @@ const workflowManuals = {
                   <div class="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent font-bold text-lg">4</div>
                   <div class="flex items-center gap-1">
                     <UserManualButton
-                      title="Intake Assessment"
+                      title="Student Entry Assessment"
                       :steps="workflowManuals.intakeAssessment"
                     />
                     <span class="badge badge-ghost badge-sm text-[10px] uppercase font-bold tracking-wider">Cohort</span>
                   </div>
                 </div>
-                <h3 class="font-bold text-base-content mb-1">Intake Assessment</h3>
+                <h3 class="font-bold text-base-content mb-1">Student Entry Assessment</h3>
                 <p class="text-xs text-base-content/60 leading-relaxed mb-4 flex-grow">Inject student sheets & process credit transfers automatically.</p>
                 <NuxtLink to="/dashboard/hop/intake-assessment" class="text-sm font-bold text-accent flex items-center gap-1 group">
                   Assess <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>

@@ -1,4 +1,13 @@
 import { pool } from "~~/server/utils/db";
+import {
+  getProgramCreditCeiling,
+  getSemesterEntryBands,
+  validateSemesterEntryBands,
+} from "~~/server/utils/semester-entry-bands";
+import {
+  resolveProgramSessionForIntake,
+  resolveSemesterRuleSetForIntake,
+} from "~~/server/utils/intake-planning-config";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -37,28 +46,63 @@ export default defineEventHandler(async (event) => {
 
   // Get distinct semester entry rule sets (by intake_type)
   const [ruleSetRows] = await pool.query(
-    `SELECT DISTINCT intake_type, 
-            COUNT(*) as rule_count,
-            MIN(credit_transfer) as min_credit,
-            MAX(credit_transfer) as max_credit
-     FROM semester_entry_rules 
-     WHERE program_id = ? 
-     GROUP BY intake_type 
+    `SELECT DISTINCT intake_type
+     FROM semester_entry_rules
+     WHERE program_id = ?
      ORDER BY intake_type ASC`,
     [programId],
   );
 
   const intakes = (intakeRows as any[]).map((r) => r.intake_year);
-  const ruleSets = (ruleSetRows as any[]).map((r) => ({
-    intake_type: r.intake_type,
-    rule_count: r.rule_count,
-    min_credit: r.min_credit,
-    max_credit: r.max_credit,
-  }));
+  const creditCeiling = await getProgramCreditCeiling(programId);
+  const ruleSets = [];
+
+  const [currentSessionRows] = await pool.query(
+    `SELECT active_intake_period, semester_type, updated_at
+     FROM program_current_session
+     WHERE program_id = ?`,
+    [programId],
+  );
+  const currentSession = (currentSessionRows as any[])[0] ?? null;
+
+  for (const row of ruleSetRows as any[]) {
+    const intakeType = String(row.intake_type);
+    const bands = await getSemesterEntryBands(programId, intakeType);
+    const validation = validateSemesterEntryBands({
+      bands,
+      creditCeiling,
+    });
+
+    ruleSets.push({
+      intake_type: intakeType,
+      rule_count: bands.length,
+      min_credit: bands[0]?.transfer_min ?? 0,
+      max_credit: bands.at(-1)?.transfer_max ?? 0,
+      is_valid: validation.is_valid,
+      validation_message: validation.issues[0]?.message ?? null,
+    });
+  }
+
+  const autoAssignment =
+    currentSession?.active_intake_period
+      ? {
+          intake_year: String(currentSession.active_intake_period),
+          semester_rule: await resolveSemesterRuleSetForIntake({
+            programId,
+            intakeYear: String(currentSession.active_intake_period),
+          }),
+          program_session: await resolveProgramSessionForIntake({
+            programId,
+            intakeYear: String(currentSession.active_intake_period),
+          }),
+        }
+      : null;
 
   return {
     programId,
     intakes,
     ruleSets,
+    current_session: currentSession,
+    auto_assignment: autoAssignment,
   };
 });

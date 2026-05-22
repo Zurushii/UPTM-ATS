@@ -78,6 +78,14 @@ export default defineEventHandler(async (event) => {
 
   // Group by semester
   const semesterMap = new Map<number, any[]>();
+  const transferredCourses: Array<{
+    course_id: number;
+    course_code: string;
+    course_name: string;
+    credit_hour: number;
+    status: string;
+    semester: number;
+  }> = [];
   for (const row of detailRows as any[]) {
     if (!semesterMap.has(row.semester)) {
       semesterMap.set(row.semester, []);
@@ -89,6 +97,17 @@ export default defineEventHandler(async (event) => {
       credit_hour: row.credit_hour,
       status: row.status || "Planned",
     });
+
+    if (row.status === "Transferred") {
+      transferredCourses.push({
+        course_id: row.course_id,
+        course_code: row.course_code,
+        course_name: row.course_name,
+        credit_hour: row.credit_hour,
+        status: row.status || "Planned",
+        semester: Number(row.semester),
+      });
+    }
   }
 
   // Pre-compute retake course IDs: course_ids that appear as Failed AND later as Planned
@@ -164,6 +183,13 @@ export default defineEventHandler(async (event) => {
       total_credit_transferred: plan.total_credit_transferred,
     },
     semesters,
+    transferredCourses: transferredCourses.sort((left, right) => {
+      if (left.semester !== right.semester) {
+        return left.semester - right.semester;
+      }
+
+      return left.course_code.localeCompare(right.course_code);
+    }),
     summary: {
       total_semesters: scheduledSemesters.size,
       total_credits: transferredCredits + plannedCredits,

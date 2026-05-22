@@ -23,6 +23,10 @@ interface Course {
   status: "Planned" | "Transferred" | "Passed" | "Failed";
 }
 
+interface TransferredCourse extends Course {
+  semester: number;
+}
+
 interface Semester {
   semester: number;
   courses: Course[];
@@ -47,6 +51,7 @@ interface PlanData {
     total_credit_transferred: number | null;
   };
   semesters: Semester[];
+  transferredCourses: TransferredCourse[];
   summary: {
     total_semesters: number;
     total_credits: number;
@@ -73,6 +78,13 @@ interface SemesterRule {
   semester_type: "L" | "S";
   is_li: boolean;
   target_credits: number;
+  allowed_overload_credits?: number;
+  allowed_underload_credits?: number;
+}
+
+interface SemesterLimitContext {
+  effectiveMin: number;
+  effectiveMax: number;
 }
 
 interface CreditLimits {
@@ -173,16 +185,27 @@ watchEffect(() => {
 const transferredCourses = computed(() => {
   if (!planData.value) return [];
 
-  const transferred: Course[] = [];
+  if (planData.value.transferredCourses?.length) {
+    return planData.value.transferredCourses;
+  }
+
+  const transferred: TransferredCourse[] = [];
   for (const semester of planData.value.semesters) {
     for (const course of semester.courses) {
       if (course.status === "Transferred") {
-        transferred.push(course);
+        transferred.push({
+          ...course,
+          semester: semester.semester,
+        });
       }
     }
   }
   return transferred;
 });
+
+const transferredCredits = computed(() =>
+  transferredCourses.value.reduce((sum, course) => sum + course.credit_hour, 0),
+);
 
 // Get passed courses (locked, completed successfully)
 const passedCourses = computed(() => {
@@ -318,16 +341,18 @@ const addSemester = () => {
       for (const r of coursesData.value.semester_rules) {
         if (!r.is_li) {
           const pos = (r.semester_number - 1) % 3;
-          posTotal[pos]++;
-          if (r.semester_type === "L") posLong[pos]++;
+          posTotal[pos] = (posTotal[pos] ?? 0) + 1;
+          if (r.semester_type === "L") {
+            posLong[pos] = (posLong[pos] ?? 0) + 1;
+          }
         }
       }
       const cycle = posTotal.map((total, i) =>
-        total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
-      );
+        total === 0 ? "L" : (posLong[i] ?? 0) >= total / 2 ? "L" : "S",
+      ) as ("L" | "S")[];
       coursesData.value.semester_rules.push({
         semester_number: nextSem,
-        semester_type: cycle[(nextSem - 1) % 3] as "L" | "S",
+        semester_type: cycle[(nextSem - 1) % 3] ?? "L",
         is_li: false,
         target_credits: 0,
       });
@@ -348,12 +373,14 @@ const detectCycle = (rules: SemesterRule[]): ("L" | "S")[] => {
   for (const r of rules) {
     if (!r.is_li) {
       const pos = (r.semester_number - 1) % 3;
-      posTotal[pos]++;
-      if (r.semester_type === "L") posLong[pos]++;
+      posTotal[pos] = (posTotal[pos] ?? 0) + 1;
+      if (r.semester_type === "L") {
+        posLong[pos] = (posLong[pos] ?? 0) + 1;
+      }
     }
   }
   return posTotal.map((total, i) =>
-    total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
+    total === 0 ? "L" : (posLong[i] ?? 0) >= total / 2 ? "L" : "S",
   ) as ("L" | "S")[];
 };
 
@@ -376,7 +403,7 @@ const addConfigSemester = () => {
   const cycle = detectCycle(editableRules.value);
   editableRules.value.push({
     semester_number: nextSem,
-    semester_type: cycle[(nextSem - 1) % 3],
+    semester_type: cycle[(nextSem - 1) % 3] ?? "L",
     is_li: false,
     target_credits: 0,
   });
@@ -904,9 +931,9 @@ const getPreviewSemesterPhaseBadgeClass = (sem: number): string => {
   return "border-info/25 bg-info/10 text-info";
 };
 
-const getSemesterLimits = (
+const getSemesterLimitContext = (
   sem: number,
-): { min: number; max: number } | null => {
+): SemesterLimitContext | null => {
   const rule = getSemesterRule(sem);
   if (!rule || rule.is_li) return null; // LI semesters bypass validation
   const useBase = coursesData.value?.on_probation && isSemesterCompleted(sem);
@@ -914,9 +941,36 @@ const getSemesterLimits = (
     ? coursesData.value?.base_credit_limits
     : coursesData.value?.credit_limits;
   if (!limits) return null;
-  if (rule.semester_type === "L")
-    return { min: limits.long_min, max: limits.long_max };
-  return { min: limits.short_min, max: limits.short_max };
+
+  if (rule.semester_type === "L") {
+    return {
+      effectiveMin: Math.max(
+        limits.long_min - (Number(rule.allowed_underload_credits) || 0),
+        0,
+      ),
+      effectiveMax: limits.long_max + (Number(rule.allowed_overload_credits) || 0),
+    };
+  }
+
+  return {
+    effectiveMin: Math.max(
+      limits.short_min - (Number(rule.allowed_underload_credits) || 0),
+      0,
+    ),
+    effectiveMax: limits.short_max + (Number(rule.allowed_overload_credits) || 0),
+  };
+};
+
+const getSemesterLimits = (
+  sem: number,
+): { min: number; max: number } | null => {
+  const context = getSemesterLimitContext(sem);
+  if (!context) return null;
+
+  return {
+    min: context.effectiveMin,
+    max: context.effectiveMax,
+  };
 };
 
 // Get credit status for a semester: 'ok' | 'over' | 'under' | 'li' | 'empty'
@@ -1409,7 +1463,7 @@ const getSemesterColumnClasses = (sem: number) => {
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Transferred:</span>
-          <span class="font-semibold text-success">{{ transferredCourses.length }} courses ({{ planData.summary.transferred_credits }} cr)</span>
+          <span class="font-semibold text-success">{{ transferredCourses.length }} courses ({{ transferredCredits }} cr)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Unassigned:</span>
@@ -1668,7 +1722,7 @@ const getSemesterColumnClasses = (sem: number) => {
       <div v-if="transferredCourses.length > 0" class="collapse collapse-arrow bg-success/5 border border-success/20 rounded-lg mt-3 flex-shrink-0">
         <input type="checkbox" />
         <div class="collapse-title py-2 min-h-0 text-sm font-medium">
-          View {{ transferredCourses.length }} Transferred Courses ({{ planData.summary.transferred_credits }} credits)
+          View {{ transferredCourses.length }} Transferred Courses ({{ transferredCredits }} credits)
         </div>
         <div class="collapse-content">
           <div class="flex flex-wrap gap-2 pt-2">
@@ -1944,7 +1998,7 @@ const getSemesterColumnClasses = (sem: number) => {
           </div>
           <div class="rounded-[1.35rem] border border-base-300 bg-base-100/95 p-4 shadow-sm">
             <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-base-content/45">Transferred Credit</span>
-            <span class="mt-2 block text-2xl font-semibold text-base-content">{{ planData?.summary.transferred_credits ?? 0 }} cr</span>
+            <span class="mt-2 block text-2xl font-semibold text-base-content">{{ transferredCredits }} cr</span>
             <span class="mt-1 block text-xs leading-5 text-base-content/55">
               Credit already obtained before this scheduling timeline begins.
             </span>
@@ -2141,7 +2195,7 @@ const getSemesterColumnClasses = (sem: number) => {
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
-              Credit Transferred ({{ transferredCourses.length }} courses, {{ planData?.summary.transferred_credits ?? 0 }} cr)
+              Credit Transferred ({{ transferredCourses.length }} courses, {{ transferredCredits }} cr)
             </h4>
             <div class="flex flex-wrap gap-2">
               <span

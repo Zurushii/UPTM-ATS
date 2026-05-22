@@ -1,4 +1,9 @@
 import { pool } from "~~/server/utils/db";
+import { getSemesterEntryBands } from "~~/server/utils/semester-entry-bands";
+import {
+  ensureSemesterRuleJourneySlotsSeeded,
+  getJourneySummaryLabel,
+} from "~~/server/utils/semester-rule-journeys";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -38,15 +43,23 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+  const bands = await getSemesterEntryBands(programId, intakeType);
 
-  // Get semester entry rules for the specified intake type
-  const [rules] = await pool.query(
-    `SELECT id, credit_transfer, entry_semester 
-     FROM semester_entry_rules 
-     WHERE program_id = ? AND intake_type = ?
-     ORDER BY credit_transfer DESC`,
-    [programId, intakeType],
+  return Promise.all(
+    bands.map(async (band) => {
+      const journeySlots = await ensureSemesterRuleJourneySlotsSeeded({
+        rule: band,
+        programId,
+      });
+
+      return {
+        ...band,
+        journey_slots: journeySlots,
+        journey_summary: getJourneySummaryLabel({
+          slots: journeySlots,
+          entrySemester: Number(band.entry_semester),
+        }),
+      };
+    }),
   );
-
-  return rules;
 });

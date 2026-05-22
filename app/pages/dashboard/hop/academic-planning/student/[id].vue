@@ -25,6 +25,10 @@ interface Course {
   grade: string | null;
 }
 
+interface TransferredCourse extends Course {
+  semester: number;
+}
+
 interface ResultSlip {
   semester: number;
   result_slip_filename: string;
@@ -55,6 +59,7 @@ interface PlanData {
     total_credit_transferred: number | null;
   };
   semesters: Semester[];
+  transferredCourses: TransferredCourse[];
   resultSlips: ResultSlip[];
   summary: {
     total_semesters: number;
@@ -282,16 +287,27 @@ const transferredCollapsed = ref(true);
 const allTransferredCourses = computed(() => {
   if (!planData.value) return [];
 
-  const transferred: Course[] = [];
+  if (planData.value.transferredCourses?.length) {
+    return planData.value.transferredCourses;
+  }
+
+  const transferred: TransferredCourse[] = [];
   for (const semester of planData.value.semesters) {
     for (const course of semester.courses) {
       if (course.status === "Transferred") {
-        transferred.push(course);
+        transferred.push({
+          ...course,
+          semester: semester.semester,
+        });
       }
     }
   }
   return transferred;
 });
+
+const transferredCredits = computed(() =>
+  allTransferredCourses.value.reduce((sum, course) => sum + course.credit_hour, 0),
+);
 
 const latestCourses = computed(() => {
   const latestByCourse = new Map<number, Course>();
@@ -704,7 +720,7 @@ const goBack = () => {
             <div>
               <span class="text-base-content/60">Transferred Credits:</span>
               <div class="font-medium text-success">
-                {{ planData.summary.transferred_credits ?? 0 }}
+                {{ transferredCredits }}
               </div>
             </div>
             <div>
@@ -808,7 +824,7 @@ const goBack = () => {
                 {{ allTransferredCourses.length }} courses
               </span>
               <span class="badge badge-outline">
-                {{ planData.summary.transferred_credits }} credits
+                {{ transferredCredits }} credits
               </span>
             </div>
           </div>
@@ -840,7 +856,7 @@ const goBack = () => {
                 <tr class="font-bold text-success-content">
                   <td colspan="2" class="text-right uppercase tracking-wide text-xs">Total:</td>
                   <td class="text-right font-mono text-lg pr-6">
-                    {{ planData.summary.transferred_credits }}
+                    {{ transferredCredits }}
                   </td>
                 </tr>
               </tfoot>

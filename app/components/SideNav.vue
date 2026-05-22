@@ -144,12 +144,12 @@ const toggleSidebar = () => emit("toggle");
               expanded ? '' : 'justify-center',
             ]"
             class="flex items-center"
-            :title="!expanded ? 'Intake Assessment' : ''"
+            :title="!expanded ? 'Student Entry Assessment' : ''"
           >
             <span class="text-xl">📋</span>
             <template v-if="expanded">
               <span class="badge badge-primary badge-xs ml-1">3</span>
-              <span class="ml-2 truncate">Intake Assessment</span>
+              <span class="ml-2 truncate">Student Entry Assessment</span>
             </template>
           </NuxtLink>
         </li>

@@ -1,5 +1,6 @@
 import { pool } from "../../utils/db";
-import { ensureSemesterOneRulePlansBackfilled } from "~~/server/utils/semester-rule-plans";
+import { getAcademicPlanSemesterConfigs } from "~~/server/utils/academic-plan-semester-config";
+import { getEffectiveSemesterRulePlans } from "~~/server/utils/effective-semester-rule-plans";
 import { auth } from "@@/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -15,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   // Get student ID and program
   const [studentRows] = await pool.query(
-    "SELECT id, program_id FROM students WHERE user_id = ?",
+    "SELECT id, program_id, total_credit_transferred FROM students WHERE user_id = ?",
     [session.user.id],
   );
 
@@ -26,12 +27,11 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
   const programId = students[0].program_id;
-
-  await ensureSemesterOneRulePlansBackfilled(programId);
+  const transferredCredits = Number(students[0].total_credit_transferred) || 0;
 
   // Get academic plan
   const [planRows] = await pool.query(
-    `SELECT id, start_semester, status, created_at
+    `SELECT id, intake_id, start_semester, status, created_at
      FROM academic_plans
      WHERE student_id = ?
      ORDER BY created_at DESC
@@ -71,16 +71,43 @@ export default defineEventHandler(async (event) => {
     [plan.id],
   );
 
-  // Get semester type metadata for this program
-  const [semesterMetaRows] = await pool.query(
-    `SELECT scp.semester_number, scp.semester_type, scp.is_li
-     FROM semester_credit_plans scp
-     JOIN semester_entry_rules ser ON scp.rule_id = ser.id
-     WHERE ser.program_id = ?
-     GROUP BY scp.semester_number, scp.semester_type, scp.is_li
-     ORDER BY scp.semester_number`,
-    [programId],
-  );
+  const planSemesterConfigs = await getAcademicPlanSemesterConfigs(Number(plan.id));
+  let semesterMetaRows: Array<{
+    semester_number: number;
+    semester_type: "L" | "S";
+    is_li: boolean;
+  }> = planSemesterConfigs.map((config) => ({
+    semester_number: Number(config.semester_number),
+    semester_type: config.semester_type,
+    is_li: !!config.is_li,
+  }));
+
+  if (semesterMetaRows.length === 0 && plan.intake_id) {
+    const [intakeMetaRows] = await pool.query(
+      `SELECT session_id, intake_type
+       FROM academic_planning_intakes
+       WHERE id = ?
+       LIMIT 1`,
+      [plan.intake_id],
+    );
+
+    const intakeMeta = (intakeMetaRows as any[])[0];
+    if (intakeMeta) {
+      const effectiveRules = await getEffectiveSemesterRulePlans({
+        programId,
+        intakeType: intakeMeta.intake_type,
+        entrySemester: Number(plan.start_semester) || 1,
+        sessionId: Number(intakeMeta.session_id) || null,
+        transferredCredits,
+      });
+
+      semesterMetaRows = effectiveRules.map((rule) => ({
+        semester_number: Number(rule.semester_number),
+        semester_type: rule.semester_type,
+        is_li: !!rule.is_li,
+      }));
+    }
+  }
 
   // Get per-intake current_semester for this student's intake
   const [studentIntakeRows] = await pool.query(

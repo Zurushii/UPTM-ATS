@@ -1,14 +1,24 @@
 import { pool } from "~~/server/utils/db";
-import { seedSemesterOneRulePlans } from "~~/server/utils/semester-rule-plans";
+import {
+  getProgramCreditCeiling,
+  getSemesterEntryBands,
+  getSemesterEntryRuleById,
+} from "~~/server/utils/semester-entry-bands";
+import {
+  ensureSemesterRuleJourneySlotsSeeded,
+  validateSemesterRuleJourneySlots,
+} from "~~/server/utils/semester-rule-journeys";
 import { auth } from "~~/utils/auth";
 
 interface RuleInput {
-  credit_transfer: number;
+  transfer_min?: number;
+  transfer_max?: number;
+  credit_transfer?: number;
   entry_semester: number;
+  reference_note?: string | null;
 }
 
 export default defineEventHandler(async (event) => {
-  // Authenticate user
   const session = await auth.api.getSession({ headers: event.headers });
 
   if (!session?.user) {
@@ -19,7 +29,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: "HOP only" });
   }
 
-  // Get the HoP's assigned program
   const [hopRows] = await pool.query(
     `SELECT program_id FROM head_of_programs WHERE user_id = ?`,
     [session.user.id],
@@ -33,85 +42,162 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const programId = hopData[0].program_id;
+  const programId = Number(hopData[0].program_id);
+  const ruleId = Number.parseInt(getRouterParam(event, "id") || "", 10);
 
-  // Get rule ID from params
-  const ruleId = parseInt(getRouterParam(event, "id") || "");
-  if (isNaN(ruleId)) {
+  if (!Number.isInteger(ruleId) || ruleId <= 0) {
     throw createError({
       statusCode: 400,
       statusMessage: "Invalid rule ID",
     });
   }
 
-  // Verify rule belongs to this program
-  const [ruleRows] = await pool.query(
-    `SELECT id, intake_type, credit_transfer, entry_semester
-     FROM semester_entry_rules
-     WHERE id = ? AND program_id = ?`,
-    [ruleId, programId],
-  );
+  const existingRule = await getSemesterEntryRuleById({
+    ruleId,
+    programId,
+  });
 
-  const ruleData = ruleRows as any[];
-  if (ruleData.length === 0) {
+  if (!existingRule) {
     throw createError({
       statusCode: 404,
       statusMessage: "Rule not found",
     });
   }
 
-  const intakeType = ruleData[0].intake_type;
-  const oldCreditTransfer = ruleData[0].credit_transfer;
-  const oldEntrySemester = ruleData[0].entry_semester;
-
-  // Parse request body
+  const creditCeiling = await getProgramCreditCeiling(programId);
   const body = await readBody<RuleInput>(event);
+  const transferMin = Number(
+    body.transfer_min ?? body.credit_transfer ?? existingRule.transfer_min,
+  );
+  const transferMax = Number(
+    body.transfer_max ?? body.transfer_min ?? body.credit_transfer ?? existingRule.transfer_max,
+  );
+  const entrySemester = Number(body.entry_semester);
+  const referenceNote =
+    body.reference_note != null
+      ? String(body.reference_note).trim() || null
+      : existingRule.reference_note;
 
-  // Validate input
-  if (body.credit_transfer === undefined || body.credit_transfer < 0) {
+  if (!Number.isInteger(transferMin) || transferMin < 0) {
     throw createError({
       statusCode: 400,
-      statusMessage: "Credit transfer must be a non-negative number",
+      statusMessage: "Minimum transferred credits must be a non-negative whole number",
     });
   }
 
-  if (!body.entry_semester || body.entry_semester < 1) {
+  if (!Number.isInteger(transferMax) || transferMax < transferMin) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Maximum transferred credits must be a whole number greater than or equal to the minimum",
+    });
+  }
+
+  if (transferMax > creditCeiling) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `Semester-entry bands cannot exceed the program credit ceiling of ${creditCeiling}`,
+    });
+  }
+
+  if (!Number.isInteger(entrySemester) || entrySemester < 1) {
     throw createError({
       statusCode: 400,
       statusMessage: "Entry semester must be at least 1",
     });
   }
 
-  // Check for duplicate credit_transfer if value changed
-  if (body.credit_transfer !== oldCreditTransfer) {
-    const [existingRules] = await pool.query(
-      `SELECT id FROM semester_entry_rules
-       WHERE program_id = ? AND intake_type = ? AND credit_transfer = ? AND id != ?`,
-      [programId, intakeType, body.credit_transfer, ruleId],
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const existingBands = await getSemesterEntryBands(
+      programId,
+      existingRule.intake_type,
+      { includeSystemDefault: false },
+      connection,
+    );
+    const overlappingBand = existingBands.find(
+      (band) =>
+        band.id !== ruleId &&
+        transferMin <= band.transfer_max &&
+        transferMax >= band.transfer_min,
     );
 
-    if ((existingRules as any[]).length > 0) {
+    if (overlappingBand) {
       throw createError({
         statusCode: 400,
-        statusMessage: `A rule for ${body.credit_transfer} credits already exists for this intake type`,
+        statusMessage: `Band ${transferMin}-${transferMax} overlaps the existing ${overlappingBand.transfer_min}-${overlappingBand.transfer_max} range for this intake`,
       });
     }
+
+    const existingJourneySlots = await ensureSemesterRuleJourneySlotsSeeded({
+      rule: existingRule,
+      programId,
+      executor: connection,
+    });
+    const journeyValidation = await validateSemesterRuleJourneySlots({
+      slots: existingJourneySlots,
+      entrySemester,
+    });
+
+    if (journeyValidation.issues.length > 0) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          journeyValidation.issues[0]?.message ||
+          "This band journey conflicts with the updated entry semester.",
+      });
+    }
+
+    await connection.query(
+      `UPDATE semester_entry_rules
+       SET credit_transfer = ?,
+           transfer_min = ?,
+           transfer_max = ?,
+           entry_semester = ?,
+           reference_note = ?
+       WHERE id = ?`,
+      [
+        transferMin,
+        transferMin,
+        transferMax,
+        entrySemester,
+        referenceNote,
+        ruleId,
+      ],
+    );
+
+    if (existingJourneySlots.length === 0) {
+      await ensureSemesterRuleJourneySlotsSeeded({
+        rule: {
+          ...existingRule,
+          credit_transfer: transferMin,
+          transfer_min: transferMin,
+          transfer_max: transferMax,
+          entry_semester: entrySemester,
+          reference_note: referenceNote,
+        },
+        programId,
+        executor: connection,
+      });
+    }
+
+    await connection.commit();
+
+    return {
+      id: ruleId,
+      intake_type: existingRule.intake_type,
+      credit_transfer: transferMin,
+      transfer_min: transferMin,
+      transfer_max: transferMax,
+      entry_semester: entrySemester,
+      reference_note: referenceNote,
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
-
-  // Update rule
-  await pool.query(
-    `UPDATE semester_entry_rules SET credit_transfer = ?, entry_semester = ? WHERE id = ?`,
-    [body.credit_transfer, body.entry_semester, ruleId],
-  );
-
-  if (oldEntrySemester !== 1 && body.entry_semester === 1) {
-    await seedSemesterOneRulePlans(ruleId, programId, intakeType);
-  }
-
-  return {
-    id: ruleId,
-    intake_type: intakeType,
-    credit_transfer: body.credit_transfer,
-    entry_semester: body.entry_semester,
-  };
 });

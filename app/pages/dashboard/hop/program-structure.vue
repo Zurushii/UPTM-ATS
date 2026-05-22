@@ -1029,7 +1029,7 @@ const manualSteps = [
                     <th class="w-[15%] border-b border-base-200">Course Code</th>
                     <th class="w-[30%] border-b border-base-200">Course Name</th>
                     <th class="text-center w-[10%] border-b border-base-200">Credit</th>
-                    <th class="w-[20%] border-b border-base-200">Status</th>
+                    <th class="w-[20%] border-b border-base-200">Type</th>
                     <th class="w-[10%] border-b border-base-200">Pre-Req</th>
                     <th class="text-right w-[10%] border-b border-base-200">Actions</th>
                   </tr>
@@ -2129,7 +2129,7 @@ const manualSteps = [
       <div class="card-body flex-row items-center justify-between py-4">
         <div>
           <p class="text-sm text-base-content/60">Next Step</p>
-          <p class="font-semibold">Process Intake Assessment</p>
+          <p class="font-semibold">Process Student Entry Assessment</p>
           <p class="text-sm text-base-content/70">
             Upload student data and assign starting semesters
           </p>
@@ -2138,7 +2138,7 @@ const manualSteps = [
           to="/dashboard/hop/intake-assessment"
           class="btn btn-primary btn-sm"
         >
-          Intake Assessment &rarr;
+          Student Entry Assessment &rarr;
         </NuxtLink>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { pool } from "~~/server/utils/db";
+import { getAcademicPlanSemesterConfigs } from "~~/server/utils/academic-plan-semester-config";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -89,6 +90,15 @@ export default defineEventHandler(async (event) => {
   // Retake courses (same course_id appearing as Planned after a Failed entry) are excluded
   // from credit totals since they don't add to the programme's required credit count.
   const coursesBySemester: Record<number, any[]> = {};
+  const transferredCourses: Array<{
+    course_id: number;
+    course_code: string;
+    course_name: string;
+    credit_hour: number;
+    status: string;
+    grade: string | null;
+    semester: number;
+  }> = [];
   let totalCredits = 0;
   let transferredCredits = 0;
   let plannedCredits = 0;
@@ -111,10 +121,11 @@ export default defineEventHandler(async (event) => {
   }
 
   for (const detail of detailRows as any[]) {
-    if (!coursesBySemester[detail.semester]) {
-      coursesBySemester[detail.semester] = [];
-    }
-    coursesBySemester[detail.semester].push({
+    const semesterKey = Number(detail.semester);
+    const semesterCourses =
+      coursesBySemester[semesterKey] || (coursesBySemester[semesterKey] = []);
+
+    semesterCourses.push({
       course_id: detail.course_id,
       course_code: detail.course_code,
       course_name: detail.course_name,
@@ -123,6 +134,18 @@ export default defineEventHandler(async (event) => {
       grade: detail.grade || null,
     });
     totalCourses++;
+
+    if (detail.status === "Transferred") {
+      transferredCourses.push({
+        course_id: detail.course_id,
+        course_code: detail.course_code,
+        course_name: detail.course_name,
+        credit_hour: detail.credit_hour,
+        status: detail.status || "Planned",
+        grade: detail.grade || null,
+        semester: semesterKey,
+      });
+    }
 
     if (
       detail.semester >= plan.start_semester &&
@@ -143,14 +166,32 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const planSemesterConfigs = await getAcademicPlanSemesterConfigs(Number(planId));
+
   // Convert to array format for easier frontend consumption
-  const semesters = Object.entries(coursesBySemester)
-    .map(([semester, courses]) => ({
-      semester: parseInt(semester),
-      courses,
-      total_credits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
-    }))
-    .sort((a, b) => a.semester - b.semester);
+  const semesters =
+    planSemesterConfigs.length > 0
+      ? planSemesterConfigs
+          .map((config) => {
+            const courses = coursesBySemester[config.semester_number] || [];
+            return {
+              semester: Number(config.semester_number),
+              semester_type: config.semester_type,
+              is_li: !!config.is_li,
+              courses,
+              total_credits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
+            };
+          })
+          .sort((a, b) => a.semester - b.semester)
+      : Object.entries(coursesBySemester)
+          .map(([semester, courses]) => ({
+            semester: parseInt(semester, 10),
+            semester_type: null,
+            is_li: false,
+            courses,
+            total_credits: courses.reduce((sum, c) => sum + c.credit_hour, 0),
+          }))
+          .sort((a, b) => a.semester - b.semester);
 
   // Get result slips for this plan
   const [resultSlipRows] = await pool.query(
@@ -180,9 +221,16 @@ export default defineEventHandler(async (event) => {
       total_credit_transferred: plan.total_credit_transferred,
     },
     semesters,
+    transferredCourses: transferredCourses.sort((left, right) => {
+      if (left.semester !== right.semester) {
+        return left.semester - right.semester;
+      }
+
+      return left.course_code.localeCompare(right.course_code);
+    }),
     resultSlips: resultSlipRows as any[],
     summary: {
-      total_semesters: scheduledSemesters.size,
+      total_semesters: semesters.filter((semester) => semester.semester >= plan.start_semester).length,
       total_credits: totalCredits,
       transferred_credits: transferredCredits,
       planned_credits: plannedCredits,

@@ -21,6 +21,11 @@ interface StudentData {
   matric_no: string;
   student_name: string;
   entry_semester: number | null;
+  system_assigned_entry_semester: number | null;
+  final_entry_semester: number | null;
+  is_entry_semester_override: boolean;
+  entry_semester_override_reason: string | null;
+  entry_semester_assignment_note: string | null;
   total_credit_transferred: number | null;
   academic_plan_id: number | null;
   plan_status: string | null;
@@ -47,7 +52,12 @@ interface PreviewStudent {
   student_name: string;
   entry_semester: number | null;
   total_credit_transferred: number | null;
-  status: "ready" | "missing_entry_semester" | "already_has_plan" | "credit_mismatch";
+  status:
+    | "ready"
+    | "missing_entry_semester"
+    | "already_has_plan"
+    | "credit_mismatch"
+    | "needs_fix";
   reason?: string;
 }
 
@@ -75,6 +85,13 @@ const showToast = (
 const searchQuery = ref("");
 const filterStatus = ref<string>("all");
 const markAsCompletedLoading = ref(false);
+const isEntrySemesterModalOpen = ref(false);
+const isSavingEntrySemester = ref(false);
+const entrySemesterStudent = ref<StudentData | null>(null);
+const entrySemesterForm = ref({
+  final_entry_semester: 1,
+  override_reason: "",
+});
 
 // Regenerate modal state
 const isRegenerateModalOpen = ref(false);
@@ -92,6 +109,8 @@ const regenPreviewResult = ref<{
     will_be_skipped: number;
     missing_entry_semester: number;
     credit_mismatch: number;
+    recoverable_needs_fix: number;
+    needs_fix: number;
     failed_records: number;
   };
   preview_students: PreviewStudent[];
@@ -104,6 +123,7 @@ const regenGenerateResult = ref<{
     successful: number;
     failed: number;
     skipped_existing: number;
+    cleared_needs_fix: number;
   };
   failed_students: Array<{
     student_id: number;
@@ -201,16 +221,32 @@ const formatDate = (dateStr: string) => {
 };
 
 // Get status badge class
-const getStatusBadgeClass = (status: string | null) => {
+const getPlanBadgeClass = (status: string | null | undefined) => {
+  const baseClass =
+    "inline-flex items-center justify-center whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold leading-none shadow-sm";
+
   switch (status) {
     case "draft":
-      return "badge-warning";
+      return `${baseClass} border-warning/30 bg-warning/10 text-warning`;
     case "approved":
-      return "badge-success";
+      return `${baseClass} border-success/30 bg-success/10 text-success`;
     case "completed":
-      return "badge-info";
+      return `${baseClass} border-info/30 bg-info/10 text-info`;
     default:
-      return "badge-ghost";
+      return `${baseClass} border-error/30 bg-error/8 text-error`;
+  }
+};
+
+const getPlanBadgeLabel = (status: string | null | undefined) => {
+  switch (status) {
+    case "draft":
+      return "Draft";
+    case "approved":
+      return "Approved";
+    case "completed":
+      return "Completed";
+    default:
+      return "Waiting for Plan";
   }
 };
 
@@ -229,6 +265,64 @@ const viewStudentSchedule = (student: StudentData) => {
     navigateTo(
       `/dashboard/hop/academic-planning/schedule/${student.academic_plan_id}`
     );
+  }
+};
+
+const openEntrySemesterModal = (student: StudentData) => {
+  if (student.academic_plan_id) {
+    return;
+  }
+
+  entrySemesterStudent.value = student;
+  entrySemesterForm.value = {
+    final_entry_semester:
+      student.final_entry_semester ??
+      student.system_assigned_entry_semester ??
+      student.entry_semester ??
+      1,
+    override_reason: student.entry_semester_override_reason ?? "",
+  };
+  isEntrySemesterModalOpen.value = true;
+};
+
+const closeEntrySemesterModal = () => {
+  isEntrySemesterModalOpen.value = false;
+  entrySemesterStudent.value = null;
+  entrySemesterForm.value = {
+    final_entry_semester: 1,
+    override_reason: "",
+  };
+};
+
+const saveEntrySemesterOverride = async () => {
+  if (!entrySemesterStudent.value || isSavingEntrySemester.value) {
+    return;
+  }
+
+  isSavingEntrySemester.value = true;
+
+  try {
+    await $fetch(
+      `/api/hop/students/${entrySemesterStudent.value.student_id}/entry-semester`,
+      {
+        method: "PUT",
+        body: {
+          final_entry_semester: entrySemesterForm.value.final_entry_semester,
+          override_reason: entrySemesterForm.value.override_reason.trim() || null,
+        },
+      },
+    );
+
+    showToast("Entry semester updated successfully", "success");
+    closeEntrySemesterModal();
+    await refresh();
+  } catch (error: any) {
+    showToast(
+      error.data?.message || error.message || "Failed to update entry semester",
+      "error",
+    );
+  } finally {
+    isSavingEntrySemester.value = false;
   }
 };
 
@@ -495,7 +589,7 @@ const regenGenerate = async () => {
           <div class="stat-value text-2xl text-success">{{ stats.withPlan }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
-          <div class="stat-title">No Plan</div>
+          <div class="stat-title">Waiting</div>
           <div class="stat-value text-2xl" :class="stats.noPlan > 0 ? 'text-error' : 'text-base-content/30'">{{ stats.noPlan }}</div>
         </div>
         <div class="stat bg-base-100 border border-base-300 rounded-lg">
@@ -514,7 +608,7 @@ const regenGenerate = async () => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
         </svg>
         <div>
-          <h3 class="font-bold">{{ stats.noPlan }} student(s) don't have academic plans</h3>
+          <h3 class="font-bold">{{ stats.noPlan }} student(s) are still waiting for an academic plan</h3>
           <p class="text-sm">You can re-upload the Excel file to generate plans for these students using the <strong>"Regenerate Plans"</strong> button.</p>
         </div>
       </div>
@@ -525,7 +619,7 @@ const regenGenerate = async () => {
           <h2 class="card-title text-base">Intake Details</h2>
           <div class="grid md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span class="text-base-content/60">Semester Rules:</span>
+              <span class="text-base-content/60">Starting Semester Table:</span>
               <div class="font-medium">{{ intakeData.intake_type }}</div>
             </div>
             <div>
@@ -568,7 +662,7 @@ const regenGenerate = async () => {
                 class="select select-bordered select-sm"
               >
                 <option value="all">All Status</option>
-                <option value="no_plan">No Plan</option>
+                <option value="no_plan">Waiting for Plan</option>
                 <option value="draft">Draft</option>
                 <option value="approved">Approved</option>
                 <option value="completed">Completed</option>
@@ -589,41 +683,44 @@ const regenGenerate = async () => {
             <table class="table w-full">
               <thead class="bg-base-200/50 text-base-content/70 uppercase text-xs tracking-wider">
                 <tr>
-                  <th class="pl-6 rounded-tl-lg text-center">Matric No</th>
-                  <th class="text-center">Student Name</th>
-                  <th class="text-center">Entry Semester</th>
-                  <th class="text-center">Credits Transferred</th>
-                  <th class="text-center">Plan Status</th>
-                  <th class="pr-6 text-center rounded-tr-lg">Actions</th>
+                  <th class="pl-6 py-4 rounded-tl-lg text-center">Matric No</th>
+                  <th class="px-4 py-4 text-center">Student Name</th>
+                  <th class="px-4 py-4 text-center">Semester Entry</th>
+                  <th class="px-4 py-4 text-center">Credits Transferred</th>
+                  <th class="px-4 py-4 text-center">Plan Status</th>
+                  <th class="pl-4 pr-6 py-4 text-center rounded-tr-lg">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-base-200">
                 <tr
                   v-for="student in filteredStudents"
                   :key="student.student_id"
-                  class="hover:bg-base-200/30 transition-colors"
+                  class="align-middle hover:bg-base-200/30 transition-colors"
                 >
-                  <td class="font-mono text-sm pl-6 text-base-content/70 text-center">{{ student.matric_no }}</td>
-                  <td class="font-medium text-base-content text-center">{{ student.student_name || '—' }}</td>
-                  <td class="text-center">
-                    <span v-if="student.entry_semester" class="badge badge-sm badge-info badge-outline bg-info/10 shadow-sm border-info/30">
-                      Semester {{ student.entry_semester }}
-                    </span>
+                  <td class="font-mono text-sm pl-6 pr-4 py-4 text-base-content/70 text-center align-middle">
+                    {{ student.matric_no }}
+                  </td>
+                  <td class="px-4 py-4 font-medium text-base-content text-center align-middle leading-6">
+                    {{ student.student_name || '—' }}
+                  </td>
+                  <td class="px-4 py-4 text-center align-middle">
+                    <div v-if="student.entry_semester || student.final_entry_semester">
+                      <span class="badge badge-sm badge-info badge-outline bg-info/10 shadow-sm border-info/30">
+                        Semester {{ student.final_entry_semester ?? student.entry_semester }}
+                      </span>
+                    </div>
                     <span v-else class="text-base-content/40">-</span>
                   </td>
-                  <td class="font-mono text-base-content/80 text-center">{{ student.total_credit_transferred ?? "-" }}</td>
-                  <td class="text-center">
-                    <span
-                      v-if="student.academic_plan_id"
-                      class="badge badge-sm shadow-sm capitalize"
-                      :class="getStatusBadgeClass(student.plan_status)"
-                    >
-                      {{ student.plan_status }}
-                    </span>
-                    <span v-else class="badge badge-sm badge-error badge-outline bg-error/10 border-error/30">No plan</span>
+                  <td class="px-4 py-4 font-mono text-base-content/80 text-center align-middle">
+                    {{ student.total_credit_transferred ?? "-" }}
                   </td>
-                  <td class="pr-6 text-center">
-                    <div v-if="student.academic_plan_id" class="flex justify-center gap-2">
+                  <td class="px-4 py-4 text-center align-middle">
+                    <span :class="getPlanBadgeClass(student.academic_plan_id ? student.plan_status : null)">
+                      {{ getPlanBadgeLabel(student.academic_plan_id ? student.plan_status : null) }}
+                    </span>
+                  </td>
+                  <td class="pl-4 pr-6 py-4 text-center align-middle">
+                    <div v-if="student.academic_plan_id" class="flex flex-nowrap justify-center gap-2.5 whitespace-nowrap">
                       <button
                         class="btn btn-xs bg-primary/10 text-primary hover:bg-primary hover:text-white border-0 shadow-sm transition-all rounded-lg"
                         @click="viewStudentPlan(student)"
@@ -637,6 +734,13 @@ const regenGenerate = async () => {
                         View Schedule
                       </button>
                     </div>
+                    <button
+                      v-else-if="intakeData.status !== 'completed'"
+                      class="btn btn-xs btn-outline btn-warning"
+                      @click="openEntrySemesterModal(student)"
+                    >
+                      Change Start
+                    </button>
                     <span v-else class="text-xs text-base-content/40">—</span>
                   </td>
                 </tr>
@@ -651,6 +755,95 @@ const regenGenerate = async () => {
         </div>
       </div>
     </template>
+
+    <dialog :class="{ 'modal modal-open': isEntrySemesterModalOpen }">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg">Change Starting Semester</h3>
+        <p class="text-sm text-base-content/65 mt-2">
+          Use this only when the approved semester rule result needs a HOP
+          decision for a specific student. The system choice will still be kept
+          for reference.
+        </p>
+
+        <div
+          v-if="entrySemesterStudent"
+          class="mt-4 rounded-xl border border-base-200 bg-base-200/40 p-4 space-y-2 text-sm"
+        >
+          <div><strong>Matric No:</strong> {{ entrySemesterStudent.matric_no }}</div>
+          <div><strong>Student:</strong> {{ entrySemesterStudent.student_name }}</div>
+          <div>
+            <strong>System Picked:</strong>
+            Semester
+            {{
+              entrySemesterStudent.system_assigned_entry_semester ??
+              entrySemesterStudent.entry_semester ??
+              "-"
+            }}
+          </div>
+          <div
+            v-if="entrySemesterStudent.entry_semester_assignment_note"
+            class="text-base-content/70"
+          >
+            {{ entrySemesterStudent.entry_semester_assignment_note }}
+          </div>
+        </div>
+
+        <div class="mt-5 space-y-4">
+          <div class="form-control">
+            <label class="label pl-0">
+              <span class="label-text font-semibold">Final Starting Semester</span>
+            </label>
+            <input
+              v-model.number="entrySemesterForm.final_entry_semester"
+              type="number"
+              min="1"
+              max="12"
+              class="input input-bordered w-full font-mono"
+            />
+          </div>
+
+          <div class="form-control">
+            <label class="label pl-0">
+              <span class="label-text font-semibold">Why Are You Changing It?</span>
+              <span class="label-text-alt text-base-content/50">
+                Required only when changing the semester picked by the system.
+              </span>
+            </label>
+            <textarea
+              v-model="entrySemesterForm.override_reason"
+              class="textarea textarea-bordered min-h-28"
+              placeholder="Explain why this student should start in a different semester."
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="modal-action">
+          <button
+            class="btn btn-ghost"
+            :disabled="isSavingEntrySemester"
+            @click="closeEntrySemesterModal"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary"
+            :class="{ loading: isSavingEntrySemester }"
+            :disabled="isSavingEntrySemester"
+            @click="saveEntrySemesterOverride"
+          >
+            Save Starting Semester
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button
+          @click="closeEntrySemesterModal"
+          :disabled="isSavingEntrySemester"
+        >
+          close
+        </button>
+      </form>
+    </dialog>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- Complete Intake Modal -->
@@ -820,6 +1013,18 @@ const regenGenerate = async () => {
               </div>
             </div>
             <div class="stat">
+              <div class="stat-title">Needs Fix Ready</div>
+              <div class="stat-value text-xl" :class="(regenPreviewResult.summary.recoverable_needs_fix ?? 0) > 0 ? 'text-success' : 'text-base-content/30'">
+                {{ regenPreviewResult.summary.recoverable_needs_fix ?? 0 }}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Needs Fix</div>
+              <div class="stat-value text-xl" :class="(regenPreviewResult.summary.needs_fix ?? 0) > 0 ? 'text-error' : 'text-base-content/30'">
+                {{ regenPreviewResult.summary.needs_fix ?? 0 }}
+              </div>
+            </div>
+            <div class="stat">
               <div class="stat-title">Credit Mismatch</div>
               <div class="stat-value text-xl" :class="(regenPreviewResult.summary.credit_mismatch ?? 0) > 0 ? 'text-error' : 'text-base-content/30'">
                 {{ regenPreviewResult.summary.credit_mismatch ?? 0 }}
@@ -835,11 +1040,25 @@ const regenGenerate = async () => {
             <span>Students who already have plans will be automatically skipped during generation.</span>
           </div>
 
+          <div v-if="(regenPreviewResult.summary.recoverable_needs_fix ?? 0) > 0" class="alert alert-success text-sm py-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 shrink-0">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m6 2.25a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            <span><strong>{{ regenPreviewResult.summary.recoverable_needs_fix }}</strong> previously <strong>Needs Fix</strong> student(s) now validate from this regenerate file. A successful generation will clear their Needs Fix flag automatically.</span>
+          </div>
+
+          <div v-if="(regenPreviewResult.summary.needs_fix ?? 0) > 0" class="alert alert-error text-sm py-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 shrink-0">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008Zm0-12a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" />
+            </svg>
+            <span><strong>{{ regenPreviewResult.summary.needs_fix }}</strong> student(s) still have <strong>Needs Fix</strong> issues that cannot be safely repaired from Regenerate Plans. They will remain <strong>No Plan</strong> until Student Entry Assessment is corrected.</span>
+          </div>
+
           <div v-if="(regenPreviewResult.summary.credit_mismatch ?? 0) > 0" class="alert alert-error text-sm py-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 shrink-0">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
             </svg>
-            <span><strong>{{ regenPreviewResult.summary.credit_mismatch }}</strong> student(s) have a credit mismatch — the <code>total_credit_transferred</code> recorded in the system does not match the sum of credit hours of the transferred courses listed in the Excel file. These students will be skipped during generation and will remain <strong>No Plan</strong>. Please fix the Excel data and re-run Intake Assessment before regenerating.</span>
+            <span><strong>{{ regenPreviewResult.summary.credit_mismatch }}</strong> student(s) still have regenerate-file validation issues, such as transferred-course credit mismatch or unrecognized course codes. They will be skipped until the uploaded file is corrected and previewed again.</span>
           </div>
 
           <!-- Preview Table -->
@@ -860,7 +1079,7 @@ const regenGenerate = async () => {
                   :class="{
                     'text-success': student.status === 'ready',
                     'text-warning': student.status === 'already_has_plan',
-                    'text-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch',
+                    'text-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch' || student.status === 'needs_fix',
                   }"
                 >
                   <td class="font-mono">{{ student.matric_no }}</td>
@@ -873,12 +1092,12 @@ const regenGenerate = async () => {
                         :class="{
                           'badge-success': student.status === 'ready',
                           'badge-warning': student.status === 'already_has_plan',
-                          'badge-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch',
+                          'badge-error': student.status === 'missing_entry_semester' || student.status === 'credit_mismatch' || student.status === 'needs_fix',
                         }"
                       >
                         {{ student.status.replace(/_/g, " ") }}
                       </span>
-                      <span v-if="student.reason && student.status === 'credit_mismatch'" class="text-xs text-error/80 max-w-[180px] leading-tight">
+                      <span v-if="student.reason && (student.status === 'credit_mismatch' || student.status === 'needs_fix')" class="text-xs text-error/80 max-w-[180px] leading-tight">
                         {{ student.reason }}
                       </span>
                     </div>
@@ -941,6 +1160,12 @@ const regenGenerate = async () => {
               <div class="stat-title">Skipped (Had Plan)</div>
               <div class="stat-value text-xl text-base-content/50">
                 {{ regenGenerateResult.summary.skipped_existing }}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Needs Fix Cleared</div>
+              <div class="stat-value text-xl" :class="(regenGenerateResult.summary.cleared_needs_fix ?? 0) > 0 ? 'text-success' : 'text-base-content/30'">
+                {{ regenGenerateResult.summary.cleared_needs_fix ?? 0 }}
               </div>
             </div>
           </div>

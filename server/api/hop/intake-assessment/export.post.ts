@@ -93,7 +93,7 @@ export default defineEventHandler(async (event) => {
   workbook.creator = "UTPM ATS";
   workbook.created = new Date();
 
-  const worksheet = workbook.addWorksheet("Intake Assessment Export");
+  const worksheet = workbook.addWorksheet("Student Entry Assessment Export");
 
   // Define columns - matching the import format exactly
   worksheet.columns = [

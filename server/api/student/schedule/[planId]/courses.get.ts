@@ -2,8 +2,12 @@ import { pool } from "../../../../utils/db";
 import { auth } from "@@/utils/auth";
 import { getAcademicPlanSemesterConfigs } from "~~/server/utils/academic-plan-semester-config";
 import {
-  ensureSemesterOneRulePlansBackfilled,
   getEffectiveSemesterRulePlans,
+} from "~~/server/utils/effective-semester-rule-plans";
+import {
+  getEffectiveSemesterRuleAllowanceMap,
+} from "~~/server/utils/effective-semester-rule-allowances";
+import {
   getIntakeLifecyclePattern,
 } from "~~/server/utils/semester-rule-plans";
 
@@ -41,8 +45,6 @@ export default defineEventHandler(async (event) => {
   const studentId = students[0].id;
   const programId = students[0].program_id;
   const transferredCredits = Number(students[0].total_credit_transferred) || 0;
-
-  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Verify this plan belongs to the student and get intake_id + start_semester
   const [planRows] = await pool.query(
@@ -217,6 +219,8 @@ export default defineEventHandler(async (event) => {
           semester_type: semType,
           is_li: false,
           target_credits: semType === "S" ? shortMin2 : longMin,
+          is_credit_exception: false,
+          credit_exception_reason: null,
         });
       }
     }
@@ -295,14 +299,34 @@ export default defineEventHandler(async (event) => {
         semester_type: semType,
         is_li: hasIt,
         target_credits: 0,
+        is_credit_exception: false,
+        credit_exception_reason: null,
       });
       existingRuleSems.add(semNum);
     }
   }
 
+  const allowanceMap = await getEffectiveSemesterRuleAllowanceMap({
+    programId,
+    intakeType,
+    entrySemester: startSemester,
+    sessionId,
+    transferredCredits,
+  });
+  const semesterRulesWithAllowances = semesterRules.map((rule: any) => {
+    const allowance = allowanceMap.get(Number(rule.semester_number));
+
+    return {
+      ...rule,
+      allowed_overload_credits: allowance?.allowed_overload_credits || 0,
+      allowed_underload_credits: allowance?.allowed_underload_credits || 0,
+      credit_exception_default_reason: allowance?.default_reason || null,
+    };
+  });
+
   return {
     courses: courseRows,
-    semester_rules: semesterRules,
+    semester_rules: semesterRulesWithAllowances,
     credit_limits: {
       long_min: longMin,
       long_max: onProbation ? longMin : longMax,

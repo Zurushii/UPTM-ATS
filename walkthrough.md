@@ -1,6 +1,6 @@
 # UTPM-ATS Walkthrough
 
-This guide explains how the system behaves today, using the same terms, screens, and rules that exist in the codebase.
+This guide explains how the system behaves today, using the same screens and logic that exist in the codebase, but with plain-language descriptions where possible.
 
 ## 1. Mental model
 
@@ -11,8 +11,9 @@ The main records are:
 - `programs`: program-level settings, including credit limits
 - `program_sessions`: curriculum versions for a program
 - `program_courses`: semester-by-semester course structure for a session
-- `semester_entry_rules`: transfer-credit thresholds that map students to entry semesters
-- `semester_credit_plans`: target credits and semester types for each rule
+- `semester_entry_rules`: transferred-credit bands that map students to starting semesters
+- `semester_rule_journey_slots`: the planned semester flow for each starting-semester rule
+- `semester_rule_exception_windows`: narrow credit-adjustment rules for exact transferred-credit cases when needed
 - `academic_planning_intakes`: intake-level planning batches such as `0825`
 - `academic_plans`: one plan per student per intake
 - `academic_plan_details`: the scheduled courses inside a plan
@@ -62,23 +63,30 @@ The HOP dashboard already presents the intended sequence:
 
 ### Step 1: Semester Rules
 
-Use the Semester Rules page to define how transferred credit maps to an entry semester.
+Use the Semester Rules page to define how transferred credit maps to a student's starting semester.
 
 Example:
 
-- `0` credits -> semester `1`
-- `20` credits -> semester `2`
-- `40` credits -> semester `3`
+- `0-20` credits -> semester `2`
+- `21-30` credits -> semester `3`
+- `31-48` credits -> semester `4`
 
-Each rule can also carry a semester credit plan. Those plans tell the scheduler:
+Each band also has a planned semester flow. That flow tells the scheduler:
 
-- whether a semester is long (`L`) or short (`S`)
-- whether a semester is Industrial Training (`LI`)
-- what credit target should be used for that semester
+- which semesters remain after the student starts
+- whether each semester is long (`L`) or short (`S`)
+- where special semesters such as `FYP1`, `FYP2`, and `LI` belong
+
+Program credit-hour ranges are treated as recommended guidance. HOP can still approve overload or underload exceptions when needed, with a recorded reason.
 
 #### Semester Rules Excel import
 
-The importer reads the first worksheet and expects a sectioned layout. It looks for:
+The importer now supports a simple direct-upload `Entry Bands` template with an `Instructions` sheet and still understands the older sectioned workbook. In both cases, the goal is the same:
+
+- define one full credit-range table for each intake type
+- make sure every transferred-credit total maps to exactly one starting semester
+
+In the older layout, the importer looks for:
 
 - section headers like `August Intake (SEM 2)`
 - a header row that starts with `PROGRAM`
@@ -87,12 +95,16 @@ The importer reads the first worksheet and expects a sectioned layout. It looks 
 What the importer does:
 
 - extracts the intake type from the section header, for example `August Intake`
-- extracts the entry semester from the same header, for example `SEM 2`
+- extracts the starting semester from the same header, for example `SEM 2`
 - reads each transfer-credit row
-- stores the rule in `semester_entry_rules`
-- stores the semester-by-semester credit plan in `semester_credit_plans`
+- ignores legacy `PROGRAM` labels when building semester-entry rules
+- converts legacy thresholds into explicit transferred-credit bands
+- if the same transferred-credit value appears more than once, keeps the lowest starting semester as the default and handles any later exception with override
+- stores the band in `semester_entry_rules`
+- generates the planned semester flow in `semester_rule_journey_slots`
+- generates narrow credit-adjustment rules in `semester_rule_exception_windows` only when needed
 
-If a base rule for semester 1 does not exist for that intake type, the importer auto-creates one.
+If the imported legacy workbook starts above `0` transferred credits, the system auto-creates the missing semester-1 band so the full range is covered.
 
 ### Step 2: Program Structure
 
@@ -144,8 +156,8 @@ Use Intake Assessment to process a spreadsheet of students for the current intak
 This step:
 
 - validates that the uploaded intake matches the configured current session
-- validates that the selected intake type has semester rules
-- calculates each student's entry semester from transferred credits
+- validates that the selected intake type has a starting-semester table
+- calculates each student's starting semester from transferred credits
 - updates existing students or creates new reserved students
 - stores transferred-course links when the course codes are valid and the credit total reconciles
 
@@ -165,7 +177,7 @@ Optional columns:
 
 Important validation rules:
 
-- `starting_semester` must be blank or `0`; the system calculates the real entry semester
+- `starting_semester` must be blank or `0`; the system calculates the real starting semester
 - `intake_year`, if present, must match the selected intake
 - `program_code`, if present, must match the HOP's program
 - invalid credit values still pre-register the student, but with an error note
@@ -353,9 +365,10 @@ This forces a rescheduling cycle instead of leaving invalid future prerequisites
 
 ### Semester Rules import
 
-Use a worksheet with section headers and semester columns, for example:
+Use either the direct-upload starting-semester band template or the older sectioned workbook, for example:
 
 - `August Intake (SEM 2)`
+- `REFERENCE NOTE | TRANSFER MIN | TRANSFER MAX | ENTRY SEMESTER`
 - `PROGRAM | CREDIT TRANSFER | SEM 2 | SEM 3 S | SEM 8 (LI)`
 
 ### Program Structure import
@@ -401,7 +414,7 @@ This file is used as a final validation source before plans are generated.
 
 - Current session not set: intake assessment is blocked until the HOP sets the active intake period.
 - Intake mismatch: the uploaded intake year must match the configured current session.
-- Missing rules: academic-planning intakes cannot be created unless that intake type already exists in Semester Rules.
+- Missing starting-semester table: academic-planning intakes cannot be created unless that intake type already exists in Semester Rules.
 - Credit mismatch: if transferred-course credits do not add up to the stored credit total, the student is excluded from generation for that run.
 - Completed intake: once an intake is completed, scheduling APIs reject further changes.
 - Unreadable result slip: scanned PDFs may not parse and must be reviewed manually in the UI.
@@ -410,7 +423,7 @@ This file is used as a final validation source before plans are generated.
 
 If you want the shortest reliable operating sequence, use this:
 
-1. Import Semester Rules.
+1. Import Semester Rules bands.
 2. Import or build Program Structure for a session.
 3. Set the Global Academic Session.
 4. Run Intake Assessment for the matching intake.

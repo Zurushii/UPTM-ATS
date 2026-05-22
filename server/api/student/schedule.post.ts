@@ -1,8 +1,10 @@
 import { pool } from "../../utils/db";
 import {
-  ensureSemesterOneRulePlansBackfilled,
   getSemesterRuleMetaForSemester,
-} from "~~/server/utils/semester-rule-plans";
+} from "~~/server/utils/effective-semester-rule-plans";
+import {
+  getEffectiveSemesterRuleAllowanceMap,
+} from "~~/server/utils/effective-semester-rule-allowances";
 import { auth } from "@@/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -28,7 +30,7 @@ export default defineEventHandler(async (event) => {
 
   // Get student ID and program_id
   const [studentRows] = await pool.query(
-    "SELECT id, program_id FROM students WHERE user_id = ?",
+    "SELECT id, program_id, total_credit_transferred FROM students WHERE user_id = ?",
     [session.user.id],
   );
 
@@ -39,8 +41,7 @@ export default defineEventHandler(async (event) => {
 
   const studentId = students[0].id;
   const programId = students[0].program_id;
-
-  await ensureSemesterOneRulePlansBackfilled(programId);
+  const transferredCredits = Number(students[0].total_credit_transferred) || 0;
 
   // Verify this plan belongs to the student and is draft
   const [planRows] = await pool.query(
@@ -166,6 +167,15 @@ export default defineEventHandler(async (event) => {
       );
       const intakeType = (intakeRows as any[])[0]?.intake_type;
       const sessionId = (intakeRows as any[])[0]?.session_id || null;
+      const semesterAllowanceMap = intakeType
+        ? await getEffectiveSemesterRuleAllowanceMap({
+            programId,
+            intakeType,
+            entrySemester: Number(plan.start_semester) || 1,
+            sessionId,
+            transferredCredits,
+          })
+        : new Map();
 
       const semesterMeta = intakeType
         ? await getSemesterRuleMetaForSemester({
@@ -174,8 +184,10 @@ export default defineEventHandler(async (event) => {
             entrySemester: plan.start_semester,
             sessionId,
             semester,
+            transferredCredits,
           })
         : null;
+      const semesterAllowance = semesterAllowanceMap.get(Number(semester));
       const semType = semesterMeta?.semester_type || null;
       const isLi = !!semesterMeta?.is_li;
 
@@ -188,12 +200,23 @@ export default defineEventHandler(async (event) => {
           maxCredits = onProbation
             ? prog.long_sem_min_credit
             : prog.long_sem_max_credit;
-          minCredits = prog.long_sem_min_credit;
+          minCredits = Math.max(
+            Number(prog.long_sem_min_credit) -
+              (Number(semesterAllowance?.allowed_underload_credits) || 0),
+            0,
+          );
         } else {
           maxCredits = onProbation
             ? prog.short_sem_min_credit
             : prog.short_sem_max_credit;
-          minCredits = prog.short_sem_min_credit;
+          minCredits = Math.max(
+            Number(prog.short_sem_min_credit) -
+              (Number(semesterAllowance?.allowed_underload_credits) || 0),
+            0,
+          );
+        }
+        if (!onProbation) {
+          maxCredits += Number(semesterAllowance?.allowed_overload_credits) || 0;
         }
 
         if (totalSemCredits > maxCredits) {

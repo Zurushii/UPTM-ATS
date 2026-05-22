@@ -1,5 +1,14 @@
 import { pool } from "~~/server/utils/db";
-import { ensureSemesterOneRulePlansBackfilled } from "~~/server/utils/semester-rule-plans";
+import {
+  formatIntakeLifecyclePattern,
+  resolveIntakeLifecyclePattern,
+} from "~~/server/utils/intake-lifecycle";
+import { getSemesterEntryBands } from "~~/server/utils/semester-entry-bands";
+import { getSemesterRuleExceptionWindows } from "~~/server/utils/semester-rule-exception-windows";
+import {
+  ensureSemesterRuleJourneySlotsSeeded,
+  getJourneySummaryLabel,
+} from "~~/server/utils/semester-rule-journeys";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -30,28 +39,88 @@ export default defineEventHandler(async (event) => {
 
   const programId = hopData[0].program_id;
 
-  await ensureSemesterOneRulePlansBackfilled(programId);
-
   // Get query param for filtering by intake type
   const query = getQuery(event);
   const intakeFilter = query.intake_type as string | undefined;
 
-  // Build query
-  let sql = `
-    SELECT id, intake_type, credit_transfer, entry_semester
-    FROM semester_entry_rules
-    WHERE program_id = ?
-  `;
-  const params: any[] = [programId];
-
   if (intakeFilter) {
-    sql += ` AND intake_type = ?`;
-    params.push(intakeFilter);
+    const bands = await getSemesterEntryBands(programId, intakeFilter);
+    return Promise.all(
+      bands.map(async (band) => {
+        const lifecycleConfig = await resolveIntakeLifecyclePattern({
+          programId,
+          intakeType: band.intake_type,
+        });
+        const journeySlots = await ensureSemesterRuleJourneySlotsSeeded({
+          rule: band,
+          programId,
+        });
+        const exceptionWindows = await getSemesterRuleExceptionWindows({
+          ruleId: band.id,
+        });
+
+        return {
+          ...band,
+          intake_lifecycle_pattern: lifecycleConfig.lifecycle_pattern,
+          intake_lifecycle_summary: formatIntakeLifecyclePattern(
+            lifecycleConfig.lifecycle_pattern,
+          ),
+          intake_lifecycle_source: lifecycleConfig.source,
+          journey_slots: journeySlots,
+          exception_windows_count: exceptionWindows.length,
+          journey_summary: getJourneySummaryLabel({
+            slots: journeySlots,
+            entrySemester: Number(band.entry_semester),
+          }),
+        };
+      }),
+    );
   }
 
-  sql += ` ORDER BY intake_type ASC, credit_transfer DESC`;
+  const [intakeRows] = await pool.query(
+    `SELECT DISTINCT intake_type
+     FROM semester_entry_rules
+     WHERE program_id = ?
+     ORDER BY intake_type ASC`,
+    [programId],
+  );
 
-  const [rows] = await pool.query(sql, params);
+  const allBands = [];
 
-  return rows;
+  for (const intakeRow of intakeRows as any[]) {
+    allBands.push(
+      ...(await getSemesterEntryBands(programId, String(intakeRow.intake_type))),
+    );
+  }
+
+  return Promise.all(
+    allBands.map(async (band) => {
+      const lifecycleConfig = await resolveIntakeLifecyclePattern({
+        programId,
+        intakeType: band.intake_type,
+      });
+      const journeySlots = await ensureSemesterRuleJourneySlotsSeeded({
+        rule: band,
+        programId,
+      });
+      const exceptionWindows = await getSemesterRuleExceptionWindows({
+        ruleId: band.id,
+      });
+
+      return {
+        ...band,
+        intake_lifecycle_pattern: lifecycleConfig.lifecycle_pattern,
+        intake_lifecycle_summary: formatIntakeLifecyclePattern(
+          lifecycleConfig.lifecycle_pattern,
+        ),
+        intake_lifecycle_source: lifecycleConfig.source,
+        journey_slots: journeySlots,
+        exception_windows_count: exceptionWindows.length,
+        journey_summary: getJourneySummaryLabel({
+          slots: journeySlots,
+          entrySemester: Number(band.entry_semester),
+        }),
+      };
+    }),
+  );
 });

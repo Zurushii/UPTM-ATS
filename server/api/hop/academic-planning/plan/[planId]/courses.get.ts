@@ -1,7 +1,11 @@
 import { pool } from "~~/server/utils/db";
 import {
-  ensureSemesterOneRulePlansBackfilled,
   getEffectiveSemesterRulePlans,
+} from "~~/server/utils/effective-semester-rule-plans";
+import {
+  getEffectiveSemesterRuleAllowanceMap,
+} from "~~/server/utils/effective-semester-rule-allowances";
+import {
   getIntakeLifecyclePattern,
 } from "~~/server/utils/semester-rule-plans";
 import { auth } from "~~/utils/auth";
@@ -39,8 +43,6 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
-
-  await ensureSemesterOneRulePlansBackfilled(programId);
 
   // Verify the plan exists and get intake info + student's starting semester
   const [planRows] = await pool.query(
@@ -222,6 +224,8 @@ export default defineEventHandler(async (event) => {
           semester_type: semType,
           is_li: false,
           target_credits: semType === "S" ? shortMin2 : longMin,
+          is_credit_exception: false,
+          credit_exception_reason: null,
         });
       }
     }
@@ -300,14 +304,34 @@ export default defineEventHandler(async (event) => {
         semester_type: semType,
         is_li: hasIt,
         target_credits: 0,
+        is_credit_exception: false,
+        credit_exception_reason: null,
       });
       existingRuleSems.add(semNum);
     }
   }
 
+  const allowanceMap = await getEffectiveSemesterRuleAllowanceMap({
+    programId,
+    intakeType,
+    entrySemester: startSemester,
+    sessionId,
+    transferredCredits,
+  });
+  const semesterRulesWithAllowances = semesterRules.map((rule: any) => {
+    const allowance = allowanceMap.get(Number(rule.semester_number));
+
+    return {
+      ...rule,
+      allowed_overload_credits: allowance?.allowed_overload_credits || 0,
+      allowed_underload_credits: allowance?.allowed_underload_credits || 0,
+      credit_exception_default_reason: allowance?.default_reason || null,
+    };
+  });
+
   return {
     courses: courseRows,
-    semester_rules: semesterRules,
+    semester_rules: semesterRulesWithAllowances,
     credit_limits: {
       long_min: longMin,
       long_max: onProbation ? longMin : longMax,

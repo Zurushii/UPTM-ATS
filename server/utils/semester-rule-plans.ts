@@ -1,10 +1,16 @@
 import { pool } from "~~/server/utils/db";
+import {
+  getDefaultIntakeLifecyclePattern,
+  resolveIntakeLifecyclePattern,
+} from "~~/server/utils/intake-lifecycle";
 
 export interface SemesterRulePlan {
   semester_number: number;
   semester_type: "L" | "S";
   is_li: boolean;
   target_credits: number;
+  is_credit_exception: boolean;
+  credit_exception_reason: string | null;
 }
 
 export interface ProgramSemesterPlanConstraints {
@@ -22,15 +28,51 @@ type SemesterRulePlanLike = Pick<
   is_li?: boolean;
 };
 
+type QueryExecutor = {
+  query: (sql: string, values?: any) => Promise<any>;
+};
+
+export interface SemesterRulePlanCreditException {
+  semester_number: number;
+  semester_type: "L" | "S";
+  target_credits: number;
+  recommended_min: number;
+  recommended_max: number;
+  exception_type: "under" | "over";
+}
+
+export const getJourneyOverflowAllowance = ({
+  semesterType,
+  slotRole = "regular",
+}: {
+  semesterType: "L" | "S";
+  slotRole?: string | null;
+}) => {
+  if (slotRole !== "regular") {
+    return 0;
+  }
+
+  return semesterType === "L" ? 3 : 1;
+};
+
 export const normalizeSemesterRulePlan = (
   plan: SemesterRulePlan,
 ): SemesterRulePlan => {
+  const normalizedPlan = {
+    ...plan,
+    is_credit_exception: !!plan.is_credit_exception,
+    credit_exception_reason:
+      plan.is_credit_exception && plan.credit_exception_reason
+        ? String(plan.credit_exception_reason).trim() || null
+        : null,
+  };
+
   if (!plan.is_li) {
-    return plan;
+    return normalizedPlan;
   }
 
   return {
-    ...plan,
+    ...normalizedPlan,
     semester_type: "L",
   };
 };
@@ -39,34 +81,22 @@ export const normalizeSemesterRulePlans = (
   plans: SemesterRulePlan[],
 ): SemesterRulePlan[] => plans.map((plan) => normalizeSemesterRulePlan(plan));
 
-type QueryExecutor = {
-  query: (sql: string, values?: any) => Promise<any>;
-};
+const sortSemesterRulePlans = (plans: SemesterRulePlan[]) =>
+  [...plans].sort((left, right) => {
+    if (left.semester_number !== right.semester_number) {
+      return left.semester_number - right.semester_number;
+    }
 
-const SEMESTER_ONE_BACKFILL_VERSION =
-  "semester-1-lifecycle-li-last-long-credit-limits-v3";
+    if (left.is_li !== right.is_li) {
+      return left.is_li ? 1 : -1;
+    }
 
-let ensureBackfillTablePromise: Promise<void> | null = null;
+    return left.semester_type.localeCompare(right.semester_type);
+  });
 
 export const getIntakeLifecyclePattern = (
   intakeType?: string | null,
-): ("L" | "S")[] => {
-  const rawIntake = intakeType?.toLowerCase() || "";
-
-  if (rawIntake.includes("may")) {
-    return ["S", "L", "L"];
-  }
-
-  if (rawIntake.includes("aug")) {
-    return ["L", "L", "S"];
-  }
-
-  if (rawIntake.includes("dec")) {
-    return ["L", "S", "L"];
-  }
-
-  return ["L", "L", "S"];
-};
+): ("L" | "S")[] => getDefaultIntakeLifecyclePattern(intakeType);
 
 export const getLastLongSemesterNumber = (
   plans: SemesterRulePlanLike[],
@@ -120,19 +150,16 @@ export const placeLiOnLastLongSemester = (
 const getSemesterCreditBounds = (
   semesterType: "L" | "S",
   constraints: ProgramSemesterPlanConstraints,
-) => {
-  if (semesterType === "L") {
-    return {
-      min: constraints.long_min,
-      max: constraints.long_max,
-    };
-  }
-
-  return {
-    min: constraints.short_min,
-    max: constraints.short_max,
-  };
-};
+) =>
+  semesterType === "L"
+    ? {
+        min: constraints.long_min,
+        max: constraints.long_max,
+      }
+    : {
+        min: constraints.short_min,
+        max: constraints.short_max,
+      };
 
 const distributeSemesterCredits = (
   plans: SemesterRulePlan[],
@@ -238,23 +265,14 @@ export const validateSemesterRulePlanTargets = (
   constraints: ProgramSemesterPlanConstraints,
   requiredTotalCredits: number | null = constraints.total_credit_required,
 ) => {
-  const semesterErrors: string[] = [];
-
-  for (const plan of plans) {
-    if (plan.is_li) {
-      continue;
-    }
-
-    const bounds = getSemesterCreditBounds(plan.semester_type, constraints);
+  const semesterErrors = getSemesterRulePlanCreditExceptions(
+    plans,
+    constraints,
+  ).map((exception) => {
     const label =
-      plan.semester_type === "L" ? "Long Semester" : "Short Semester";
-
-    if (plan.target_credits < bounds.min || plan.target_credits > bounds.max) {
-      semesterErrors.push(
-        `Semester ${plan.semester_number} must stay within ${label} credit limits (${bounds.min}-${bounds.max}).`,
-      );
-    }
-  }
+      exception.semester_type === "L" ? "Long Semester" : "Short Semester";
+    return `Semester ${exception.semester_number} is outside the recommended ${label} range (${exception.recommended_min}-${exception.recommended_max}).`;
+  });
 
   const totalCredits = plans.reduce((sum, plan) => sum + plan.target_credits, 0);
   const totalError =
@@ -271,26 +289,44 @@ export const validateSemesterRulePlanTargets = (
   };
 };
 
-export const getSemesterRulePlanRequiredTotalCredits = ({
-  entrySemester,
-  creditTransfer,
-  constraints,
-}: {
-  entrySemester: number;
-  creditTransfer: number;
-  constraints: ProgramSemesterPlanConstraints;
-}) => {
-  const programTotal = Number(constraints.total_credit_required);
+export const getSemesterRulePlanCreditExceptions = (
+  plans: SemesterRulePlan[],
+  constraints: ProgramSemesterPlanConstraints,
+): SemesterRulePlanCreditException[] => {
+  const exceptions: SemesterRulePlanCreditException[] = [];
 
-  if (!Number.isFinite(programTotal) || programTotal <= 0) {
-    return null;
+  for (const plan of plans) {
+    if (plan.is_li) {
+      continue;
+    }
+
+    const bounds = getSemesterCreditBounds(plan.semester_type, constraints);
+
+    if (plan.target_credits < bounds.min) {
+      exceptions.push({
+        semester_number: plan.semester_number,
+        semester_type: plan.semester_type,
+        target_credits: plan.target_credits,
+        recommended_min: bounds.min,
+        recommended_max: bounds.max,
+        exception_type: "under",
+      });
+      continue;
+    }
+
+    if (plan.target_credits > bounds.max) {
+      exceptions.push({
+        semester_number: plan.semester_number,
+        semester_type: plan.semester_type,
+        target_credits: plan.target_credits,
+        recommended_min: bounds.min,
+        recommended_max: bounds.max,
+        exception_type: "over",
+      });
+    }
   }
 
-  if (Number(entrySemester) === 1) {
-    return programTotal;
-  }
-
-  return Math.max(programTotal - (Number(creditTransfer) || 0), 0);
+  return exceptions;
 };
 
 export const getProgramSemesterPlanConstraints = async (
@@ -377,7 +413,25 @@ export const buildSemesterRulePlansForSession = async (
     return [];
   }
 
-  const cyclePattern = getIntakeLifecyclePattern(intakeType);
+  const [sessionRows] = await executor.query(
+    `SELECT program_id
+     FROM program_sessions
+     WHERE id = ?
+     LIMIT 1`,
+    [sessionId],
+  );
+
+  const programId = Number((sessionRows as any[])[0]?.program_id);
+  const lifecycleConfig = programId
+    ? await resolveIntakeLifecyclePattern({
+        programId,
+        intakeType,
+        executor,
+      })
+    : {
+        lifecycle_pattern: getDefaultIntakeLifecyclePattern(intakeType),
+      };
+  const cyclePattern = lifecycleConfig.lifecycle_pattern;
   const constraints = await getSessionSemesterPlanConstraints(sessionId, executor);
 
   const [semesterRows] = await executor.query(
@@ -413,9 +467,11 @@ export const buildSemesterRulePlansForSession = async (
 
     return {
       semester_number: semesterNumber,
-      semester_type: cyclePattern[(semesterNumber - 1) % 3],
+      semester_type: cyclePattern[(semesterNumber - 1) % 3] || "L",
       is_li: false,
       target_credits: Number(row.regular_credits) || 0,
+      is_credit_exception: false,
+      credit_exception_reason: null,
     };
   });
 
@@ -453,355 +509,5 @@ export const buildSemesterRulePlansForSession = async (
 
   return constraints
     ? rebalanceSemesterRulePlanTargets(plans, constraints)
-    : plans;
-};
-
-export const replaceSemesterCreditPlans = async (
-  ruleId: number,
-  plans: SemesterRulePlan[],
-  executor: QueryExecutor = pool,
-) => {
-  const normalizedPlans = normalizeSemesterRulePlans(plans);
-
-  await executor.query(`DELETE FROM semester_credit_plans WHERE rule_id = ?`, [
-    ruleId,
-  ]);
-
-  if (normalizedPlans.length === 0) {
-    return;
-  }
-
-  const values = normalizedPlans.map((plan) => [
-    ruleId,
-    plan.semester_number,
-    plan.semester_type,
-    plan.is_li ? 1 : 0,
-    plan.target_credits,
-  ]);
-
-  await executor.query(
-    `INSERT INTO semester_credit_plans (
-      rule_id,
-      semester_number,
-      semester_type,
-      is_li,
-      target_credits
-    ) VALUES ?`,
-    [values],
-  );
-};
-
-export const seedSemesterOneRulePlans = async (
-  ruleId: number,
-  programId: number,
-  intakeType: string,
-  executor: QueryExecutor = pool,
-) => {
-  const latestSessionId = await getLatestProgramStructureSessionId(
-    programId,
-    executor,
-  );
-
-  if (!latestSessionId) {
-    return [];
-  }
-
-  const plans = await buildSemesterRulePlansForSession(
-    latestSessionId,
-    intakeType,
-    executor,
-  );
-
-  await replaceSemesterCreditPlans(ruleId, plans, executor);
-
-  return plans;
-};
-
-export const ensureBaseRuleForIntake = async (
-  programId: number,
-  intakeType: string,
-  executor: QueryExecutor = pool,
-) => {
-  const [baseRuleRows] = await executor.query(
-    `SELECT id
-     FROM semester_entry_rules
-     WHERE program_id = ?
-       AND intake_type = ?
-       AND credit_transfer = 0
-       AND entry_semester = 1
-     ORDER BY id ASC
-     LIMIT 1`,
-    [programId, intakeType],
-  );
-
-  if ((baseRuleRows as any[]).length > 0) {
-    return {
-      ruleId: Number((baseRuleRows as any[])[0].id),
-      created: false,
-    };
-  }
-
-  const [baseResult] = await executor.query(
-    `INSERT INTO semester_entry_rules (program_id, intake_type, credit_transfer, entry_semester)
-     VALUES (?, ?, 0, 1)`,
-    [programId, intakeType],
-  );
-
-  const ruleId = Number((baseResult as any).insertId);
-  await seedSemesterOneRulePlans(ruleId, programId, intakeType, executor);
-
-  return {
-    ruleId,
-    created: true,
-  };
-};
-
-export const getStoredSemesterRulePlans = async (
-  programId: number,
-  intakeType: string,
-  entrySemester: number,
-  transferredCredits?: number | null,
-  executor: QueryExecutor = pool,
-): Promise<SemesterRulePlan[]> => {
-  let ruleRows: any[] = [];
-
-  if (
-    transferredCredits != null &&
-    Number.isFinite(transferredCredits) &&
-    transferredCredits >= 0
-  ) {
-    const [matchedRuleRows] = await executor.query(
-      `SELECT id
-       FROM semester_entry_rules
-       WHERE program_id = ?
-         AND intake_type = ?
-         AND entry_semester = ?
-         AND credit_transfer <= ?
-       ORDER BY credit_transfer DESC, id ASC
-       LIMIT 1`,
-      [programId, intakeType, entrySemester, transferredCredits],
-    );
-
-    ruleRows = matchedRuleRows as any[];
-  }
-
-  if (ruleRows.length === 0) {
-    const [fallbackRuleRows] = await executor.query(
-      `SELECT id
-       FROM semester_entry_rules
-       WHERE program_id = ?
-         AND intake_type = ?
-         AND entry_semester = ?
-       ORDER BY credit_transfer ASC, id ASC
-       LIMIT 1`,
-      [programId, intakeType, entrySemester],
-    );
-
-    ruleRows = fallbackRuleRows as any[];
-  }
-
-  if (ruleRows.length === 0) {
-    return [];
-  }
-
-  const [planRows] = await executor.query(
-    `SELECT semester_number, semester_type, is_li, target_credits
-     FROM semester_credit_plans
-     WHERE rule_id = ?
-     ORDER BY semester_number ASC`,
-    [Number(ruleRows[0].id)],
-  );
-
-  return normalizeSemesterRulePlans(
-    (planRows as any[]).map((row) => ({
-      semester_number: Number(row.semester_number),
-      semester_type: row.semester_type as "L" | "S",
-      is_li: !!row.is_li,
-      target_credits: Number(row.target_credits) || 0,
-    })),
-  );
-};
-
-export const getEffectiveSemesterRulePlans = async ({
-  programId,
-  intakeType,
-  entrySemester,
-  sessionId,
-  transferredCredits,
-  executor = pool,
-}: {
-  programId: number;
-  intakeType?: string | null;
-  entrySemester: number;
-  sessionId?: number | null;
-  transferredCredits?: number | null;
-  executor?: QueryExecutor;
-}) => {
-  if (!intakeType) {
-    return [];
-  }
-
-  if (entrySemester === 1 && sessionId) {
-    return buildSemesterRulePlansForSession(sessionId, intakeType, executor);
-  }
-
-  const storedPlans = await getStoredSemesterRulePlans(
-    programId,
-    intakeType,
-    entrySemester,
-    transferredCredits,
-    executor,
-  );
-
-  if (storedPlans.length > 0) {
-    return storedPlans;
-  }
-
-  return [];
-};
-
-export const getSemesterRuleMetaForSemester = async ({
-  programId,
-  intakeType,
-  entrySemester,
-  sessionId,
-  semester,
-  transferredCredits,
-  executor = pool,
-}: {
-  programId: number;
-  intakeType?: string | null;
-  entrySemester: number;
-  sessionId?: number | null;
-  semester: number;
-  transferredCredits?: number | null;
-  executor?: QueryExecutor;
-}) => {
-  const plans = await getEffectiveSemesterRulePlans({
-    programId,
-    intakeType,
-    entrySemester,
-    sessionId,
-    transferredCredits,
-    executor,
-  });
-
-  return (
-    plans.find((plan) => plan.semester_number === semester) || null
-  );
-};
-
-const ensureSemesterRuleBackfillTable = async () => {
-  if (!ensureBackfillTablePromise) {
-    ensureBackfillTablePromise = pool
-      .query(`
-        CREATE TABLE IF NOT EXISTS semester_rule_plan_backfills (
-          program_id INT NOT NULL,
-          version VARCHAR(100) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-          PRIMARY KEY (program_id, version),
-          CONSTRAINT fk_srpb_program
-            FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-      `)
-      .then(() => undefined)
-      .catch((error) => {
-        ensureBackfillTablePromise = null;
-        throw error;
-      });
-  }
-
-  await ensureBackfillTablePromise;
-};
-
-export const backfillSemesterOneRulePlansForProgram = async (
-  programId: number,
-  executor: QueryExecutor = pool,
-) => {
-  const [ruleRows] = await executor.query(
-    `SELECT id, intake_type
-     FROM semester_entry_rules
-     WHERE program_id = ? AND entry_semester = 1
-     ORDER BY id ASC`,
-    [programId],
-  );
-
-  if ((ruleRows as any[]).length === 0) {
-    return { updatedRules: 0, eligibleToMark: true };
-  }
-
-  const latestSessionId = await getLatestProgramStructureSessionId(
-    programId,
-    executor,
-  );
-
-  if (!latestSessionId) {
-    return { updatedRules: 0, eligibleToMark: false };
-  }
-
-  const plansByIntakeType = new Map<string, SemesterRulePlan[]>();
-
-  for (const rule of ruleRows as any[]) {
-    const intakeType = String(rule.intake_type);
-
-    if (!plansByIntakeType.has(intakeType)) {
-      plansByIntakeType.set(
-        intakeType,
-        await buildSemesterRulePlansForSession(
-          latestSessionId,
-          intakeType,
-          executor,
-        ),
-      );
-    }
-
-    await replaceSemesterCreditPlans(
-      Number(rule.id),
-      plansByIntakeType.get(intakeType) || [],
-      executor,
-    );
-  }
-
-  return { updatedRules: (ruleRows as any[]).length, eligibleToMark: true };
-};
-
-export const ensureSemesterOneRulePlansBackfilled = async (programId: number) => {
-  await ensureSemesterRuleBackfillTable();
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [backfillRows] = await connection.query(
-      `SELECT 1
-       FROM semester_rule_plan_backfills
-       WHERE program_id = ? AND version = ?
-       LIMIT 1`,
-      [programId, SEMESTER_ONE_BACKFILL_VERSION],
-    );
-
-    if ((backfillRows as any[]).length === 0) {
-      const result = await backfillSemesterOneRulePlansForProgram(
-        programId,
-        connection,
-      );
-
-      if (result.eligibleToMark) {
-        await connection.query(
-          `INSERT IGNORE INTO semester_rule_plan_backfills (program_id, version)
-           VALUES (?, ?)`,
-          [programId, SEMESTER_ONE_BACKFILL_VERSION],
-        );
-      }
-    }
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    : normalizeSemesterRulePlans(plans);
 };

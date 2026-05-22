@@ -20,7 +20,7 @@ See [walkthrough.md](./walkthrough.md) for the full end-to-end user flow.
 - Manage semester entry rules and per-semester target credits.
 - Create or clone program sessions and import course structures from Excel.
 - Set the active intake period and semester type for the program.
-- Process intake assessment spreadsheets and pre-register students.
+- Process Student Entry Assessment spreadsheets and pre-register students.
 - Create academic-planning intakes and generate plans in bulk.
 - Review draft plans, approve them, complete them, and lock finished intakes.
 - Receive notifications when students revert approved plans back to draft for rescheduling.

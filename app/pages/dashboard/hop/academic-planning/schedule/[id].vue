@@ -24,6 +24,10 @@ interface Course {
   status: "Planned" | "Transferred" | "Passed" | "Failed";
 }
 
+interface TransferredCourse extends Course {
+  semester: number;
+}
+
 interface Semester {
   semester: number;
   courses: Course[];
@@ -48,6 +52,7 @@ interface PlanData {
     total_credit_transferred: number | null;
   };
   semesters: Semester[];
+  transferredCourses: TransferredCourse[];
   summary: {
     total_semesters: number;
     total_credits: number;
@@ -74,6 +79,11 @@ interface SemesterRule {
   semester_type: "L" | "S";
   is_li: boolean;
   target_credits: number;
+  is_credit_exception: boolean;
+  credit_exception_reason: string | null;
+  allowed_overload_credits?: number;
+  allowed_underload_credits?: number;
+  credit_exception_default_reason?: string | null;
 }
 
 interface CreditLimits {
@@ -81,6 +91,22 @@ interface CreditLimits {
   long_max: number;
   short_min: number;
   short_max: number;
+}
+
+interface CreditExceptionDetail {
+  semester: number;
+  semester_type: "L" | "S";
+  total_credits: number;
+  recommended_min: number;
+  recommended_max: number;
+  exception_type: "under" | "over";
+}
+
+interface SemesterLimitContext {
+  recommendedMin: number;
+  recommendedMax: number;
+  effectiveMin: number;
+  effectiveMax: number;
 }
 
 // Fetch plan data
@@ -133,6 +159,9 @@ const toastMessage = ref('');
 const toastType = ref<'error' | 'success' | 'warning'>('error');
 let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 const showClearConfirmModal = ref(false);
+const isCreditExceptionModalOpen = ref(false);
+const pendingCreditExceptions = ref<CreditExceptionDetail[]>([]);
+const creditExceptionReason = ref("");
 
 // Initialize course assignments from plan data (only from start_semester onwards)
 watchEffect(() => {
@@ -174,16 +203,27 @@ watchEffect(() => {
 const transferredCourses = computed(() => {
   if (!planData.value) return [];
 
-  const transferred: Course[] = [];
+  if (planData.value.transferredCourses?.length) {
+    return planData.value.transferredCourses;
+  }
+
+  const transferred: TransferredCourse[] = [];
   for (const semester of planData.value.semesters) {
     for (const course of semester.courses) {
       if (course.status === "Transferred") {
-        transferred.push(course);
+        transferred.push({
+          ...course,
+          semester: semester.semester,
+        });
       }
     }
   }
   return transferred;
 });
+
+const transferredCredits = computed(() =>
+  transferredCourses.value.reduce((sum, course) => sum + course.credit_hour, 0),
+);
 
 // Get passed courses (locked, completed successfully)
 const passedCourses = computed(() => {
@@ -319,18 +359,22 @@ const addSemester = () => {
       for (const r of coursesData.value.semester_rules) {
         if (!r.is_li) {
           const pos = (r.semester_number - 1) % 3;
-          posTotal[pos]++;
-          if (r.semester_type === "L") posLong[pos]++;
+          posTotal[pos] = (posTotal[pos] ?? 0) + 1;
+          if (r.semester_type === "L") {
+            posLong[pos] = (posLong[pos] ?? 0) + 1;
+          }
         }
       }
       const cycle = posTotal.map((total, i) =>
-        total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
-      );
+        total === 0 ? "L" : (posLong[i] ?? 0) >= total / 2 ? "L" : "S",
+      ) as ("L" | "S")[];
       coursesData.value.semester_rules.push({
         semester_number: nextSem,
-        semester_type: cycle[(nextSem - 1) % 3] as "L" | "S",
+        semester_type: cycle[(nextSem - 1) % 3] ?? "L",
         is_li: false,
         target_credits: 0,
+        is_credit_exception: false,
+        credit_exception_reason: null,
       });
     }
   }
@@ -349,12 +393,14 @@ const detectCycle = (rules: SemesterRule[]): ("L" | "S")[] => {
   for (const r of rules) {
     if (!r.is_li) {
       const pos = (r.semester_number - 1) % 3;
-      posTotal[pos]++;
-      if (r.semester_type === "L") posLong[pos]++;
+      posTotal[pos] = (posTotal[pos] ?? 0) + 1;
+      if (r.semester_type === "L") {
+        posLong[pos] = (posLong[pos] ?? 0) + 1;
+      }
     }
   }
   return posTotal.map((total, i) =>
-    total === 0 ? "L" : posLong[i] >= total / 2 ? "L" : "S",
+    total === 0 ? "L" : (posLong[i] ?? 0) >= total / 2 ? "L" : "S",
   ) as ("L" | "S")[];
 };
 
@@ -377,9 +423,11 @@ const addConfigSemester = () => {
   const cycle = detectCycle(editableRules.value);
   editableRules.value.push({
     semester_number: nextSem,
-    semester_type: cycle[(nextSem - 1) % 3],
+    semester_type: cycle[(nextSem - 1) % 3] ?? "L",
     is_li: false,
     target_credits: 0,
+    is_credit_exception: false,
+    credit_exception_reason: null,
   });
 };
 
@@ -905,19 +953,125 @@ const getPreviewSemesterPhaseBadgeClass = (sem: number): string => {
   return "border-info/25 bg-info/10 text-info";
 };
 
-const getSemesterLimits = (
+const getSemesterLimitContext = (
   sem: number,
-): { min: number; max: number } | null => {
+): SemesterLimitContext | null => {
   const rule = getSemesterRule(sem);
   if (!rule || rule.is_li) return null; // LI semesters bypass validation
   const useBase = coursesData.value?.on_probation && isSemesterCompleted(sem);
-  const limits = useBase
+  const effectiveLimits = useBase
     ? coursesData.value?.base_credit_limits
     : coursesData.value?.credit_limits;
-  if (!limits) return null;
-  if (rule.semester_type === "L")
-    return { min: limits.long_min, max: limits.long_max };
-  return { min: limits.short_min, max: limits.short_max };
+  const baseLimits = coursesData.value?.base_credit_limits ?? effectiveLimits;
+  if (!effectiveLimits || !baseLimits) return null;
+
+  const recommendedMin =
+    rule.semester_type === "L" ? baseLimits.long_min : baseLimits.short_min;
+  const recommendedMax =
+    rule.semester_type === "L" ? baseLimits.long_max : baseLimits.short_max;
+  const baselineMin =
+    rule.semester_type === "L"
+      ? effectiveLimits.long_min
+      : effectiveLimits.short_min;
+  const baselineMax =
+    rule.semester_type === "L"
+      ? effectiveLimits.long_max
+      : effectiveLimits.short_max;
+
+  return {
+    recommendedMin,
+    recommendedMax,
+    effectiveMin: Math.max(
+      baselineMin - (Number(rule.allowed_underload_credits) || 0),
+      0,
+    ),
+    effectiveMax: baselineMax + (Number(rule.allowed_overload_credits) || 0),
+  };
+};
+
+const getSemesterLimits = (
+  sem: number,
+): { min: number; max: number } | null => {
+  const context = getSemesterLimitContext(sem);
+  if (!context) return null;
+
+  return {
+    min: context.effectiveMin,
+    max: context.effectiveMax,
+  };
+};
+
+const getSemesterExceptionDetail = (
+  sem: number,
+): CreditExceptionDetail | null => {
+  const rule = getSemesterRule(sem);
+  const limitContext = getSemesterLimitContext(sem);
+  const credits = getSemesterCredits(sem);
+
+  if (!rule || !limitContext || credits === 0) {
+    return null;
+  }
+
+  if (credits > limitContext.effectiveMax) {
+    return {
+      semester: sem,
+      semester_type: rule.semester_type,
+      total_credits: credits,
+      recommended_min: limitContext.recommendedMin,
+      recommended_max: limitContext.recommendedMax,
+      exception_type: "over",
+    };
+  }
+
+  if (credits < limitContext.effectiveMin) {
+    return {
+      semester: sem,
+      semester_type: rule.semester_type,
+      total_credits: credits,
+      recommended_min: limitContext.recommendedMin,
+      recommended_max: limitContext.recommendedMax,
+      exception_type: "under",
+    };
+  }
+
+  return null;
+};
+
+const scheduleCreditExceptionDetails = computed(() => {
+  const startSem = planData.value?.plan.start_semester || 1;
+  return availableSemesters.value
+    .filter((sem) => sem >= startSem)
+    .map((sem) => getSemesterExceptionDetail(sem))
+    .filter((detail): detail is CreditExceptionDetail => detail !== null);
+});
+
+const seedScheduleExceptionReason = (exceptions: CreditExceptionDetail[]) => {
+  const reasons = exceptions
+    .map(
+      (exception) => {
+        const rule = getSemesterRule(exception.semester);
+        return (
+          rule?.credit_exception_reason?.trim() ||
+          rule?.credit_exception_default_reason?.trim() ||
+          null
+        );
+      },
+    )
+    .filter((reason): reason is string => !!reason);
+
+  creditExceptionReason.value = reasons[0] ?? "";
+};
+
+const openCreditExceptionModal = (exceptions: CreditExceptionDetail[]) => {
+  pendingCreditExceptions.value = exceptions;
+  seedScheduleExceptionReason(exceptions);
+  isCreditExceptionModalOpen.value = true;
+};
+
+const closeCreditExceptionModal = () => {
+  isCreditExceptionModalOpen.value = false;
+  pendingCreditExceptions.value = [];
+  creditExceptionReason.value = "";
 };
 
 // Get credit status for a semester: 'ok' | 'over' | 'under' | 'li' | 'empty'
@@ -1077,12 +1231,19 @@ const confirmClearAllCourses = () => {
   showClearConfirmModal.value = false;
 };
 
-// Save all changes
-const saveChanges = async () => {
+const persistScheduleChanges = async (acceptExceptions: boolean = false) => {
   if (!planData.value) return;
+
+  if (acceptExceptions && !creditExceptionReason.value.trim()) {
+    showToast("Please enter a reason for this credit-hour exception.", 'error');
+    return;
+  }
 
   saveLoading.value = true;
   const startSem = planData.value.plan.start_semester || 1;
+  const exceptionSemesters = new Set(
+    pendingCreditExceptions.value.map((exception) => exception.semester),
+  );
 
   try {
     // Group courses by semester (only non-locked courses, but include retakes)
@@ -1127,6 +1288,8 @@ const saveChanges = async () => {
           semester_type: rule.semester_type,
           is_li: rule.is_li,
           target_credits: rule.target_credits,
+          is_credit_exception: rule.is_credit_exception,
+          credit_exception_reason: rule.credit_exception_reason,
         })),
       },
     });
@@ -1149,6 +1312,12 @@ const saveChanges = async () => {
           plan_id: planData.value.plan.id,
           semester: sem,
           courses: semesterCourses.get(sem) || [], // Empty array clears the semester
+          accept_credit_exception:
+            acceptExceptions && exceptionSemesters.has(sem),
+          credit_exception_reason:
+            acceptExceptions && exceptionSemesters.has(sem)
+              ? creditExceptionReason.value.trim()
+              : undefined,
         },
       });
     }
@@ -1161,6 +1330,7 @@ const saveChanges = async () => {
           plan_id: planData.value.plan.id,
           semester: sem,
           courses: [], // Clear all planned courses from earlier semesters
+          accept_credit_exception: false,
         },
       });
     }
@@ -1169,10 +1339,31 @@ const saveChanges = async () => {
     await Promise.all([refreshPlan(), refreshCourses()]);
     navigateTo(`/dashboard/hop/academic-planning/student/${planId}`);
   } catch (error: any) {
+    if (error?.data?.code === "CREDIT_EXCEPTION_REQUIRED") {
+      openCreditExceptionModal([
+        error.data.exception as CreditExceptionDetail,
+      ]);
+      return;
+    }
+
     showToast(error.data?.message || "Failed to save schedule", 'error');
   } finally {
     saveLoading.value = false;
   }
+};
+
+// Save all changes
+const saveChanges = async () => {
+  if (scheduleCreditExceptionDetails.value.length > 0) {
+    openCreditExceptionModal(scheduleCreditExceptionDetails.value);
+    return;
+  }
+
+  await persistScheduleChanges(false);
+};
+
+const confirmScheduleSave = async () => {
+  await persistScheduleChanges(true);
 };
 
 // Go back
@@ -1217,10 +1408,6 @@ const isCourseDisabledForSemester = (courseId: number, semester: number): boolea
   if (course && course.prerequisite_course_id) {
     if (!isPrereqSatisfied(course.prerequisite_course_id, semester)) return true;
   }
-  if (course) {
-    const limits = getSemesterLimits(semester);
-    if (limits && getSemesterCredits(semester) + course.credit_hour > limits.max) return true;
-  }
   return false;
 };
 
@@ -1236,12 +1423,6 @@ const getDropReason = (courseId: number, semester: number): string | null => {
   }
   if (course && course.prerequisite_course_id && !isPrereqSatisfied(course.prerequisite_course_id, semester)) {
     return `Prereq: ${course.prerequisite_code}`;
-  }
-  if (course) {
-    const limits = getSemesterLimits(semester);
-    if (limits && getSemesterCredits(semester) + course.credit_hour > limits.max) {
-      return coursesData.value?.on_probation ? `Probation: max ${limits.max} cr` : `Exceeds ${limits.max} cr`;
-    }
   }
   return null;
 };
@@ -1410,7 +1591,7 @@ const getSemesterColumnClasses = (sem: number) => {
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Transferred:</span>
-          <span class="font-semibold text-success">{{ transferredCourses.length }} courses ({{ planData.summary.transferred_credits }} cr)</span>
+          <span class="font-semibold text-success">{{ transferredCourses.length }} courses ({{ transferredCredits }} cr)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-sm text-base-content/60">Unassigned:</span>
@@ -1535,25 +1716,44 @@ const getSemesterColumnClasses = (sem: number) => {
           </div>
 
           <!-- Panel Header (for selected semester) -->
-          <div v-if="selectedSemester" class="px-4 py-2.5 border-b border-base-300 flex-shrink-0 bg-base-100 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
+          <div v-if="selectedSemester" class="px-4 py-2.5 border-b border-base-300 flex-shrink-0 bg-base-100">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
               <h2 class="font-semibold">Semester {{ selectedSemester }}</h2>
               <span v-if="getSemesterTypeLabel(selectedSemester)" class="badge badge-outline badge-sm">{{ getSemesterTypeLabel(selectedSemester) }}</span>
+              <span
+                v-if="getSemesterRule(selectedSemester)?.is_credit_exception"
+                class="badge badge-info badge-sm"
+                :title="
+                  getSemesterRule(selectedSemester)?.credit_exception_reason ||
+                  undefined
+                "
+              >
+                Exception
+              </span>
               <span class="badge badge-sm"
                 :class="{ 'badge-success': getSemesterCreditStatus(selectedSemester) === 'ok', 'badge-error': getSemesterCreditStatus(selectedSemester) === 'over', 'badge-warning': getSemesterCreditStatus(selectedSemester) === 'under', 'badge-ghost': getSemesterCreditStatus(selectedSemester) === 'empty' || getSemesterCreditStatus(selectedSemester) === 'li' }"
               >
                 {{ getSemesterCredits(selectedSemester) }}<template v-if="getSemesterLimits(selectedSemester)"> / {{ getSemesterLimits(selectedSemester)!.min }}–{{ getSemesterLimits(selectedSemester)!.max }}</template> credit
               </span>
-            </div>
-            <!-- Credit progress bar -->
-            <div v-if="getSemesterLimits(selectedSemester)" class="flex-1 max-w-48">
-              <div class="h-2 bg-base-200 rounded-full overflow-hidden">
-                <div class="h-full rounded-full transition-colors"
-                  :class="{ 'bg-success': getSemesterCreditStatus(selectedSemester) === 'ok', 'bg-error': getSemesterCreditStatus(selectedSemester) === 'over', 'bg-warning': getSemesterCreditStatus(selectedSemester) === 'under', 'bg-base-300': getSemesterCreditStatus(selectedSemester) === 'empty' }"
-                  :style="{ width: creditBarWidth(selectedSemester) }"
-                ></div>
+              </div>
+              <!-- Credit progress bar -->
+              <div v-if="getSemesterLimits(selectedSemester)" class="flex-1 max-w-48">
+                <div class="h-2 bg-base-200 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full transition-colors"
+                    :class="{ 'bg-success': getSemesterCreditStatus(selectedSemester) === 'ok', 'bg-error': getSemesterCreditStatus(selectedSemester) === 'over', 'bg-warning': getSemesterCreditStatus(selectedSemester) === 'under', 'bg-base-300': getSemesterCreditStatus(selectedSemester) === 'empty' }"
+                    :style="{ width: creditBarWidth(selectedSemester) }"
+                  ></div>
+                </div>
               </div>
             </div>
+            <p
+              v-if="getSemesterRule(selectedSemester)?.is_credit_exception"
+              class="mt-2 text-xs text-info"
+            >
+              Approved exception:
+              {{ getSemesterRule(selectedSemester)?.credit_exception_reason }}
+            </p>
           </div>
 
           <!-- Drop Zone Content Area -->
@@ -1669,7 +1869,7 @@ const getSemesterColumnClasses = (sem: number) => {
       <div v-if="transferredCourses.length > 0" class="collapse collapse-arrow bg-success/5 border border-success/20 rounded-lg mt-3 flex-shrink-0">
         <input type="checkbox" />
         <div class="collapse-title py-2 min-h-0 text-sm font-medium">
-          View {{ transferredCourses.length }} Transferred Courses ({{ planData.summary.transferred_credits }} credits)
+          View {{ transferredCourses.length }} Transferred Courses ({{ transferredCredits }} credits)
         </div>
         <div class="collapse-content">
           <div class="flex flex-wrap gap-2 pt-2">
@@ -1689,6 +1889,76 @@ const getSemesterColumnClasses = (sem: number) => {
         <button class="btn btn-ghost btn-xs" @click="toastMessage = ''">✕</button>
       </div>
     </Transition>
+
+    <dialog
+      class="modal modal-bottom sm:modal-middle"
+      :class="{ 'modal-open': isCreditExceptionModalOpen }"
+    >
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg">Approve Credit-Hour Exception?</h3>
+        <p class="py-3 text-sm text-base-content/70">
+          One or more semesters are outside the recommended credit-hour
+          guideline. Enter a reason to save this schedule.
+        </p>
+
+        <div class="space-y-2 mb-4">
+          <div
+            v-for="exception in pendingCreditExceptions"
+            :key="`grid-credit-exception-${exception.semester}`"
+            class="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm"
+          >
+            <div class="font-semibold">
+              Semester {{ exception.semester }}
+              ({{ exception.semester_type === "L" ? "Long" : "Short" }})
+            </div>
+            <div class="text-base-content/70">
+              {{ exception.total_credits }} credits, recommended
+              {{ exception.recommended_min }}-{{ exception.recommended_max }}
+              credits
+              <span v-if="coursesData?.on_probation && exception.exception_type === 'over'">
+                for a probation student
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-control">
+          <label class="label pl-0">
+            <span class="label-text font-semibold">Exception Reason</span>
+          </label>
+          <textarea
+            v-model="creditExceptionReason"
+            class="textarea textarea-bordered min-h-28"
+            placeholder="Explain why this overload or underload is academically acceptable."
+          ></textarea>
+        </div>
+
+        <div class="modal-action">
+          <button
+            class="btn btn-ghost"
+            :disabled="saveLoading"
+            @click="closeCreditExceptionModal"
+          >
+            Decline
+          </button>
+          <button
+            class="btn btn-primary"
+            :class="{ loading: saveLoading }"
+            :disabled="saveLoading"
+            @click="confirmScheduleSave"
+          >
+            Approve and Save
+          </button>
+        </div>
+      </div>
+      <form
+        method="dialog"
+        class="modal-backdrop"
+        @click="closeCreditExceptionModal"
+      >
+        <button>close</button>
+      </form>
+    </dialog>
 
     <!-- Configure Plan Modal -->
     <dialog class="modal" :class="{ 'modal-open': isConfigModalOpen }">
@@ -1945,7 +2215,7 @@ const getSemesterColumnClasses = (sem: number) => {
           </div>
           <div class="rounded-[1.35rem] border border-base-300 bg-base-100/95 p-4 shadow-sm">
             <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-base-content/45">Transferred Credit</span>
-            <span class="mt-2 block text-2xl font-semibold text-base-content">{{ planData?.summary.transferred_credits ?? 0 }} cr</span>
+            <span class="mt-2 block text-2xl font-semibold text-base-content">{{ transferredCredits }} cr</span>
             <span class="mt-1 block text-xs leading-5 text-base-content/55">
               Credit already obtained before this scheduling timeline begins.
             </span>
@@ -2037,6 +2307,15 @@ const getSemesterColumnClasses = (sem: number) => {
                     }"
                   >
                     {{ getSemesterTypeLabel(sem) }}
+                  </span>
+                  <span
+                    v-if="getSemesterRule(sem)?.is_credit_exception"
+                    class="badge badge-info badge-xs"
+                    :title="
+                      getSemesterRule(sem)?.credit_exception_reason || undefined
+                    "
+                  >
+                    Exception
                   </span>
                   <p class="basis-full text-xs leading-5 text-base-content/55">
                     {{ getPreviewSemesterLoadLabel(sem) }}:
@@ -2142,7 +2421,7 @@ const getSemesterColumnClasses = (sem: number) => {
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
-              Credit Transferred ({{ transferredCourses.length }} courses, {{ planData?.summary.transferred_credits ?? 0 }} cr)
+              Credit Transferred ({{ transferredCourses.length }} courses, {{ transferredCredits }} cr)
             </h4>
             <div class="flex flex-wrap gap-2">
               <span

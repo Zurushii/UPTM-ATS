@@ -86,7 +86,7 @@ export default defineEventHandler(async (event) => {
   workbook.creator = "UTPM ATS";
   workbook.created = new Date();
 
-  const worksheet = workbook.addWorksheet("Intake Assessment Template");
+  const worksheet = workbook.addWorksheet("Student Entry Assessment Template");
 
   worksheet.columns = [
     { header: "matric_no", key: "matric_no", width: 20 },
@@ -127,10 +127,10 @@ export default defineEventHandler(async (event) => {
   instructionsSheet.columns = [{ width: 24 }, { width: 96 }];
   instructionsSheet.properties.defaultRowHeight = 22;
 
-  instructionsSheet.getCell("A1").value = "Intake Assessment Template Guide";
+  instructionsSheet.getCell("A1").value = "Student Entry Assessment Template Guide";
   instructionsSheet.getCell("A1").font = { bold: true, size: 16 };
   instructionsSheet.getCell("A2").value =
-    "Use the first worksheet to fill the student intake data. Keep it as the first sheet if you plan to upload the workbook back into Intake Assessment.";
+    "Use the first worksheet to fill the student intake data. Keep it as the first sheet if you plan to upload the workbook back into Student Entry Assessment.";
   instructionsSheet.getCell("A2").font = {
     italic: true,
     color: { argb: "FF4B5563" },
@@ -150,11 +150,11 @@ export default defineEventHandler(async (event) => {
   const instructionRows: Array<[string, string]> = [
     [
       "What this template is",
-      "The first sheet is a starter workbook for Intake Assessment. It follows the expected upload columns and includes 10 sample rows so HOP can begin from a clean format.",
+      "The first sheet is a starter workbook for Student Entry Assessment. It follows the expected upload columns and includes 10 sample rows so HOP can begin from a clean format.",
     ],
     [
       "Keep sheet order",
-      "If you upload this workbook back into the system, keep 'Intake Assessment Template' as the first worksheet because the processor reads the first sheet.",
+      "If you upload this workbook back into the system, keep 'Student Entry Assessment Template' as the first worksheet because the processor reads the first sheet.",
     ],
     [
       "matric_no",
@@ -182,11 +182,11 @@ export default defineEventHandler(async (event) => {
     ],
     [
       "Before upload",
-      "Check that the selected rule set exists, the active session intake matches the file intake, and the Excel column headers stay unchanged.",
+      "Check that the resolved rule set exists, the active session intake matches the file intake, and the Excel column headers stay unchanged. If the system cannot auto-match the rule set, choose it manually before processing.",
     ],
     [
       "Upload step",
-      "Go to Intake Assessment, choose the intake and rule set in Step 1, upload the completed workbook in Step 2, then continue to processing.",
+      "Go to Student Entry Assessment, confirm the intake setup in Step 1, upload the completed workbook in Step 2, then continue to processing. The system will auto-match the rule set and program structure when possible.",
     ],
   ];
 

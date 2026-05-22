@@ -1,13 +1,26 @@
-import { pool } from "~~/server/utils/db";
-import { auth } from "~~/utils/auth";
 import ExcelJS from "exceljs";
+import {
+  CREDIT_COLUMN_HEADERS,
+  assessNeedsFixForAcademicPlanRegeneration,
+  parseTransferredCreditsFromExcel,
+  resolveAcademicPlanRegenerationEntryInputs,
+  validateTransferredCoursesForAcademicPlanRegeneration,
+} from "~~/server/utils/academic-plan-regeneration";
+import { pool } from "~~/server/utils/db";
+import { ensureStudentEntrySemesterColumns } from "~~/server/utils/semester-entry-bands";
+import { auth } from "~~/utils/auth";
 
 interface PreviewStudent {
   matric_no: string;
   student_name: string;
   entry_semester: number | null;
   total_credit_transferred: number | null;
-  status: "ready" | "missing_entry_semester" | "already_has_plan" | "credit_mismatch";
+  status:
+    | "ready"
+    | "missing_entry_semester"
+    | "already_has_plan"
+    | "credit_mismatch"
+    | "needs_fix";
   reason?: string;
 }
 
@@ -18,7 +31,6 @@ interface FailedRecord {
 }
 
 export default defineEventHandler(async (event) => {
-  // Authenticate user
   const session = await auth.api.getSession({ headers: event.headers });
 
   if (!session?.user) {
@@ -29,7 +41,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: "HOP only" });
   }
 
-  // Get the HoP's assigned program
   const [hopRows] = await pool.query(
     `SELECT program_id FROM head_of_programs WHERE user_id = ?`,
     [session.user.id],
@@ -44,8 +55,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+  await ensureStudentEntrySemesterColumns();
 
-  // Parse multipart form data
   const formData = await readMultipartFormData(event);
   if (!formData) {
     throw createError({
@@ -61,7 +72,7 @@ export default defineEventHandler(async (event) => {
     if (field.name === "file" && field.data) {
       fileBuffer = field.data;
     } else if (field.name === "intake_id" && field.data) {
-      intakeId = parseInt(field.data.toString());
+      intakeId = parseInt(field.data.toString(), 10);
     }
   }
 
@@ -79,9 +90,8 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Verify intake belongs to this program and get intake details
   const [intakeRows] = await pool.query(
-    `SELECT id, intake_year, intake_type FROM academic_planning_intakes 
+    `SELECT id, intake_year, intake_type, session_id FROM academic_planning_intakes
      WHERE id = ? AND program_id = ?`,
     [intakeId, programId],
   );
@@ -95,15 +105,18 @@ export default defineEventHandler(async (event) => {
 
   const intake = (intakeRows as any[])[0];
 
-  // Get all students in this program with the matching intake year
-  // Use LEFT JOIN to include reserved students (user_id = NULL)
   const [studentRows] = await pool.query(
     `SELECT 
       s.id,
       s.matric_no,
       COALESCE(u.name, s.matric_no) as student_name,
       s.starting_semester,
-      s.total_credit_transferred
+      s.total_credit_transferred,
+      s.system_assigned_entry_semester,
+      s.final_entry_semester,
+      s.is_entry_semester_override,
+      s.intake_assessment_needs_fix,
+      s.intake_assessment_error_reason
     FROM students s
     LEFT JOIN user u ON s.user_id = u.id
     WHERE s.program_id = ? AND s.intake_year = ?`,
@@ -112,10 +125,9 @@ export default defineEventHandler(async (event) => {
 
   const studentsMap = new Map<string, any>();
   for (const student of studentRows as any[]) {
-    studentsMap.set(student.matric_no.toLowerCase(), student);
+    studentsMap.set(String(student.matric_no).toLowerCase(), student);
   }
 
-  // Get students who already have academic plans for this intake
   const [existingPlanRows] = await pool.query(
     `SELECT student_id FROM academic_plans WHERE intake_id = ?`,
     [intakeId],
@@ -123,22 +135,19 @@ export default defineEventHandler(async (event) => {
 
   const studentsWithPlans = new Set<number>();
   for (const row of existingPlanRows as any[]) {
-    studentsWithPlans.add(row.student_id);
+    studentsWithPlans.add(Number(row.student_id));
   }
 
-  // Get all courses for code-to-ID lookup and credit hours
-  // (same as generate.post.ts — needed for transferred_courses validation)
   const [allCoursesRows] = await pool.query(
     `SELECT id, course_code, credit_hour FROM courses`,
   );
   const courseCodeToId = new Map<string, number>();
   const courseIdToCreditHour = new Map<number, number>();
   for (const course of allCoursesRows as any[]) {
-    courseCodeToId.set(course.course_code.toUpperCase(), course.id);
-    courseIdToCreditHour.set(course.id, course.credit_hour);
+    courseCodeToId.set(String(course.course_code).toUpperCase(), Number(course.id));
+    courseIdToCreditHour.set(Number(course.id), Number(course.credit_hour) || 0);
   }
 
-  // Parse Excel file
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(fileBuffer as unknown as ExcelJS.Buffer);
 
@@ -150,16 +159,17 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Find column indices (matric_no + optional transferred_courses)
   const headerRow = worksheet.getRow(1);
   let matricNoCol = -1;
   let transferredCoursesCol = -1;
+  let totalCreditTransferredCol = -1;
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value || "")
       .toLowerCase()
       .trim()
       .replace(/\s+/g, "_");
+
     if (
       value === "matric_no" ||
       value === "matricno" ||
@@ -173,6 +183,8 @@ export default defineEventHandler(async (event) => {
       value === "transfer_courses"
     ) {
       transferredCoursesCol = colNumber;
+    } else if (CREDIT_COLUMN_HEADERS.includes(value)) {
+      totalCreditTransferredCol = colNumber;
     }
   });
 
@@ -183,10 +195,10 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Process rows
   const previewStudents: PreviewStudent[] = [];
   const failedRecords: FailedRecord[] = [];
   const processedMatricNos = new Set<string>();
+  let recoverableNeedsFixCount = 0;
 
   for (let rowNum = 2; rowNum <= worksheet.rowCount; rowNum++) {
     const row = worksheet.getRow(rowNum);
@@ -198,7 +210,6 @@ export default defineEventHandler(async (event) => {
     const matricNo = String(matricNoValue).trim();
     const matricNoLower = matricNo.toLowerCase();
 
-    // Check for duplicates in Excel
     if (processedMatricNos.has(matricNoLower)) {
       failedRecords.push({
         row: rowNum,
@@ -209,7 +220,6 @@ export default defineEventHandler(async (event) => {
     }
     processedMatricNos.add(matricNoLower);
 
-    // Find student in database
     const student = studentsMap.get(matricNoLower);
     if (!student) {
       failedRecords.push({
@@ -220,8 +230,7 @@ export default defineEventHandler(async (event) => {
       continue;
     }
 
-    // Check if student already has a plan
-    if (studentsWithPlans.has(student.id)) {
+    if (studentsWithPlans.has(Number(student.id))) {
       previewStudents.push({
         matric_no: student.matric_no,
         student_name: student.student_name,
@@ -233,92 +242,158 @@ export default defineEventHandler(async (event) => {
       continue;
     }
 
-    // Check if student has entry semester set
-    if (!student.starting_semester) {
+    const needsFixAssessment = student.intake_assessment_needs_fix
+      ? assessNeedsFixForAcademicPlanRegeneration(
+          student.intake_assessment_error_reason,
+        )
+      : null;
+
+    if (
+      needsFixAssessment &&
+      !needsFixAssessment.canRetryInAcademicPlanning
+    ) {
       previewStudents.push({
         matric_no: student.matric_no,
         student_name: student.student_name,
-        entry_semester: null,
+        entry_semester: student.starting_semester,
         total_credit_transferred: student.total_credit_transferred,
-        status: "missing_entry_semester",
-        reason: "Entry semester not set - run Intake Assessment first",
+        status: "needs_fix",
+        reason:
+          needsFixAssessment.blockReason ||
+          "Needs Fix in Student Entry Assessment",
       });
       continue;
     }
 
-    // ── Credit Transfer Validation ──
-    // Only runs when the Excel file contains a transferred_courses column.
-    // Mirrors the same check in generate.post.ts (lines 322–364) and
-    // intake-assessment/process.post.ts (lines 495–507).
-    // If no column is present, skip validation (same behaviour as generate endpoint).
-    if (transferredCoursesCol !== -1) {
-      const transferredCoursesValue = row.getCell(transferredCoursesCol).value;
+    if (
+      needsFixAssessment?.requiresTransferredCreditsColumn &&
+      totalCreditTransferredCol === -1
+    ) {
+      previewStudents.push({
+        matric_no: student.matric_no,
+        student_name: student.student_name,
+        entry_semester: student.starting_semester,
+        total_credit_transferred: student.total_credit_transferred,
+        status: "needs_fix",
+        reason:
+          needsFixAssessment.recoveryGuidance ||
+          "Upload a regenerate file with a corrected total_credit_transferred value before regenerating this student.",
+      });
+      continue;
+    }
 
-      if (transferredCoursesValue) {
-        const courseCodes = String(transferredCoursesValue)
-          .split(",")
-          .map((code) => code.trim().toUpperCase())
-          .filter((code) => code.length > 0);
+    const parsedTransferredCredits = parseTransferredCreditsFromExcel(
+      totalCreditTransferredCol !== -1
+        ? row.getCell(totalCreditTransferredCol).value
+        : null,
+    );
 
-        let transferredCoursesCredits = 0;
-        for (const code of courseCodes) {
-          // Support slash-separated course groups (e.g. "UCS3153/UCS3143") —
-          // use the first code that matches, same as intake-assessment process.
-          if (code.includes("/")) {
-            const groupCodes = code
-              .split("/")
-              .map((c) => c.trim().toUpperCase())
-              .filter((c) => c.length > 0);
-            for (const groupCode of groupCodes) {
-              const id = courseCodeToId.get(groupCode);
-              if (id) {
-                transferredCoursesCredits += courseIdToCreditHour.get(id) || 0;
-                break;
-              }
-            }
-          } else {
-            const courseId = courseCodeToId.get(code);
-            if (courseId) {
-              transferredCoursesCredits += courseIdToCreditHour.get(courseId) || 0;
-            }
-          }
-        }
+    if (!parsedTransferredCredits.ok) {
+      previewStudents.push({
+        matric_no: student.matric_no,
+        student_name: student.student_name,
+        entry_semester: student.starting_semester,
+        total_credit_transferred: student.total_credit_transferred,
+        status: "credit_mismatch",
+        reason:
+          parsedTransferredCredits.reason ||
+          "Invalid total_credit_transferred value in regenerate file.",
+      });
+      continue;
+    }
 
-        const dbCredits = student.total_credit_transferred || 0;
+    const effectiveTransferredCredits =
+      parsedTransferredCredits.value ??
+      (Number(student.total_credit_transferred) || 0);
+    const resolvedEntryInputs =
+      await resolveAcademicPlanRegenerationEntryInputs({
+        programId,
+        intakeType: String(intake.intake_type),
+        sessionId: Number(intake.session_id),
+        transferredCredits: effectiveTransferredCredits,
+        student,
+      });
 
-        // Only flag a mismatch when at least one side is non-zero
-        if ((courseCodes.length > 0 || dbCredits > 0) && dbCredits !== transferredCoursesCredits) {
-          previewStudents.push({
-            matric_no: student.matric_no,
-            student_name: student.student_name,
-            entry_semester: student.starting_semester,
-            total_credit_transferred: student.total_credit_transferred,
-            status: "credit_mismatch",
-            reason: `Credit mismatch: DB total_credit_transferred (${dbCredits}) does not match sum of transferred courses in Excel (${transferredCoursesCredits}). This student will be skipped during generation.`,
-          });
-          continue;
-        }
-      }
+    if (!resolvedEntryInputs) {
+      previewStudents.push({
+        matric_no: student.matric_no,
+        student_name: student.student_name,
+        entry_semester: null,
+        total_credit_transferred: effectiveTransferredCredits,
+        status: "missing_entry_semester",
+        reason: `No semester-entry band covers ${effectiveTransferredCredits} transferred credits for ${intake.intake_type}.`,
+      });
+      continue;
+    }
+
+    if (
+      needsFixAssessment?.requiresTransferredCoursesColumn &&
+      transferredCoursesCol === -1
+    ) {
+      previewStudents.push({
+        matric_no: student.matric_no,
+        student_name: student.student_name,
+        entry_semester: resolvedEntryInputs.effectiveStartingSemester,
+        total_credit_transferred: effectiveTransferredCredits,
+        status: "needs_fix",
+        reason:
+          needsFixAssessment.recoveryGuidance ||
+          "Upload a regenerate file with a corrected transferred_courses column before regenerating this student.",
+      });
+      continue;
+    }
+
+    const validation = validateTransferredCoursesForAcademicPlanRegeneration({
+      rawValue:
+        transferredCoursesCol !== -1
+          ? row.getCell(transferredCoursesCol).value
+          : null,
+      hasTransferredCoursesColumn: transferredCoursesCol !== -1,
+      dbCredits: effectiveTransferredCredits,
+      courseCodeToId,
+      courseIdToCreditHour,
+    });
+
+    if (!validation.ok) {
+      previewStudents.push({
+        matric_no: student.matric_no,
+        student_name: student.student_name,
+        entry_semester: resolvedEntryInputs.effectiveStartingSemester,
+        total_credit_transferred: effectiveTransferredCredits,
+        status: "credit_mismatch",
+        reason: validation.reason || "Transferred-course validation failed.",
+      });
+      continue;
     }
 
     previewStudents.push({
       matric_no: student.matric_no,
       student_name: student.student_name,
-      entry_semester: student.starting_semester,
-      total_credit_transferred: student.total_credit_transferred,
+      entry_semester: resolvedEntryInputs.effectiveStartingSemester,
+      total_credit_transferred: effectiveTransferredCredits,
       status: "ready",
+      reason: needsFixAssessment?.canRetryInAcademicPlanning
+        ? "Previously marked Needs Fix. This regenerate file now validates, and a successful generation will clear the flag automatically."
+        : undefined,
     });
+
+    if (needsFixAssessment?.canRetryInAcademicPlanning) {
+      recoverableNeedsFixCount++;
+    }
   }
 
   const readyCount = previewStudents.filter((s) => s.status === "ready").length;
   const skippedCount = previewStudents.filter(
-    (s) => s.status === "already_has_plan"
+    (s) => s.status === "already_has_plan",
   ).length;
   const missingEntryCount = previewStudents.filter(
-    (s) => s.status === "missing_entry_semester"
+    (s) => s.status === "missing_entry_semester",
   ).length;
   const creditMismatchCount = previewStudents.filter(
-    (s) => s.status === "credit_mismatch"
+    (s) => s.status === "credit_mismatch",
+  ).length;
+  const needsFixCount = previewStudents.filter(
+    (s) => s.status === "needs_fix",
   ).length;
 
   return {
@@ -328,6 +403,8 @@ export default defineEventHandler(async (event) => {
       will_be_skipped: skippedCount,
       missing_entry_semester: missingEntryCount,
       credit_mismatch: creditMismatchCount,
+      recoverable_needs_fix: recoverableNeedsFixCount,
+      needs_fix: needsFixCount,
       failed_records: failedRecords.length,
     },
     preview_students: previewStudents,

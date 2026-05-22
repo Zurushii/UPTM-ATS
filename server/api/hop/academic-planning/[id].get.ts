@@ -1,4 +1,5 @@
 import { pool } from "~~/server/utils/db";
+import { ensureStudentEntrySemesterColumns } from "~~/server/utils/semester-entry-bands";
 import { auth } from "~~/utils/auth";
 
 export default defineEventHandler(async (event) => {
@@ -33,6 +34,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const programId = hopData[0].program_id;
+  await ensureStudentEntrySemesterColumns();
 
   // Get the academic planning intake details
   const [intakeRows] = await pool.query(
@@ -71,7 +73,12 @@ export default defineEventHandler(async (event) => {
       s.id AS student_id,
       s.matric_no,
       COALESCE(u.name, s.matric_no) AS student_name,
-      s.starting_semester AS entry_semester,
+      COALESCE(s.final_entry_semester, s.starting_semester) AS entry_semester,
+      s.system_assigned_entry_semester,
+      s.final_entry_semester,
+      s.is_entry_semester_override,
+      s.entry_semester_override_reason,
+      s.entry_semester_assignment_note,
       s.total_credit_transferred,
       ap.id AS academic_plan_id,
       ap.status AS plan_status
