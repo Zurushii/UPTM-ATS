@@ -1317,19 +1317,30 @@ const handleDrop = (event: DragEvent) => {
   isDragging.value = false;
   if (event.dataTransfer?.files?.[0]) {
     importFile.value = event.dataTransfer.files[0] || null;
+    if (importFileInput.value) {
+      importFileInput.value.value = "";
+    }
+  }
+};
+
+const resetImportSelection = () => {
+  importFile.value = null;
+  if (importFileInput.value) {
+    importFileInput.value.value = "";
   }
 };
 
 const openImportModal = () => {
-  importFile.value = null;
+  resetImportSelection();
   importResult.value = null;
   isImportModalOpen.value = true;
 };
 
 const closeImportModal = () => {
   isImportModalOpen.value = false;
-  importFile.value = null;
+  resetImportSelection();
   importResult.value = null;
+  isDragging.value = false;
 };
 
 const importRules = async () => {
@@ -2008,7 +2019,7 @@ const exportTemplate = async () => {
             <div class="text-xs text-base-content/50">
               {{ (importFile.size / 1024).toFixed(1) }} KB
             </div>
-            <button class="btn btn-xs btn-ghost text-error" @click.stop="importFile = null">
+            <button class="btn btn-xs btn-ghost text-error" @click.stop="resetImportSelection">
               Remove
             </button>
           </div>

@@ -25,7 +25,7 @@ const thinBorder: Partial<ExcelJS.Borders> = {
 };
 
 const STARTER_INTAKE_TYPE = "New Intake";
-const STARTER_BAND_ROWS = 5;
+const STARTER_BAND_ROWS = 4;
 
 const styleCell = (
   cell: ExcelJS.Cell,
@@ -187,7 +187,7 @@ export default defineEventHandler(async (event) => {
     7,
     STARTER_BAND_ROWS,
     bandHeaders.length,
-    () => [null, null, null],
+    (index) => [null, null, index + 1],
   );
 
   bandsSheet.getColumn(1).width = 18;
