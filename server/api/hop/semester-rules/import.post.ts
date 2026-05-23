@@ -427,6 +427,9 @@ const parseBandWorksheet = ({
   worksheet.eachRow((row) => {
     const rowTexts = getRowTexts(row);
     const nonEmptyTexts = rowTexts.filter((value) => value.length > 0);
+    const distinctNonEmptyTexts = [
+      ...new Set(nonEmptyTexts.map((value) => value.toLowerCase())),
+    ];
 
     if (nonEmptyTexts.length === 0) {
       return;
@@ -446,13 +449,11 @@ const parseBandWorksheet = ({
     }
 
     if (
-      nonEmptyTexts.length === 1 &&
-      /intake/i.test(firstCell) &&
-      !/reference|program|transfer|semester/i.test(firstCell)
+      distinctNonEmptyTexts.length === 1 &&
+      !/entry\s*bands|reference|program|transfer|semester/i.test(firstCell)
     ) {
       currentIntakeType = firstCell;
       currentSectionEntrySemester = null;
-      headerRow = [];
       currentSectionJourneySlots = [];
       currentSectionJourneyColumns = [];
       return;

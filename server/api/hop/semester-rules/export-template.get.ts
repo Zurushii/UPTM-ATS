@@ -95,7 +95,7 @@ const fillBlankRows = (
       }
 
       styleCell(cell, {
-        horizontal: columnNumber < 3 ? "left" : "center",
+        horizontal: "center",
       });
     }
   }
@@ -142,7 +142,7 @@ export default defineEventHandler(async (event) => {
   bandsSheet.getCell("A1").value = "Entry Bands";
   bandsSheet.getCell("A1").font = { bold: true, size: 16 };
   bandsSheet.getCell("A2").value =
-    "Start with one intake table. Add one non-overlapping transferred-credit range per row. The system will generate the semester flow and any credit adjustments after import.";
+    "Replace the intake title, then add one non-overlapping transferred-credit range per row.";
   bandsSheet.getCell("A2").font = {
     italic: true,
     color: { argb: "FF4B5563" },
@@ -150,20 +150,24 @@ export default defineEventHandler(async (event) => {
   bandsSheet.getCell("A3").value =
     `Program: ${program.program_code} - ${program.program_name}`;
   bandsSheet.getCell("A3").font = { size: 11, color: { argb: "FF4B5563" } };
-  bandsSheet.getCell("A4").value =
-    "Optional REFERENCE NOTE is for reminders only and does not affect automatic semester matching.";
-  bandsSheet.getCell("A4").font = {
-    size: 11,
-    color: { argb: "FF6B7280" },
-  };
 
   const bandHeaders = [
-    "INTAKE TYPE",
-    "REFERENCE NOTE",
     "TRANSFER MIN",
     "TRANSFER MAX",
     "ENTRY SEMESTER",
   ];
+
+  const titleRowNumber = 5;
+  const titleRow = bandsSheet.getRow(titleRowNumber);
+  titleRow.height = 24;
+  titleRow.getCell(1).value = STARTER_INTAKE_TYPE;
+  styleCell(titleRow.getCell(1), {
+    bold: true,
+    fill: titleFill,
+    horizontal: "left",
+    fontSize: 12,
+  });
+  bandsSheet.mergeCells(titleRowNumber, 1, titleRowNumber, bandHeaders.length);
 
   const bandHeaderRow = bandsSheet.getRow(6);
   bandHeaderRow.height = 24;
@@ -173,36 +177,22 @@ export default defineEventHandler(async (event) => {
     styleCell(cell, {
       bold: true,
       fill: headerFill,
-      horizontal: index < 2 ? "left" : "center",
+      horizontal: "center",
       wrapText: true,
     });
   });
 
-  let currentBandRow = 7;
-  const titleRow = bandsSheet.getRow(currentBandRow);
-  titleRow.getCell(1).value = STARTER_INTAKE_TYPE;
-  styleCell(titleRow.getCell(1), {
-    bold: true,
-    fill: titleFill,
-    horizontal: "left",
-    fontSize: 12,
-  });
-  bandsSheet.mergeCells(currentBandRow, 1, currentBandRow, bandHeaders.length);
-  currentBandRow += 1;
-
   fillBlankRows(
     bandsSheet,
-    currentBandRow,
+    7,
     STARTER_BAND_ROWS,
     bandHeaders.length,
-    () => [STARTER_INTAKE_TYPE, null, null, null, null],
+    () => [null, null, null],
   );
 
-  bandsSheet.getColumn(1).width = 20;
-  bandsSheet.getColumn(2).width = 38;
-  bandsSheet.getColumn(3).width = 16;
-  bandsSheet.getColumn(4).width = 16;
-  bandsSheet.getColumn(5).width = 18;
+  bandsSheet.getColumn(1).width = 18;
+  bandsSheet.getColumn(2).width = 18;
+  bandsSheet.getColumn(3).width = 18;
 
   const instructionsSheet = workbook.addWorksheet("Instructions");
   instructionsSheet.columns = [{ width: 26 }, { width: 96 }];
@@ -211,7 +201,7 @@ export default defineEventHandler(async (event) => {
   instructionsSheet.getCell("A1").value = "Semester Rules Template Guide";
   instructionsSheet.getCell("A1").font = { bold: true, size: 16 };
   instructionsSheet.getCell("A2").value =
-    "Use the Entry Bands sheet to set one intake at a time. After import, the system will generate the semester flow automatically.";
+    "Use the Entry Bands sheet to set one intake at a time. The rows below the intake title belong to that intake.";
   instructionsSheet.getCell("A2").font = {
     italic: true,
     color: { argb: "FF4B5563" },
@@ -236,11 +226,11 @@ export default defineEventHandler(async (event) => {
   const instructions: Array<[string, string]> = [
     [
       "How to use this template",
-      "Fill in only the Entry Bands sheet. You can duplicate the starter rows when one intake needs more transferred-credit groups.",
+      "Fill in only the Entry Bands sheet. Replace 'New Intake' with the real intake name, then fill the transferred-credit groups underneath it.",
     ],
     [
-      "One intake at a time",
-      "Replace 'New Intake' with the real intake name, for example 'May Intake' or 'August Intake'. Keep the same intake name on every row that belongs to that intake.",
+      "Intake title",
+      "Use an intake name such as 'May Intake' or 'August Intake'. Every credit range under the title belongs to that intake.",
     ],
     [
       "Transfer Min and Transfer Max",
@@ -249,10 +239,6 @@ export default defineEventHandler(async (event) => {
     [
       "Entry Semester",
       "Enter the semester where students in that transferred-credit range should start, for example 2, 3, or 4.",
-    ],
-    [
-      "Reference Note",
-      "Optional. Use this for reminders or legacy workbook notes. It does not affect automatic semester matching.",
     ],
     [
       "After import",
